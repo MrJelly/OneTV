@@ -9,14 +9,15 @@ One 是面向 Android 电视、盒子、投影仪和手机横屏的桌面与通�
 | 首页 | 频道列表 |
 | --- | --- |
 | ![One 首页](docs/screenshots/home.png) | ![频道列表示例](docs/screenshots/live.png) |
-| 常规设置 | 遥控设置 |
-| ![常规设置](docs/screenshots/settings.png) | ![遥控设置](docs/screenshots/remote-settings.png) |
+| 控制中心 · 浅色 | 控制中心 · 深色 |
+| ![浅色控制中心](docs/screenshots/settings.png) | ![深色控制中心](docs/screenshots/settings-dark.png) |
 
 界面中的背景、应用和频道为使用示例，频道由用户自行配置。
 
 ## 主要功能
 
 - **电视桌面**：添加常用应用、打开全部应用、自定义壁纸，支持浅色与深色外观。
+- **控制中心**：管理桌面背景、桌面应用和直播入口，快速打开信号源、网络及系统设置。
 - **通用播放器**：导入节目单或添加直播直链，按分类查看频道，收藏常看内容，记住上次播放的频道。
 - **手机遥控**：扫码连接，支持方向键、滑动光标和发送文字；手机网页保留独立的浅色主题。
 - **文件管理**：局域网上传文件，预览图片和视频，通过系统安装器安装 APK。
@@ -79,3 +80,4 @@ One 是面向 Android 电视、盒子、投影仪和手机横屏的桌面与通�
 开发者可查看 [构建说明](docs/DEVELOPMENT.md)。本版本主应用的对应源码见对应版本 Release 的 **Source code** 下载项，不包含直播插件和签名私钥。
 
 原创代码许可见 [LICENSE](LICENSE)。第三方组件保留各自许可，见 [组件许可证](app/src/main/assets/licenses/) 及包内 `assets/licenses/`；包含 FFmpeg / NextLib 的组合安装包亦须遵循 GPL-3.0，使用声明不替代这些许可证。
+
