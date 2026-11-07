@@ -7,3 +7,4 @@ Android 电视桌面，支持直播、网页浏览、手机遥控和文件传输
 | 首页 | 设置 |
 | --- | --- |
 | ![首页](docs/screenshots/home.png) | ![设置](docs/screenshots/settings.png) |
+
