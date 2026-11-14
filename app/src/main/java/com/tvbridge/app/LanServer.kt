@@ -30,6 +30,9 @@ class LanServer(base:File,html:InputStream,private val onFatal: ((LanServer) -> 
     @Volatile private var lastAction="等待手机连接"
     private var capabilities=TextSource{"{}"}
     private var liveData:(String)->String={"{}"}
+    private var appArtwork:(String)->ByteArray?={null}
+    fun appArtwork(value:(String)->ByteArray?){appArtwork=value}
+    private var appsData:(String)->String={"{}"}
     private var liveMessage=TextSource{"直播源操作失败"}
     private var playbackData=TextSource{"{}"}
     private var textMessage=TextSource{"请先选中电视输入框，并连接系统遥控"}
@@ -65,6 +68,7 @@ class LanServer(base:File,html:InputStream,private val onFatal: ((LanServer) -> 
     fun lastAction()=lastAction
     fun capabilities(value:TextSource){capabilities=value}
     fun liveData(value:(String)->String){liveData=value}
+    fun appsData(value:(String)->String){appsData=value}
     fun liveMessage(value:TextSource){liveMessage=value}
     fun playbackData(value:TextSource){playbackData=value}
     fun textMessage(value:TextSource){textMessage=value}
@@ -82,9 +86,10 @@ class LanServer(base:File,html:InputStream,private val onFatal: ((LanServer) -> 
     @Throws(IOException::class) fun start(){
         var lastError:IOException?=null
         for(candidate in 8888..8999){
+            var pending:ServerSocket?=null
             try{
-                listener=ServerSocket().apply{reuseAddress=true;bind(InetSocketAddress(candidate))};boundPort=candidate;lastError=null;break
-            }catch(e:IOException){lastError=e;try{listener?.close()}catch(_:IOException){};listener=null}
+                pending=ServerSocket();pending.reuseAddress=true;pending.bind(InetSocketAddress(candidate));listener=pending;boundPort=candidate;lastError=null;break
+            }catch(e:IOException){lastError=e;try{pending?.close()}catch(_:IOException){}}
         }
         if(lastError!=null)throw lastError
         Thread({
@@ -147,6 +152,17 @@ class LanServer(base:File,html:InputStream,private val onFatal: ((LanServer) -> 
                     return
                 }
                 "/playback"->{response(out,200,"application/json; charset=utf-8",playbackData.get().toByteArray());return}
+                "/appArtwork"->{
+                    if(length !in 1..1024){reject(400,"无效应用");return}
+                    val bytes=appArtwork(read(input,length.toInt()))
+                    if(bytes==null)reject(404,"应用图标不存在") else response(out,200,"image/webp",bytes)
+                    return
+                }
+                "/apps"->{
+                    if(length>32){reject(413,"应用版本无效");return}
+                    response(out,200,"application/json; charset=utf-8",appsData(read(input,length.toInt())).toByteArray())
+                    return
+                }
                 "/files"->{val files=directory.listFiles{f->!f.name.endsWith(".part")}.orEmpty().sortedByDescending{it.lastModified()}.take(100);val json=files.joinToString(",","[","]"){"{\"name\":${quote(it.name)},\"size\":${it.length()}}"};response(out,200,"application/json; charset=utf-8",json.toByteArray());return}
                 "/files/delete"->{
                     if(length !in 1..1024){reject(400,"无效文件名");return}
@@ -186,6 +202,6 @@ class LanServer(base:File,html:InputStream,private val onFatal: ((LanServer) -> 
     private fun read(input:InputStream,count:Int):String {val bytes=ByteArray(count);var pos=0;while(pos<count){val n=input.read(bytes,pos,count-pos);if(n<0)throw EOFException();pos+=n};return bytes.toString(Charsets.UTF_8)}
     private fun quote(value:String)=buildString{append('"');for(c in value){if(c=='"'||c=='\\')append('\\');if(c<' ')append(String.format(Locale.US,"\\u%04x",c.code))else append(c)};append('"')}
     private fun reply(out:OutputStream,status:Int,text:String)=response(out,status,"text/plain; charset=utf-8",text.toByteArray())
-    private fun response(out:OutputStream,status:Int,type:String,bytes:ByteArray){val headers="HTTP/1.1 $status Response\r\nContent-Type: $type\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'\r\n\r\n";out.write(headers.toByteArray(Charsets.US_ASCII));out.write(bytes);out.flush()}
+    private fun response(out:OutputStream,status:Int,type:String,bytes:ByteArray){val headers="HTTP/1.1 $status Response\r\nContent-Type: $type\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'\r\n\r\n";out.write(headers.toByteArray(Charsets.US_ASCII));out.write(bytes);out.flush()}
     override fun close(){closed=true;try{listener?.close()}catch(_:IOException){};connections.forEach{try{it.close()}catch(_:IOException){}};pool.shutdownNow()}
 }

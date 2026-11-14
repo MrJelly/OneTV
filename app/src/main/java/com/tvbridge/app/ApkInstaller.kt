@@ -36,8 +36,10 @@ class ApkInstaller(private val activity:Activity){
     private var sessionTimeout:Runnable?=null
     companion object{const val REQUEST_PERMISSION=11;const val INSTALL_STATUS_ACTION="com.tvbridge.app.INSTALL_STATUS"}
     val allowed get()=if(android.os.Build.VERSION.SDK_INT>=26)activity.packageManager.canRequestPackageInstalls()else android.provider.Settings.Secure.getInt(activity.contentResolver,android.provider.Settings.Secure.INSTALL_NON_MARKET_APPS,0)==1
+    private val useInstallSession get()=android.os.Build.VERSION.SDK_INT>=28
     fun request(file:File){
-        if((sessionId>=0||openingInstaller)&&android.os.SystemClock.uptimeMillis()-pendingInstallAt>=120000)resetStaleInstall()
+        if((sessionId>=0||openingInstaller)&&activity.hasWindowFocus()&&
+            (installerSeen||android.os.SystemClock.uptimeMillis()-pendingInstallAt>=10000))resetStaleInstall()
         if(sessionId>=0||openingInstaller){message("安装正在进行，请先完成或取消安装");return}
         if(!valid(file)){message("文件已不存在或不是 APK");return}
         if(installViaSession(file))return
@@ -58,17 +60,22 @@ class ApkInstaller(private val activity:Activity){
     }
     fun openPermissionSettings(file:File?=null){
         pendingName=file?.takeIf{valid(it)}?.name;awaitingPermission=true;permissionLaunchedAt=android.os.SystemClock.uptimeMillis()
+        InstallHandoff.begin(activity)
         val own=Uri.parse("package:${activity.packageName}")
         for(intent in (if(android.os.Build.VERSION.SDK_INT>=26)listOf(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,own),Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES))else emptyList())+listOf(Intent(Settings.ACTION_SECURITY_SETTINGS),Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,own))){
             try{activity.startActivityForResult(intent,REQUEST_PERMISSION);return}catch(_:ActivityNotFoundException){}catch(_:SecurityException){}
         }
-        awaitingPermission=false;pendingName=null;message("系统没有可用的安装授权页面")
+        awaitingPermission=false;pendingName=null;InstallHandoff.finish(activity);message("系统没有可用的安装授权页面")
     }
-    fun onResult(request:Int):Boolean{if(request!=REQUEST_PERMISSION)return false;return true}
+    fun onResult(request:Int):Boolean{
+        if(request!=REQUEST_PERMISSION)return false
+        if(awaitingPermission)main.post{resumePermission()}
+        return true
+    }
     fun onResume(){
         homePaused=false
         val justLeftInstaller=installerLeftHome
-        if(installerLeftHome||(!openingInstaller&&sessionId<0&&pendingInstallName==null)){
+        if(installerLeftHome||(!openingInstaller&&sessionId<0&&pendingInstallName==null&&!awaitingPermission)){
             InstallHandoff.finish(activity);openingInstaller=false;installerLeftHome=false
         }
         val confirmation=deferredConfirmation
@@ -94,12 +101,12 @@ class ApkInstaller(private val activity:Activity){
         deferredRetries=0
         try{
             openingInstaller=true;installerLeftHome=false;pendingInstallAt=android.os.SystemClock.uptimeMillis();InstallHandoff.begin(activity)
-            activity.startActivity(confirmation.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));checkConfirmationOpened()
+            activity.startActivity(confirmation);checkConfirmationOpened()
         }catch(_:RuntimeException){fallbackSession()}
     }
     private fun resumePermission(){
         if(!awaitingPermission)return
-        awaitingPermission=false;val name=pendingName;pendingName=null
+        awaitingPermission=false;val name=pendingName;pendingName=null;InstallHandoff.finish(activity)
         if(name==null)return
         if(!allowed){
             val file=File(activity.filesDir,"received/$name")
@@ -203,7 +210,7 @@ class ApkInstaller(private val activity:Activity){
         main.postDelayed(watch,20000)
     }
     private fun installViaSession(file:File):Boolean{
-        if(android.os.Build.VERSION.SDK_INT<21)return false
+        if(!useInstallSession)return false
         return try{
             ensureInstallReceiver()
             sessionFallbackTried=false;deferredRetries=0;installerSeen=false
@@ -225,7 +232,7 @@ class ApkInstaller(private val activity:Activity){
             }finally{session.close()}
             armSessionWatchdog(sessionId)
             true
-        }catch(_:Exception){sessionId=-1;InstallHandoff.finish(activity);false}
+        }catch(_:Exception){resetStaleInstall();false}
     }
     fun checkInstallStatus(){
         val name=pendingInstallName?:return

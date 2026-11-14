@@ -6,4 +6,7 @@
         <item name="android:colorControlHighlight">#3350685F</item>
         <item name="android:windowBackground">#162233</item>
     </style>
+    <style name="FolderInput" parent="AppTheme">
+        <item name="android:colorAccent">#4C8BC9</item>
+    </style>
 </resources>

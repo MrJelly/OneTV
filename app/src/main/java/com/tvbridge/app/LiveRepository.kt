@@ -112,7 +112,7 @@ class LiveRepository(private val context:Context) {
     private var snapshotJson=""
     private var snapshotVersion=0L
     @Synchronized fun snapshot(knownVersion:String=""):String {
-        val external=LiveLaunch.component(context)!=null
+        val external=false
         val mode=if(external)"external"else if(LiveLaunch.builtIn(context))"one"else "default"
         val player=LiveLaunch.label(context)
         val key=SnapshotKey(revision,mode,player,active,lastMessage)
@@ -200,10 +200,15 @@ class LiveRepository(private val context:Context) {
                 break
             }finally{connection.disconnect()}
         }
-        val channels=PlaylistParser.parse(text?:error("订阅读取失败"),original,next)
+        val body=text?:error("订阅读取失败")
+        val digests=context.getSharedPreferences("live-subscriptions",Context.MODE_PRIVATE)
+        val digest=PlaylistParser.digest(body)
+        if(digests.getString(original,null)==digest){synchronized(this){sources.firstOrNull{it.url==original}?.let{replace(it.copy(updated=System.currentTimeMillis()))}};lastMessage="订阅内容未变化";return@attempt}
+        val channels=PlaylistParser.parse(body,original,next)
         require(channels.isNotEmpty()){"节目单没有可用频道，已保留原频道"}
         val name=synchronized(this){sources.firstOrNull{it.url==original}?.name}?:URL(original).host
         replace(Source(original,name,channels,System.currentTimeMillis()))
+        digests.edit().putString(original,digest).apply()
     }
     private fun attempt(block:()->Unit):Boolean=try{block();true}catch(e:Exception){lastMessage=LegacyTls.message(e);false}
 }

@@ -24,11 +24,8 @@ class MainActivity:Activity() {
     private var controlQr:ImageView?=null
     private var controlQrLabel:TextView?=null
     private var controlQrDot:View?=null
-    private var applications:LauncherApps?=null
-    private var appsScanGeneration=0
-    private var appsEditing=false
     private var catalogReceiverRegistered=false
-    private val catalogReceiver=object:BroadcastReceiver(){override fun onReceive(context:Context,intent:Intent){LauncherApps.invalidate(context);if(!intent.getBooleanExtra(Intent.EXTRA_REPLACING,false))LiveLaunch.component(context);if(::home.isInitialized){home.refreshApps();if(screen=="apps")showApps(appsEditing)}}}
+    private val catalogReceiver=object:BroadcastReceiver(){override fun onReceive(context:Context,intent:Intent){LauncherApps.invalidate(context);if(::home.isInitialized)home.refreshApps()}}
     private val appearanceUi by lazy{AppearanceController(this,{keep->appearanceUpdated(keep)})}
     private var pointerPermissionPending=false
     private var pointerConnecting=false
@@ -42,6 +39,11 @@ class MainActivity:Activity() {
         window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(if(HomeAppearance.dark(this))0xff162233.toInt()else 0xffe9eff4.toInt()))
         if(intent.getBooleanExtra("from_boot",false))BootReceiver.markArrived(this)
         apkInstaller=ApkInstaller(this);apkInstaller.restore(state);fileExporter=FileExporter(this)
+        if(Build.VERSION.SDK_INT>=28){
+            window.attributes=window.attributes.apply{
+                layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
         window.decorView.systemUiVisibility=5894 or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         Hub.activity=this;Hub.start(this)
         run{
@@ -51,18 +53,23 @@ class MainActivity:Activity() {
         root=FrameLayout(this);sceneBackground(false);setContentView(root);UiSounds.attach(this)
         val packages=IntentFilter().apply{addAction(Intent.ACTION_PACKAGE_ADDED);addAction(Intent.ACTION_PACKAGE_REMOVED);addAction(Intent.ACTION_PACKAGE_CHANGED);addAction(Intent.ACTION_PACKAGE_REPLACED);addDataScheme("package")}
         if(Build.VERSION.SDK_INT>=33)registerReceiver(catalogReceiver,packages,Context.RECEIVER_NOT_EXPORTED)else registerReceiver(catalogReceiver,packages);catalogReceiverRegistered=true
-        home=TvHomeView(this,{openTelevision()},{showFiles()},{showAppSettings()},{Hub.server?.refreshInvite();updateHome()},{showApps()},{showApps(true)},{startActivity(Intent(this,BrowserActivity::class.java))}).apply{drawsBackdrop=false}
+        home=TvHomeView(this,{openTelevision()},{showFiles()},{showAppSettings()},{Hub.server?.refreshInvite();updateHome()},{startActivity(Intent(this,BrowserActivity::class.java))}).apply{drawsBackdrop=false}
         root.addView(home,FrameLayout.LayoutParams(-1,-1));updateHome();home.focusFirst()
         Thread({runCatching{LauncherApps(this).installed()}},"apps-prewarm").start()
         HomeAppearance.prewarm(this)
         if(intent.getBooleanExtra("pointer_setup",false))root.post{requestGlobalPointer()}
         if(intent.getBooleanExtra("open_live",false))root.post{openSelectedLive()}
-        else if(state==null&&!intent.getBooleanExtra("show_home",false))scheduleLiveStartup()
+        else if(state==null&&!intent.getBooleanExtra("show_home",false))scheduleBootApp()
     }
     private var startupDialog:AlertDialog?=null
-    private fun scheduleLiveStartup(){
+    private fun scheduleBootApp(){
         startupDialog?.dismiss()
-        if(screen=="live"||!startupPrefs.getBoolean("live",false))return
+        if(!intent.getBooleanExtra("from_boot",false)&&!intent.getBooleanExtra("reopen_boot",false)&&
+            !(intent.hasCategory(Intent.CATEGORY_HOME)&&isDefaultHome()&&android.os.SystemClock.elapsedRealtime()<180000&&!BootReceiver.arrivedThisBoot(this)))return
+        val apps=LauncherApps(this)
+        val target=apps.bootApp()?:return
+        val title=apps.appTitle(target)?:return
+        if(screen=="live"&&target=="module:live")return
         var seconds=3
         val row=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
         val notice=TextView(this).apply{gravity=Gravity.CENTER_VERTICAL;isSingleLine=true;NativeUi.textSize(this,30f);setTextColor(GlassUi.ink(this@MainActivity))}
@@ -70,7 +77,7 @@ class MainActivity:Activity() {
         var countdown:AlertDialog?=null
         val cancel=Button(this).apply{text="取消";isAllCaps=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;setPadding(0,0,0,0);NativeUi.textSize(this,28f);setTextColor(GlassUi.colors(this@MainActivity));if(Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null;elevation=0f};background=GlassUi.surface(this);setOnClickListener{countdown?.dismiss()};NativeUi.touchClicks(this)}
         row.addView(cancel,LinearLayout.LayoutParams(dp(58),dp(32)).apply{leftMargin=dp(12)})
-        fun update(){notice.text="${seconds} 秒后进入直播"}
+        fun update(){notice.text="${seconds} 秒后打开 $title"}
         update()
         val dialog=NativeUi.show(AlertDialog.Builder(this).setView(row),compact=true)
         countdown=dialog;cancel.requestFocus()
@@ -80,9 +87,13 @@ class MainActivity:Activity() {
             seconds--
             if(seconds<=0){
                 dialog.dismiss()
-                if(intent.getBooleanExtra("from_boot",false))DesktopRecovery.noteBootTargetOpened(this@MainActivity)
-                if(intent.getBooleanExtra("reopen_boot",false))nudgeVolumeAfterReopen()
-                openTelevision()
+                DesktopRecovery.noteBootTargetOpened(this@MainActivity)
+                when(target){
+                    "module:live"->{if(intent.getBooleanExtra("reopen_boot",false))nudgeVolumeAfterReopen();openTelevision()}
+                    "module:files"->showFiles()
+                    "module:browser"->startActivity(Intent(this@MainActivity,BrowserActivity::class.java))
+                    else->apps.installed().firstOrNull{it.component.flattenToString()==target}?.let{apps.launch(it)}
+                }
             }else{update();handler.postDelayed(this,1000)}
         }}
         dialog.setOnDismissListener{NativeUi.handleExternalDismiss(dialog);handler.removeCallbacks(tick);if(startupDialog===dialog)startupDialog=null}
@@ -132,13 +143,12 @@ class MainActivity:Activity() {
     private var desktopButton:Button?=null
     private var lastHomeBackMs=0L
     private val homeBackExitDelay=Runnable{showExitDialog()}
-    private fun desktopLabel()=if(isDefaultHome()||DesktopTakeover.wanted(this)&&DesktopGuardService.connected)"已设置"else "未设置"
+    private fun desktopLabel()=if(DesktopTakeover.configured(this))"已设置"else "未设置"
     internal fun desktopConnectionChanged(){runOnUiThread{if(!isDestroyed)desktopButton?.let{it.setCompoundDrawablesRelative(null,null,NativeUi.trailing(it,desktopLabel(),ink=true),null);it.contentDescription="桌面应用，"+desktopLabel()}}}
     private val liveSettings by lazy{LiveSettings(this)}
     internal fun openSelectedLive(){showHome();openTelevision()}
     private fun openTelevision(){
         startupDialog?.dismiss()
-        if(LiveLaunch.open(this))return
         showLive()
     }
     private fun showAppSettings(keepDialog:Boolean=false){
@@ -148,7 +158,7 @@ class MainActivity:Activity() {
         val header=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
         page.addView(header,LinearLayout.LayoutParams(-1,dp(48)))
         button(header,"返回"){showHome()}
-        header.addView(TextView(this).apply{text="设置";NativeUi.textSize(this,40f);setTypeface(null,android.graphics.Typeface.BOLD);setTextColor(GlassUi.ink(this@MainActivity));setPadding(dp(18),0,0,0)},LinearLayout.LayoutParams(0,-2,1f))
+        header.addView(TextView(this).apply{text="设置";NativeUi.textSize(this,NativeUi.BODY_TEXT_SIZE);setTypeface(null,android.graphics.Typeface.BOLD);setTextColor(GlassUi.ink(this@MainActivity));setPadding(dp(18),0,0,0)},LinearLayout.LayoutParams(0,-2,1f))
         val shortcuts=SystemControls.quickActions(this)
         val shortcutWidth=(0 until shortcuts.childCount).sumOf{(shortcuts.getChildAt(it).layoutParams as LinearLayout.LayoutParams).let{p->p.width+p.leftMargin+p.rightMargin}}
         header.addView(shortcuts,LinearLayout.LayoutParams(shortcutWidth,dp(40)))
@@ -166,18 +176,56 @@ class MainActivity:Activity() {
         scroll.addView(body,FrameLayout.LayoutParams(-1,-1))
         fun action(parent:LinearLayout,label:String,detail:String="",run:()->Unit):Button=button(parent,label,run).apply{
             setOnClickListener{NativeUi.selectControl(this);run()}
-            layoutParams=LinearLayout.LayoutParams(-1,dp(46)).apply{bottomMargin=dp(6)}
+            layoutParams=LinearLayout.LayoutParams(-1,NativeUi.settingsRowHeight(this@MainActivity)).apply{bottomMargin=NativeUi.settingsRowGap(this@MainActivity)}
             gravity=Gravity.START or Gravity.CENTER_VERTICAL;setPadding(dp(16),0,dp(16),0);NativeUi.textSize(this,30f)
             setCompoundDrawablesRelative(null,null,NativeUi.trailing(this,detail,ink=true),null)
         }
         fun toggle(parent:LinearLayout,label:String,checked:Boolean,change:(Boolean)->Unit){
             val v=SettingsSwitch(this).apply{text=label;isChecked=checked;NativeUi.textSize(this,30f);setTextColor(GlassUi.colors(this@MainActivity));setPadding(dp(16),0,dp(16),0);background=GlassUi.surface(this,20f,faint=true);if(Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null};if(Build.VERSION.SDK_INT>=26)defaultFocusHighlightEnabled=false;setOnCheckedChangeListener{_,on->change(on)};NativeUi.touchClicks(this)}
-            parent.addView(v,LinearLayout.LayoutParams(-1,dp(46)).apply{bottomMargin=dp(6)})
+            parent.addView(v,LinearLayout.LayoutParams(-1,NativeUi.settingsRowHeight(this@MainActivity)).apply{bottomMargin=NativeUi.settingsRowGap(this@MainActivity)})
         }
-        val desktop=action(body,"桌面应用",desktopLabel()){DesktopTakeover.settings(this,{chooseDefaultHome()},{if(screen=="settings")showAppSettings()})}
+        val desktop=action(body,"桌面应用",desktopLabel()){DesktopTakeover.settings(this,{chooseDefaultHome()},{desktopConnectionChanged()})}
         action(body,"桌面背景",HomeAppearance.label(this)){appearanceUi.wallpaper()}
         action(body,"直播管理"){liveSettings.show()}
-        toggle(body,"打开时进入直播",startupPrefs.getBoolean("live",false)){startupPrefs.edit().putBoolean("live",it).apply()}
+        val apps=LauncherApps(this)
+        val hiddenApps=apps.hiddenIds().mapNotNull{id->apps.appTitle(id)?.let{id to it}}
+        if(hiddenApps.isNotEmpty())action(body,"恢复隐藏应用"){
+            val grid=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+            val scroll=ScrollView(this).apply{isVerticalScrollBarEnabled=false;addView(grid)}
+            val remaining=hiddenApps.toMutableList()
+            val cellWidth=((detail.width-dp(44))/3).coerceAtLeast(dp(54))
+            fun render(focusIndex:Int):View?{
+                grid.removeAllViews()
+                var focus:View?=null
+                remaining.chunked(3).forEachIndexed{rowIndex,items->
+                    val row=LinearLayout(this)
+                    grid.addView(row,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(6)})
+                    items.forEachIndexed{column,app->
+                        val index=rowIndex*3+column
+                        val tile=NativeUi.optionButton(this,app.second,center=true)
+                        if(index==focusIndex)focus=tile
+                        tile.setOnClickListener{
+                            apps.setHidden(app.first,false)
+                            home.refreshApps()
+                            remaining.remove(app)
+                            if(remaining.isEmpty()){
+                                grid.removeAllViews()
+                                grid.addView(TextView(this).apply{text="没有隐藏的应用";setTextColor(GlassUi.ink(this@MainActivity));NativeUi.textSize(this,30f)})
+                            }else render(index.coerceAtMost(remaining.lastIndex))?.requestFocusFromTouch()
+                        }
+                        row.addView(tile,LinearLayout.LayoutParams(cellWidth,NativeUi.settingsRowHeight(this)).apply{if(column>0)leftMargin=dp(6)})
+                    }
+                }
+                return focus
+            }
+            val first=render(0)
+            val dialog=NativeUi.show(AlertDialog.Builder(this).setTitle("恢复隐藏应用").setView(scroll)
+                .setNegativeButton("关闭",null),widthDp=300,initialFocus=first)
+            dialog.setOnDismissListener{
+                NativeUi.handleExternalDismiss(dialog)
+                if(screen=="settings"&&remaining.size!=hiddenApps.size)showAppSettings()
+            }
+        }
         toggle(body,"按键音",UiSounds.enabled(this)){UiSounds.setEnabled(this,it)}
         action(body,"检查更新"){updates.check()}
         val settingsRows=(0 until body.childCount).map{body.getChildAt(it)}
@@ -199,65 +247,7 @@ class MainActivity:Activity() {
         header.getChildAt(0).nextFocusDownId=desktop.id
         desktopButton=desktop;desktopConnectionChanged();desktop.requestFocus()
     }
-    private fun showApps(addMode:Boolean=false){
-        if(screen!="home")showHome()
-        screen="apps";home.visibility=View.GONE
-        val repository=applications?:LauncherApps(this).also{applications=it}
-        var entries=listOf<LauncherApps.Entry>()
-        val generation=++appsScanGeneration
-        val editing=addMode
-        appsEditing=editing
-        val page=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(56),dp(24),dp(56),dp(24));background=GlassUi.backdrop(this)};appsPanel=page;root.addView(page,FrameLayout.LayoutParams(-1,-1))
-        val header=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL};page.addView(header,LinearLayout.LayoutParams(-1,dp(44)))
-        button(header,"返回"){showHome()}
-        header.addView(TextView(this).apply{text=if(addMode)"添加常用应用"else "全部应用";NativeUi.textSize(this,40f);setTextColor(GlassUi.ink(this@MainActivity))},LinearLayout.LayoutParams(0,-2,1f))
-        if(addMode)button(header,"完成"){showHome()}
-        val scroll=ScrollView(this).apply{isFillViewport=true;isVerticalScrollBarEnabled=false};page.addView(scroll,LinearLayout.LayoutParams(-1,0,1f).apply{topMargin=dp(14)})
-        val grid=GridLayout(this).apply{columnCount=5};scroll.addView(grid,FrameLayout.LayoutParams(-1,-2))
-        fun render(){
-            grid.removeAllViews();val saved=repository.saved()
-            entries.forEachIndexed{i,entry->
-                val selected=entry.component.flattenToString() in saved
-                val b=object:Button(this@MainActivity){
-                    private val mark=AppIcons.Vector("star"){currentTextColor}
-                    override fun onDraw(canvas:android.graphics.Canvas){super.onDraw(canvas);if(editing&&isSelected){val size=dp(11);mark.setBounds(width-dp(9)-size,dp(9),width-dp(9),dp(9)+size);mark.draw(canvas)}}
-                }.apply{text=entry.label;contentDescription=entry.label+(if(editing)if(selected)"，已添加到首页"else "，添加到首页"else "");isAllCaps=false;maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;NativeUi.textSize(this,30f);setPadding(dp(12),dp(12),dp(12),dp(12));if(android.os.Build.VERSION.SDK_INT>=21)backgroundTintList=null;if(android.os.Build.VERSION.SDK_INT>=21)stateListAnimator=null;if(android.os.Build.VERSION.SDK_INT>=26)defaultFocusHighlightEnabled=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;setTextColor(GlassUi.colors(this@MainActivity));background=GlassUi.surface(this,faint=true);isSelected=editing&&selected;isFocusableInTouchMode=true}
-                try{val icon=repository.icon(entry);icon.setBounds(0,0,dp(34),dp(34));b.setCompoundDrawables(null,icon,null,null);b.compoundDrawablePadding=dp(8)}catch(_:Exception){}
-                b.tag=entry
-                if(!editing)b.setOnLongClickListener{showInstalledAppMenu(entry);true}
-                b.setOnClickListener{if(editing){if(!repository.toggle(entry))NativeUi.notice(this,"常用应用最多添加 10 个");render();grid.getChildAt(i)?.requestFocus()}else if(!repository.launch(entry))NativeUi.notice(this,"无法打开应用")}
-                NativeUi.touchClicks(b);grid.addView(b,GridLayout.LayoutParams().apply{width=if(Build.VERSION.SDK_INT>=21)0 else (resources.displayMetrics.widthPixels-dp(152))/5;height=dp(100);columnSpec=if(Build.VERSION.SDK_INT>=21)GridLayout.spec(i%5,1f)else GridLayout.spec(i%5);rowSpec=GridLayout.spec(i/5);setMargins(dp(4),dp(4),dp(4),dp(4))})
-            }
-            if(entries.isEmpty())grid.addView(TextView(this).apply{text="暂无可打开的应用";NativeUi.textSize(this,28f)})
-        }
-        Thread({val found=runCatching{repository.installed()}.getOrDefault(emptyList());runOnUiThread{if(generation!=appsScanGeneration||isFinishing||isDestroyed||screen!="apps")return@runOnUiThread;entries=found;render();grid.getChildAt(0)?.requestFocus()}},"apps-scan").start()
-    }
-    private fun showInstalledAppMenu(entry:LauncherApps.Entry){
-        val flags=try{packageManager.getApplicationInfo(entry.component.packageName,0).flags}catch(_:Exception){android.content.pm.ApplicationInfo.FLAG_SYSTEM}
-        val choices=mutableListOf("打开")
-        if(entry.component.flattenToString() in applications?.saved().orEmpty())choices.add("移出常用")
-        if(flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM==0)choices.add("卸载应用")
-        else if(flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP!=0)choices.add("卸载更新")
-        choices.add("应用信息")
-        NativeUi.show(AlertDialog.Builder(this).setTitle(entry.label).setItems(choices.toTypedArray()){_,which->
-            when(choices[which]){
-                "打开"->applications?.launch(entry)
-                "移出常用"->{applications?.remove(entry);home.refreshApps();NativeUi.notice(this,"已移出常用")}
-                "卸载应用","卸载更新"->try{startActivityForResult(Intent(Intent.ACTION_DELETE,android.net.Uri.parse("package:${entry.component.packageName}")),52)}catch(_:RuntimeException){NativeUi.notice(this,"系统未提供卸载入口")}
-                else->try{startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,android.net.Uri.parse("package:${entry.component.packageName}")))}catch(_:RuntimeException){NativeUi.notice(this,"无法打开应用信息")}
-            }
-        })
-    }
-    private fun showFocusedAppMenu():Boolean {
-        if(screen!="apps"||appsEditing)return false
-        var view=appsPanel?.findFocus()
-        while(view!=null){
-            (view.tag as? LauncherApps.Entry)?.let{showInstalledAppMenu(it);return true}
-            view=view.parent as? View
-        }
-        return false
-    }
-    override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);if(intent.getBooleanExtra("from_boot",false))BootReceiver.markArrived(this);if(intent.getBooleanExtra("pointer_setup",false)){requestGlobalPointer();return};if(::home.isInitialized){if(intent.getBooleanExtra("open_live",false))openSelectedLive()else if(intent.getBooleanExtra("show_home",false)||intent.hasCategory(Intent.CATEGORY_HOME))showHome()else scheduleLiveStartup()}}
+    override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);if(intent.getBooleanExtra("from_boot",false))BootReceiver.markArrived(this);if(intent.getBooleanExtra("pointer_setup",false)){requestGlobalPointer();return};if(::home.isInitialized){if(intent.getBooleanExtra("open_live",false))openSelectedLive()else if(intent.getBooleanExtra("show_home",false)||intent.hasCategory(Intent.CATEGORY_HOME))showHome()else scheduleBootApp()}}
     private var cachedAddresses=emptyList<String>();private var cachedAddressesMs=0L
     private fun addresses():List<String> {
         val now=SystemClock.elapsedRealtime()
@@ -313,6 +303,12 @@ class MainActivity:Activity() {
         window.setBackgroundDrawable(ColorDrawable(color))
         if(::root.isInitialized)root.background=if(live)ColorDrawable(color)else GlassUi.backdrop(root)
     }
+    internal fun returnToOneHome():Boolean {
+        if(!visible||screen=="home")return false
+        NativeUi.dismissDialogs()
+        showHome()
+        return true
+    }
     fun showHome(keepDialog:Boolean=false){sceneBackground(false);appsPanel?.let{root.removeView(it)};appsPanel=null;controlQr=null;controlQrLabel=null;controlQrDot=null;lastControlQr=null;lastControlSummary="";if(!keepDialog)NativeUi.dialogCommand("back");screen="home";livePanel?.stop();livePanel?.let{root.removeView(it)};livePanel=null;home.visibility=View.VISIBLE;home.refreshAppearance();home.refreshApps();home.focusFirst();window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);updateHome();if(HomeAppearance.mode(this)=="bing")HomeAppearance.refreshBingIfStale(this){if(!isDestroyed){home.refreshAppearance();home.invalidate()}}}
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     fun showLive(autoPlay:Boolean=true){
@@ -339,6 +335,7 @@ class MainActivity:Activity() {
         appsPanel=setup;root.addView(setup,FrameLayout.LayoutParams(-1,-1))
         card.findViewWithTag<View>("refresh-connection")?.requestFocus()
     }
+    fun appsUpdated(){home.refreshApps()}
     fun liveUpdated(){if(screen=="liveSetup"&&Hub.live.resumeChannel()!=null)showLive()else livePanel?.refresh()}
     fun appearanceUpdated(keepDialog:Boolean=false){if(!keepDialog)NativeUi.dialogCommand("back");home.refreshAppearance();if(screen=="control"||screen=="settings")showAppSettings(keepDialog)else root.invalidate();HomeAppearance.prewarm(this)}
     fun playChannel(id:String):Boolean{val channel=Hub.live.findChannel(id)?:return false;showLive(false);livePanel?.play(channel,true);return true}
@@ -350,7 +347,6 @@ class MainActivity:Activity() {
         if(cmd=="remoteSettings"){systemRemote();return true}
         if(cmd=="liveOpen"){openTelevision();return true};if(cmd=="livePlay")return playChannel(value)
         if(screen=="live"&&livePanel?.command(cmd,value)==true)return true
-        if(cmd=="menu"&&showFocusedAppMenu())return true
         if(cmd=="menu"&&screen=="home"){if(!home.handleKey(KeyEvent.KEYCODE_MENU))showAppSettings();return true}
         if(cmd=="back"){
             if(screen=="home")home.handleKey(KeyEvent.KEYCODE_BACK) else onBackPressed()
@@ -440,30 +436,31 @@ class MainActivity:Activity() {
         }.setNegativeButton("关闭",null),maxListHeightDp=240)
         fileObserver?.startWatching()
     }
-    override fun onActivityResult(request:Int,result:Int,data:Intent?){super.onActivityResult(request,result,data);if(appearanceUi.onResult(request,result,data)){startupDialog?.dismiss();return};if(request==41){pointerPermissionPending=false;if(GlobalPointer.permitted(this)&&GlobalPointer.requested)requestGlobalPointer()else NativeUi.notice(this,"未授予悬浮窗权限");return};if(apkInstaller.onResult(request))return;if(request==20)return;if(request==52){showApps(false);return}}
+    override fun onActivityResult(request:Int,result:Int,data:Intent?){super.onActivityResult(request,result,data);if(appearanceUi.onResult(request,result,data)){startupDialog?.dismiss();return};if(request==41){pointerPermissionPending=false;if(GlobalPointer.permitted(this)&&GlobalPointer.requested)requestGlobalPointer()else NativeUi.notice(this,"未授予悬浮窗权限");return};if(apkInstaller.onResult(request))return;if(request==20)return;if(request==52){if(::home.isInitialized)home.refreshApps();return}}
     override fun onRequestPermissionsResult(request:Int,permissions:Array<out String>,results:IntArray){super.onRequestPermissionsResult(request,permissions,results);fileExporter.onPermissionResult(request,results)}
     override fun dispatchKeyEvent(event:KeyEvent):Boolean {
+        if(screen=="home"&&::home.isInitialized&&home.consumeMenuConfirm(event))return true
         UiSounds.key(this,event)
+        if(event.action==KeyEvent.ACTION_DOWN&&screen=="home"&&::home.isInitialized&&home.handleKey(event.keyCode))return true
         if(event.action==KeyEvent.ACTION_DOWN&&event.repeatCount==0&&screen=="home"&&event.keyCode in listOf(KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_DPAD_DOWN,KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER)&&::home.isInitialized&&home.visibility==View.VISIBLE){
             val focus=currentFocus
             val bad=focus==null||focus.visibility!=View.VISIBLE||!focus.isFocusable||!isInHome(focus)||focus===home
             if(bad){home.focusFirst();return super.dispatchKeyEvent(event)}
         }
-        if(event.action==KeyEvent.ACTION_DOWN&&event.repeatCount==0&&event.keyCode==KeyEvent.KEYCODE_MENU&&showFocusedAppMenu())return true
         if(event.action==KeyEvent.ACTION_DOWN&&screen=="home"&&event.keyCode==KeyEvent.KEYCODE_SETTINGS){showAppSettings();return true}
-        if(event.action==KeyEvent.ACTION_DOWN&&screen=="home"){if(home.handleKey(event.keyCode))return true;if(event.keyCode==KeyEvent.KEYCODE_MENU){showAppSettings();return true}}
+        if(event.action==KeyEvent.ACTION_DOWN&&screen=="home"&&event.keyCode==KeyEvent.KEYCODE_MENU){showAppSettings();return true}
         if(event.action==KeyEvent.ACTION_DOWN&&screen=="live"&&livePanel?.handleKey(event.keyCode)==true)return true
         return super.dispatchKeyEvent(event)
     }
     private fun exitOne(){DesktopTakeover.cancel(this);DesktopGuardService.allowStockLauncher();startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));if(Build.VERSION.SDK_INT>=21)finishAndRemoveTask()else finish()}
     private fun showExitDialog(){NativeUi.show(AlertDialog.Builder(this).setMessage("退出One？").setPositiveButton("退出"){_,_->exitOne()}.setNegativeButton("继续使用",null))}
-    override fun onBackPressed(){when(screen){"apps","settings","control","liveSetup"->showHome();"live"->if(livePanel?.back()!=true)showHome();else->if(!isDefaultHome()&&!DesktopTakeover.wanted(this)){
+    override fun onBackPressed(){when(screen){"settings","control","liveSetup"->showHome();"live"->if(livePanel?.back()!=true)showHome();else->if(!isDefaultHome()&&!DesktopTakeover.wanted(this)){
         val now=System.currentTimeMillis()
         if(now-lastHomeBackMs<500){handler.removeCallbacks(homeBackExitDelay);lastHomeBackMs=0;exitOne()}
         else{lastHomeBackMs=now;handler.removeCallbacks(homeBackExitDelay);handler.postDelayed(homeBackExitDelay,500)}
     }}}
     override fun onSaveInstanceState(state:Bundle){super.onSaveInstanceState(state);apkInstaller.save(state)}
-    override fun onResume(){super.onResume();DesktopTakeover.recover(this);DesktopTakeover.finishSetup(this){};LiveLaunch.component(this);apkInstaller.onResume();apkInstaller.checkInstallStatus();if(::home.isInitialized){Hub.live.refreshPlugin();if(screen=="liveSetup"&&Hub.live.resumeChannel()!=null){showLive(false);livePanel?.command("liveFull","")}};visible=true;DesktopRecovery.setHomeInFront(this,true);if(startupPrefs.getBoolean("boot",false)&&!BootReceiver.arrivedThisBoot(this))BootReceiver.markArrived(this);DesktopGuardService.onOneResumed();desktopConnectionChanged();if(::home.isInitialized&&screen=="home"){home.refreshApps();home.focusFirst()};if(::home.isInitialized){handler.removeCallbacks(ticker);handler.post(ticker)};livePanel?.resume()}
+    override fun onResume(){super.onResume();DesktopTakeover.recover(this);DesktopTakeover.finishSetup(this){};apkInstaller.onResume();apkInstaller.checkInstallStatus();if(::home.isInitialized){Hub.live.refreshPlugin();if(screen=="liveSetup"&&Hub.live.resumeChannel()!=null){showLive(false);livePanel?.command("liveFull","")}};visible=true;DesktopRecovery.setHomeInFront(this,true);if(startupPrefs.getBoolean("boot",false)&&!BootReceiver.arrivedThisBoot(this))BootReceiver.markArrived(this);DesktopGuardService.onOneResumed();desktopConnectionChanged();if(::home.isInitialized&&screen=="home"){home.refreshApps();home.focusFirst();AppArtwork.refresh(this){if(!isDestroyed)home.refreshApps()}};if(::home.isInitialized){handler.removeCallbacks(ticker);handler.post(ticker)};livePanel?.resume()}
     override fun onPause(){apkInstaller.onPause();startupDialog?.dismiss();visible=false;DesktopRecovery.setHomeInFront(this,false);DesktopGuardService.onOnePaused();handler.removeCallbacks(ticker);livePanel?.pause();super.onPause()}
     private fun isInHome(view:View):Boolean{var current:View?=view;while(current!=null){if(current===home)return true;current=current.parent as? View};return false}
     override fun onWindowFocusChanged(hasFocus:Boolean){
@@ -473,5 +470,5 @@ class MainActivity:Activity() {
             if(focus==null||focus.visibility!=View.VISIBLE||!focus.isFocusable||!isInHome(focus)){home.focusFirst()}
         }
     }
-    override fun onDestroy(){apkInstaller.destroy();updates.destroy();if(catalogReceiverRegistered){unregisterReceiver(catalogReceiver);catalogReceiverRegistered=false};handler.removeCallbacksAndMessages(null);livePanel?.stop();if(Hub.activity===this)Hub.activity=null;if(!RemoteHostService.running)Hub.stop();super.onDestroy()}
+    override fun onDestroy(){apkInstaller.destroy();updates.destroy();if(catalogReceiverRegistered){unregisterReceiver(catalogReceiver);catalogReceiverRegistered=false};handler.removeCallbacksAndMessages(null);livePanel?.stop();if(Hub.activity===this){Hub.activity=null;if(!RemoteHostService.running)Hub.stop()};super.onDestroy()}
 }

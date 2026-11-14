@@ -85,7 +85,8 @@ class DesktopGuardService:AccessibilityService(){
     private fun stock(component:ComponentName?)=component!=null&&(component in homes||DesktopPolicy.bootCover(component))
     private fun firmwarePushedAtBoot(pkg:String)=pkg in DesktopPolicy.FIRMWARE_BOOT_APPS&&SystemClock.elapsedRealtime()<180000&&!keySeen
     private fun allowedStock()=SystemClock.uptimeMillis()<allowStockUntil
-    private fun refresh(force:Boolean=false){worker.execute{if(force||SystemClock.elapsedRealtime()-refreshed>if(homes.isEmpty())1000 else 30000){homes=DesktopTakeover.homes(this);refreshed=SystemClock.elapsedRealtime();activities.clear()}}}
+    private fun automaticHold()=maxOf(sourceGraceUntil,recentsRequestedAt+3000)-SystemClock.uptimeMillis()
+    private fun refresh(force:Boolean=false){worker.execute{if(force||SystemClock.elapsedRealtime()-refreshed>if(homes.isEmpty())1000 else 30000){val firstScan=refreshed==0L;homes=DesktopTakeover.homes(this);refreshed=SystemClock.elapsedRealtime();activities.clear();if(firstScan&&refreshed<180000)ui.post{if(instance===this)inspectFront(woke=true)}}}}
     private fun usageAllowed()=DesktopPolicy.usageAllowed(this)
     private var foregroundQuery=false
     private fun readFront(lookback:Long=14400000):ComponentName? {
@@ -111,11 +112,21 @@ class DesktopGuardService:AccessibilityService(){
         val stockTask=woke&&current?.packageName in homes.map{it.packageName}
         if(stock(current)||stockTask||(woke&&current==null&&!DesktopTakeover.revivedOften(this)&&!DesktopPolicy.startsOnSignalSource(this)))launch()
     }
+    private var lastScreenOn=Long.MIN_VALUE
+    private fun suppressWakeTakeover()=!DesktopTakeover.returnsAfterStandby(this)&&
+        lastScreenOn!=Long.MIN_VALUE&&SystemClock.elapsedRealtime()-lastScreenOn<6000
+
+    private val wakeCheck=Runnable{
+        if(DesktopTakeover.returnsAfterStandby(this))inspectFront(woke=true)
+    }
     private fun settle(boot:Boolean=false){
         ui.removeCallbacks(recheck)
         if(boot)ui.post(recheck)else ui.postDelayed(recheck,350)
         if(boot)bootChecks.forEachIndexed{i,task->ui.removeCallbacks(task);ui.postDelayed(task,listOf(1200L,4000L,12000L,25000L)[i])}
-        else ui.postDelayed({inspectFront(woke=true)},700)
+        else if(DesktopTakeover.returnsAfterStandby(this)){
+            ui.removeCallbacks(wakeCheck)
+            for(delay in longArrayOf(700,1800,4200))ui.postDelayed(wakeCheck,delay)
+        }
     }
     private val watch=object:Runnable{override fun run(){
         if(!connected)return
@@ -157,12 +168,12 @@ class DesktopGuardService:AccessibilityService(){
                     homeInOneAt=homeAt
                     lastHomeInOneAt=homeAt
                 }
-                if(front==null||stock(front))launch(explicit=true)
+                if(BrowserActivity.active!=null||Hub.activity?.visible==true||front==null||stock(front))launch(explicit=true)
                 ui.removeCallbacks(afterHome);ui.postDelayed(afterHome,if(deaf)150 else 300);ui.postDelayed(afterHome,1500)
                 ui.removeCallbacks(switchHold);ui.postDelayed(switchHold,5500)
             }
-            Intent.ACTION_SCREEN_ON,Intent.ACTION_USER_UNLOCKED->{DesktopTakeover.afterUnlock(this@DesktopGuardService);refresh(force=true);settle();ui.removeCallbacks(watch);ui.post(watch)}
-            Intent.ACTION_SCREEN_OFF->{ui.removeCallbacks(hold);ui.removeCallbacks(watch);homeDown=false;configureKeys();DesktopTakeover.suspendForStandby(this@DesktopGuardService)}
+            Intent.ACTION_SCREEN_ON,Intent.ACTION_USER_UNLOCKED->{if(intent.action==Intent.ACTION_SCREEN_ON)lastScreenOn=SystemClock.elapsedRealtime();DesktopTakeover.afterUnlock(this@DesktopGuardService);refresh(force=true);if(DesktopTakeover.returnsAfterStandby(this@DesktopGuardService))settle();ui.removeCallbacks(watch);ui.post(watch)}
+            Intent.ACTION_SCREEN_OFF->{ui.removeCallbacks(recheck);ui.removeCallbacks(wakeCheck);ui.removeCallbacks(hold);ui.removeCallbacks(watch);homeDown=false;configureKeys();DesktopTakeover.suspendForStandby(this@DesktopGuardService)}
         }
     }}
     private val inputListener=object:InputManager.InputDeviceListener{
@@ -196,7 +207,7 @@ class DesktopGuardService:AccessibilityService(){
             (getSystemService(Context.INPUT_SERVICE) as? InputManager)?.registerInputDeviceListener(inputListener,ui);registered=true
         }
         if(!DesktopTakeover.unlocked(this))DesktopTakeover.afterUnlock(this)
-        else if(DesktopTakeover.wanted(this))settle(boot=SystemClock.elapsedRealtime()<180000)
+        else if(DesktopTakeover.wanted(this)&&(SystemClock.elapsedRealtime()<180000||DesktopTakeover.returnsAfterStandby(this)))settle(boot=SystemClock.elapsedRealtime()<180000)
         if(SystemClock.elapsedRealtime()<180000){
             val bootMs=DeviceAdapters.profile(this).bootStockMs
             if(bootMs>0){
@@ -239,10 +250,11 @@ class DesktopGuardService:AccessibilityService(){
         val component=ComponentName(pkg,if(cls.startsWith('.'))pkg+cls else cls)
         if(pkg==packageName){if(isActivity(component)){front=component;frontAt=System.currentTimeMillis()};if(recentsOnResume){recentsOnResume=false;ui.post{openRecents()}};return}
         if(!active())return
-        if(Build.VERSION.SDK_INT<=22&&pkg=="com.jamdeo.launcher"&&cls=="android.widget.RelativeLayout"&&homes.any{it.packageName==pkg}){performGlobalAction(GLOBAL_ACTION_BACK);launch();return}
+        if(Build.VERSION.SDK_INT<=22&&!allowedStock()&&pkg=="com.jamdeo.launcher"&&cls=="android.widget.RelativeLayout"&&homes.any{it.packageName==pkg}){performGlobalAction(GLOBAL_ACTION_BACK);launch();return}
         if(firmwarePushedAtBoot(pkg)&&isActivity(component)){launch();return}
         refresh()
         if(pkg in DesktopPolicy.sourceSwitchers)sourceGraceUntil=SystemClock.uptimeMillis()+3000
+        if(!stock(component)&&!isActivity(component))return
         if(stock(component))DesktopRecovery.noteStockHomeInFront(this)
         if(bootStockHolding&&!bootStockShown&&stock(component)){
             bootStockShown=true
@@ -252,21 +264,30 @@ class DesktopGuardService:AccessibilityService(){
         if(stock(component)||isActivity(component)){front=component;frontAt=System.currentTimeMillis()}
         if(!allowedStock()&&stock(component)){
             ui.removeCallbacks(recheck)
-            if(SystemClock.uptimeMillis()<sourceGraceUntil)ui.postDelayed(recheck,sourceGraceUntil-SystemClock.uptimeMillis())else launch()
+            launch()
         }
         configureKeys()
     }
     private fun launch(explicit:Boolean=false){
-        if(!active()||(!explicit&&allowedStock()))return
+        if(!active()||(!explicit&&(allowedStock()||suppressWakeTakeover())))return
+        if(!explicit){
+            val remaining=automaticHold()
+            if(remaining>0){
+                ui.removeCallbacks(recheck);ui.postDelayed(recheck,remaining)
+                return
+            }
+        }
+        if(explicit&&BrowserActivity.active?.returnToOneHome()==true)return
+        if(explicit&&Hub.activity?.returnToOneHome()==true)return
         if(!explicit&&(BrowserActivity.active!=null))return
         if(Hub.activity?.visible==true){if(stock(front)){ui.removeCallbacks(recheck);ui.postDelayed(recheck,150)};return}
         if(SystemClock.uptimeMillis()-lastLaunch<700){ui.removeCallbacks(recheck);ui.postDelayed(recheck,750);return}
         lastLaunch=SystemClock.uptimeMillis()
         val boot=!explicit&&SystemClock.elapsedRealtime()<180000&&!BootReceiver.arrivedThisBoot(this)
-        val live=getSharedPreferences("startup",0).getBoolean("live",false)
-        val reopenBootTarget=!explicit&&SystemClock.elapsedRealtime()<180000&&live&&!DesktopRecovery.homeKeyWithin(this,5000)&&DesktopRecovery.bootTargetOpenedWithin(this,60000)
-        val autoLive=(boot||reopenBootTarget)&&live
-        try{startActivity(Intent(this,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra("show_home",!autoLive).putExtra("from_boot",boot).putExtra("reopen_boot",reopenBootTarget))}
+        val hasBootApp=LauncherApps(this).bootApp()!=null
+        val reopenBootTarget=!explicit&&SystemClock.elapsedRealtime()<180000&&hasBootApp&&!DesktopRecovery.homeKeyWithin(this,5000)&&DesktopRecovery.bootTargetOpenedWithin(this,60000)
+        val openBootApp=(boot||reopenBootTarget)&&hasBootApp
+        try{startActivity(Intent(this,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra("show_home",!openBootApp).putExtra("from_boot",boot).putExtra("reopen_boot",reopenBootTarget))}
         catch(e:RuntimeException){getSharedPreferences("startup",0).edit().putString("guard_error",e.javaClass.simpleName).apply()}
     }
     override fun onInterrupt(){}

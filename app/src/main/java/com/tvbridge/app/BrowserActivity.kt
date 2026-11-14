@@ -1,6 +1,7 @@
 package com.tvbridge.app
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -49,8 +50,13 @@ class BrowserActivity : Activity() {
     private var videoSpeed = 1.0f
     private val videoSpeeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
     private var loopVideo = false
-    private val sniffedVideos = LinkedHashMap<String,Long>()
+    private class SniffedStream(val at:Long,val headers:Map<String,String>)
+    private val sniffedVideos = LinkedHashMap<String,SniffedStream>()
     private val mediaSuffix = Regex("\\.(m3u8|mpd|mp4|webm|mov|m4v|mkv|flv)$",RegexOption.IGNORE_CASE)
+    private val adHosts = setOf("doubleclick.net","googlesyndication.com","google-analytics.com","googletagmanager.com","googleadservices.com","adservice.google.com","imasdk.googleapis.com","amazon-adsystem.com","adnxs.com","scorecardresearch.com")
+    private val segmentWords = setOf("init","dashinit","seg","segment","chunk","frag","fragment")
+    private val segmentPrefix = Regex("^(init|seg|segment|chunk|frag|fragment)\\d+$")
+    private val segmentSplit = Regex("[^a-z0-9]+")
     @Volatile private var sniffGeneration = 0L
     private var videoGeneration = 0L
     private var videoDeadline: Runnable? = null
@@ -223,7 +229,7 @@ class BrowserActivity : Activity() {
             override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean = Uri.parse(url).scheme !in listOf("http", "https")
             @android.annotation.TargetApi(21)
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-                if(!request.isForMainFrame)sniffVideoUrl(view,request.url.toString())
+                if(!request.isForMainFrame)sniffVideoUrl(view,request.url.toString(),request.requestHeaders?:emptyMap())
                 return super.shouldInterceptRequest(view,request)
             }
             @Suppress("DEPRECATION")
@@ -445,26 +451,73 @@ class BrowserActivity : Activity() {
         web.visibility = View.VISIBLE; cursor.visibility = View.VISIBLE; toolbar.visibility = if(toolsCollapsed)View.GONE else View.VISIBLE; web.requestFocus()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
-    private fun sniffVideoUrl(view:WebView,url:String) {
+    private fun isAdHost(url:String):Boolean {
+        val host=Uri.parse(url).host?.lowercase()?:return false
+        return adHosts.any{host==it||host.endsWith(".$it")}
+    }
+    private fun isSegmentLike(path:String):Boolean {
+        val name=path.substringAfterLast('/').substringBeforeLast('.').lowercase()
+        if(name.isEmpty())return false
+        if(name.all{it.isDigit()})return true
+        val words=name.split(segmentSplit).filter{it.isNotEmpty()}
+        if(words.any{it in segmentWords||segmentPrefix.matches(it)})return true
+        val last=words.lastOrNull()?:return false
+        return words.size>1&&last.length>1&&last.startsWith("0")&&last.all{it.isDigit()}
+    }
+    private fun sniffVideoUrl(view:WebView,url:String,requestHeaders:Map<String,String> = emptyMap()) {
         val generation=sniffGeneration
         val path=url.substringBefore('?').substringBefore('#')
         if(!mediaSuffix.containsMatchIn(path)||PlaylistParser.httpUrl(url)==null)return
+        if(isAdHost(url))return
+        val lower=path.lowercase()
+        if((lower.endsWith(".mp4")||lower.endsWith(".m4v")||lower.endsWith(".webm")||lower.endsWith(".mkv"))&&isSegmentLike(path))return
         synchronized(sniffedVideos) {
             if(view!==web||generation!=sniffGeneration)return
             sniffedVideos.remove(url)
-            sniffedVideos[url]=SystemClock.uptimeMillis()
+            sniffedVideos[url]=SniffedStream(SystemClock.uptimeMillis(),HashMap(requestHeaders))
             if(sniffedVideos.size>20)sniffedVideos.remove(sniffedVideos.keys.first())
         }
     }
 
+    private fun sniffKind(url:String):Int {
+        val path=url.substringBefore('?').substringBefore('#').lowercase()
+        return when{
+            path.endsWith(".m3u8")->if(path.contains("master"))0 else 1
+            path.endsWith(".mpd")->2
+            else->3
+        }
+    }
     private fun sniffedCandidates():List<String> = synchronized(sniffedVideos) {
         val cutoff=SystemClock.uptimeMillis()-90_000
-        sniffedVideos.entries.filter{it.value>=cutoff}.sortedWith(
-            compareBy<Map.Entry<String,Long>>{
-                val path=it.key.substringBefore('?').lowercase()
-                if(path.endsWith(".m3u8")||path.endsWith(".mpd"))0 else 1
-            }.thenByDescending{it.value}
-        ).map{it.key}
+        sniffedVideos.entries.filter{it.value.at>=cutoff}
+            .map{Triple(it.key,sniffKind(it.key),it.value.at)}
+            .sortedWith(compareBy<Triple<String,Int,Long>>{it.second}.thenBy{row->
+                if(row.second==0)-row.third else row.third
+            })
+            .map{it.first}
+    }
+    private fun sniffedHeaders(url:String):Map<String,String> = synchronized(sniffedVideos) {
+        sniffedVideos[url]?.headers?:emptyMap()
+    }
+    private fun originOf(url:String):String? {
+        val uri=runCatching{java.net.URI(url)}.getOrNull()?:return null
+        val scheme=uri.scheme?.lowercase()?:return null
+        if(scheme!="http"&&scheme!="https")return null
+        val host=uri.host?.lowercase()?:return null
+        val defaultPort=if(scheme=="https")443 else 80
+        val port=if(uri.port==-1||uri.port==defaultPort)"" else ":${uri.port}"
+        return "$scheme://$host$port"
+    }
+    private fun playbackHeaders(url:String):Map<String,String> {
+        val sniffed=sniffedHeaders(url)
+        fun header(name:String):String? = sniffed.entries.firstOrNull{it.key.equals(name,true)}?.value?.ifEmpty{null}
+        val sniffedReferer=header("Referer")
+        val origin=header("Origin")?:sniffedReferer?.let{originOf(it)}?.takeIf{it!=originOf(url)}
+        val referer=sniffedReferer?:web.url?.ifEmpty{null}
+        return buildMap{
+            referer?.let{put("Referer",it)}
+            origin?.let{put("Origin",it)}
+        }
     }
 
     private fun clearVideoDeadline() {
@@ -590,7 +643,7 @@ class BrowserActivity : Activity() {
                 })
                 videoDeadline=Runnable{if(pagePlayer===player&&!rendered)attempt(index+1)}
                     .also{root.postDelayed(it,4500)}
-                player.setMediaSource(NativePlayback.browserSource(this,urls[index],web.settings.userAgentString))
+                player.setMediaSource(NativePlayback.browserSource(this,urls[index],web.settings.userAgentString,playbackHeaders(urls[index])))
                 player.prepare()
                 player.play()
             }catch(_:RuntimeException){attempt(index+1)}
@@ -1032,6 +1085,12 @@ class BrowserActivity : Activity() {
         if(enabled)cursor.placeAtAddress(false)
     }
     fun pointerClick(x:Int,y:Int){val origin=IntArray(2);root.getLocationOnScreen(origin);cursor.clickAt((x-origin[0]).toFloat(),(y-origin[1]).toFloat())}
+    internal fun returnToOneHome(): Boolean {
+        startActivity(Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra("show_home", true))
+        return true
+    }
     fun remoteCommand(command: String, value: String = ""): Boolean {
         if(command.startsWith("browserTouch")&&GlobalPointer.enabled)GlobalPointer.hide()
         when(command){

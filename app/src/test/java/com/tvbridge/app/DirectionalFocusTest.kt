@@ -20,8 +20,8 @@ class DirectionalFocusTest {
             activity.showHome();layout(activity.window.decorView)
             val all=views(activity.window.decorView)
             val settings=all.first{it.contentDescription=="控制中心"&&it.visibility==View.VISIBLE}
-            for(label in listOf("电视直播","文件管理","浏览器","全部应用")){
-                val button=all.filterIsInstance<Button>().first{it.text==label&&it.visibility==View.VISIBLE}
+            for(label in listOf("电视直播","文件管理","浏览器")){
+                val button=all.filterIsInstance<AppTileView>().first{it.title==label&&it.visibility==View.VISIBLE}
                 assertTrue(button.requestFocusFromTouch())
                 assertSame(settings,button.focusSearch(View.FOCUS_UP))
                 assertTrue(settings.requestFocus())

@@ -9,8 +9,8 @@ android {
         applicationId 'com.tvbridge.app'
         minSdk 19
         targetSdk 35
-        versionCode 74
-        versionName '1.1'
+        versionCode 75
+        versionName '1.2'
 
 
 

@@ -39,7 +39,7 @@ object DesktopRecovery {
         return SystemClock.elapsedRealtime()-at<ms
     }
     fun startAfterStopOverStock(context:Context):Boolean{
-        if(Build.VERSION.SDK_INT<24||DesktopGuardService.connected)return false
+        if(Build.VERSION.SDK_INT<24||DesktopGuardService.connected||InstallHandoff.active(context))return false
         if(SystemClock.elapsedRealtime()<180000)return false
         val power=context.getSystemService(Context.POWER_SERVICE) as? PowerManager
         if(power?.isInteractive!=true)return false

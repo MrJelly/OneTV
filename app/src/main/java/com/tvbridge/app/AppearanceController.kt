@@ -61,8 +61,8 @@ class AppearanceController(private val activity:Activity,private val changed:(ke
                 }
             }.apply{background=GlassUi.surface(this,24f)}
             previews[mode]=preview
-            tile.addView(preview,LinearLayout.LayoutParams(-1,dp(64)))
-            NativeUi.touchClicks(tile);row.addView(tile,LinearLayout.LayoutParams(0,dp(64),1f).apply{if(row.childCount>0)leftMargin=dp(8)})
+            tile.addView(preview,LinearLayout.LayoutParams(-1,dp(88)))
+            NativeUi.touchClicks(tile);row.addView(tile,LinearLayout.LayoutParams(0,dp(88),1f).apply{if(row.childCount>0)leftMargin=dp(8)})
         }
         refreshTiles()
         val buttons=LinearLayout(activity).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER}
@@ -94,10 +94,9 @@ class AppearanceController(private val activity:Activity,private val changed:(ke
         if(files.isEmpty()){
 
             message("暂无可上传的图片，请在设置页手机连接扫码上传");return}
-        val anchorView=wallpaperDialog?.takeIf{it.isShowing}?.window?.decorView
-        val widthDp=anchorView?.let{view->val w=wallpaperDialog?.window?.attributes?.width?:0;if(w>0)(w/(2*NativeUi.scale(activity))).toInt() else null}
-        uploadDialog=if(anchorView!=null)NativeUi.show(AlertDialog.Builder(activity).setTitle("选择背景").setItems(files.map{it.name}.toTypedArray()){_,which->importWallpaper(Uri.fromFile(files[which]))}.setNegativeButton("取消",null),anchor=anchorView,widthDp=widthDp)
-        else NativeUi.show(AlertDialog.Builder(activity).setTitle("选择背景").setItems(files.map{it.name}.toTypedArray()){_,which->importWallpaper(Uri.fromFile(files[which]))}.setNegativeButton("取消",null))
+        uploadDialog=NativeUi.show(AlertDialog.Builder(activity).setTitle("选择背景")
+            .setItems(files.map{it.name}.toTypedArray()){_,which->importWallpaper(Uri.fromFile(files[which]))}
+            .setNegativeButton("取消",null),listIcons=List(files.size){"folder"})
     }
     fun onResult(request:Int,result:Int,data:Intent?):Boolean {
         if(request!=IMAGE)return false

@@ -24,11 +24,36 @@ object AppIcons {
         override fun onStateChange(state:IntArray):Boolean{invalidateSelf();return true}
         override fun draw(c:Canvas){c.save();c.translate(bounds.left.toFloat(),bounds.top.toFloat());c.scale(bounds.width()/24f,bounds.height()/24f);paint.color=tint()
             fun line(vararg xy:Float){val p=Path();p.moveTo(xy[0],xy[1]);for(i in 2 until xy.size step 2)p.lineTo(xy[i],xy[i+1]);c.drawPath(p,paint)}
-            fun box(l:Float,t:Float,r:Float,b:Float,rad:Float=3f){c.drawRoundRect(RectF(l,t,r,b),rad,rad,paint)}
+            fun box(l:Float,t:Float,r:Float,b:Float,rad:Float=3f){c.drawPath(roundedRectPath(l,t,r,b,rad),paint)}
             fun path(x:Float,y:Float,a:Float,b:Float,d:Float,e:Float,f:Float,g:Float){val p=Path();p.moveTo(x,y);p.cubicTo(a,b,d,e,f,g);c.drawPath(p,paint)}
             when(key){
-                "wifi"->{path(2f,8f,7f,4f,17f,4f,22f,8f);path(5f,12f,9f,9f,15f,9f,19f,12f);path(8.5f,16f,10.5f,14.5f,13.5f,14.5f,15.5f,16f);paint.style=Paint.Style.FILL;c.drawCircle(12f,20f,1.3f,paint);paint.style=Paint.Style.STROKE}
-                "ethernet"->{line(7f,6f,2f,12f,7f,18f);line(17f,6f,22f,12f,17f,18f);paint.style=Paint.Style.FILL;for(x in listOf(9f,12f,15f))c.drawCircle(x,12f,.8f,paint);paint.style=Paint.Style.STROKE}
+                "move"->{line(12f,3f,12f,21f);line(3f,12f,21f,12f);line(9f,6f,12f,3f,15f,6f);line(9f,18f,12f,21f,15f,18f);line(6f,9f,3f,12f,6f,15f);line(18f,9f,21f,12f,18f,15f)}
+                "hidden"->{path(3f,12f,8f,5f,16f,5f,21f,12f);path(3f,12f,8f,19f,16f,19f,21f,12f);line(4f,4f,20f,20f)}
+                "info"->{c.drawCircle(12f,12f,9f,paint);line(12f,11f,12f,16f);c.drawPoint(12f,8f,paint)}
+                "power"->{c.drawArc(RectF(4f,4f,20f,21f),-55f,290f,false,paint);line(12f,2f,12f,11f)}
+                "trash"->{line(4f,7f,20f,7f);line(9f,7f,9f,4f,15f,4f,15f,7f);line(6f,8f,7f,20f,17f,20f,18f,8f);line(10f,11f,10.5f,17f);line(14f,11f,13.5f,17f)}
+                "wifi","wifi0","wifi1","wifi2","wifi3"->{
+                    val level=key.last().digitToIntOrNull()?:3
+                    val color=paint.color
+                    for(i in 0..2){
+                        paint.alpha=if(i<level)Color.alpha(color)else Color.alpha(color)/3
+                        val radius=4f+i*4f
+                        c.drawArc(RectF(12f-radius,20f-radius,12f+radius,20f+radius),222f,96f,false,paint)
+                    }
+                    paint.color=color;paint.style=Paint.Style.FILL;c.drawCircle(12f,20f,1.35f,paint);paint.style=Paint.Style.STROKE
+                }
+                "ethernet"->{
+                    line(12f,8f,12f,13f);line(5f,16f,5f,13f,19f,13f,19f,16f)
+                    paint.style=Paint.Style.FILL
+                    c.drawRoundRect(RectF(8.5f,2f,15.5f,9f),1.5f,1.5f,paint)
+                    c.drawRoundRect(RectF(1.5f,15f,8.5f,22f),1.5f,1.5f,paint)
+                    c.drawRoundRect(RectF(15.5f,15f,22.5f,22f),1.5f,1.5f,paint)
+                    paint.style=Paint.Style.STROKE
+                }
+                "network_off"->{c.drawArc(RectF(0f,6f,24f,30f),225f,90f,false,paint);line(4f,4f,20f,20f);c.drawCircle(12f,20f,1f,paint)}
+                "input_hdmi"->{line(4f,5f,20f,5f,20f,13f,17f,18f,7f,18f,4f,13f,4f,5f);for(x in 8..16 step 4)line(x.toFloat(),6f,x.toFloat(),9f)}
+                "input_tuner"->{c.drawArc(RectF(2f,3f,22f,23f),180f,180f,false,paint);c.drawArc(RectF(6f,7f,18f,19f),180f,180f,false,paint);line(8f,21f,12f,16f,16f,21f);line(12f,12f,12f,16f)}
+                "input_av"->{for(x in listOf(5f,12f,19f)){line(x,3f,x,21f);c.drawRoundRect(RectF(x-1.5f,7f,x+1.5f,16f),.6f,.6f,paint)}}
                 "sliders"->{line(3f,6f,8f,6f);line(12f,6f,21f,6f);c.drawCircle(10f,6f,2f,paint);line(3f,12f,14f,12f);line(18f,12f,21f,12f);c.drawCircle(16f,12f,2f,paint);line(3f,18f,6f,18f);line(10f,18f,21f,18f);c.drawCircle(8f,18f,2f,paint)}
                 "sun"->{c.drawCircle(12f,12f,4f,paint);for(i in 0..7){val a=Math.toRadians(i*45.0);line((12+7*kotlin.math.cos(a)).toFloat(),(12+7*kotlin.math.sin(a)).toFloat(),(12+9*kotlin.math.cos(a)).toFloat(),(12+9*kotlin.math.sin(a)).toFloat())}}
 

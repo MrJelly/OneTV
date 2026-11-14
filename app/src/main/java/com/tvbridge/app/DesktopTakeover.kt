@@ -76,8 +76,9 @@ object DesktopTakeover {
     fun recover(context:Context){
         val app=context.applicationContext
         if(!unlocked(app)){afterUnlock(app);return}
-        if(wanted(app))rescanIfMissing(app)
-        if(!ensureGuard(app))return
+        if(!wanted(app))return
+        rescanIfMissing(app)
+        if(!ensureGuard(app)&&!enabled(app))return
         DesktopRecovery.ensure(app)
         if(DesktopGuardService.connected||recoveryPending)return
         recoveryPending=true
@@ -107,11 +108,13 @@ object DesktopTakeover {
     private const val REQUEST=7130
     private val delays=longArrayOf(4000,12000,25000)
     private fun prefs(context:Context)=context.getSharedPreferences("startup",0)
-    fun wanted(context:Context)=unlocked(context)&&prefs(context).getBoolean("boot",false)&&prefs(context).getBoolean("desktop_guard",false)
+    fun wanted(context:Context)=unlocked(context)&&prefs(context).getBoolean("desktop_guard",false)
     fun enabled(context:Context):Boolean {
         val component=ComponentName(context,DesktopGuardService::class.java)
         return Settings.Secure.getString(context.contentResolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().split(':').any{ComponentName.unflattenFromString(it)==component}
     }
+    fun configured(context:Context)=defaultHome(context)?.packageName==context.packageName||
+        (wanted(context)&&enabled(context))
     fun label(context:Context)=when{!wanted(context)->"标准启动";!enabled(context)->"待授权";DesktopGuardService.connected->"兼容接管已连接";else->"兼容接管待连接"}
     private fun defaultHome(context:Context)=context.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),0)?.activityInfo?.let{ComponentName(it.packageName,it.name)}
     private fun originalHome(context:Context):ComponentName? {
@@ -125,28 +128,65 @@ object DesktopTakeover {
     private fun homeEntry(context:Context,enable:Boolean){
         context.packageManager.setComponentEnabledSetting(ComponentName(context,"com.tvbridge.app.DesktopActivity"),if(enable)android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED else android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,android.content.pm.PackageManager.DONT_KILL_APP)
     }
+    fun returnsAfterStandby(context:Context)=prefs(context).getBoolean("desktop_wake",true)
+
+    private fun enableHomeEntry(activity:Activity){
+        val previous=defaultHome(activity)?.takeIf{it.packageName!=activity.packageName&&it.packageName!="android"&&!it.className.endsWith("FallbackHome")}?:originalHome(activity)
+        if(previous!=null)prefs(activity).edit().putString("previous_home",previous.flattenToString()).apply()
+        homeEntry(activity,true)
+    }
+
     fun settings(activity:Activity,chooseHome:()->Unit,changed:()->Unit){
-        NativeUi.show(AlertDialog.Builder(activity).setTitle("桌面应用").setMessage("开机或按主页键进入 One，按提示完成授权。可随时还原原桌面。")
-            .setPositiveButton("设为桌面"){_,_->
-                val previous=defaultHome(activity)?.takeIf{it.packageName!=activity.packageName&&it.packageName!="android"&&!it.className.endsWith("FallbackHome")}?:originalHome(activity)
-                homeEntry(activity,true)
-                val edit=prefs(activity).edit().putBoolean("boot",true).putBoolean("desktop_guard",true).putBoolean("desktop_setup_pending",true).remove("desktop_setup_step")
-                if(previous!=null)edit.putString("previous_home",previous.flattenToString());edit.apply()
-                NativeUi.notice(activity,"正在配置桌面，请确认设备上的授权提示")
-                Thread({
-                    val needsGrant=androidx.core.content.ContextCompat.checkSelfPermission(activity,android.Manifest.permission.WRITE_SECURE_SETTINGS)!=android.content.pm.PackageManager.PERMISSION_GRANTED||(Build.VERSION.SDK_INT>=21&&!DesktopPolicy.usageAllowed(activity))
-                    val adbReady=runCatching{Hub.adb.ready||(Hub.adb.enabled()&&Hub.adb.restore())||(needsGrant&&Hub.adb.connect(Hub.adb.port()))}.getOrDefault(false)
-                    if(!wanted(activity)||!prefs(activity).getBoolean("desktop_setup_pending",false))return@Thread
-                    if(adbReady)Hub.adb.authorizeDesktop()
-                    val native=if(adbReady){
-                        if(defaultHome(activity)?.packageName!=activity.packageName)Hub.adb.setDefaultHome(ComponentName(activity,"com.tvbridge.app.DesktopActivity"))else true
-                    }else defaultHome(activity)?.packageName==activity.packageName
-                    activity.runOnUiThread{if(!activity.isFinishing&&!activity.isDestroyed){
-                        if(native||ensureGuard(activity)||enabled(activity)){finishSetup(activity,changed)}
-                        else{chooseHome();changed()}
-                    }}
-                },"desktop-setup").start()
-            }.setNeutralButton("还原桌面"){_,_->restore(activity,changed)}.setNegativeButton("关闭",null))
+        val preferences=prefs(activity)
+        fun guarding()=preferences.getBoolean("desktop_guard",false)
+        fun guardLabel()=when{
+            !guarding()->"关闭"
+            DesktopGuardService.connected->"已连接"
+            enabled(activity)->"正在连接"
+            else->"待授权"
+        }
+        val labels=listOf("桌面守护","选择默认桌面","待机唤醒返回 One","还原原桌面")
+        val body=android.widget.LinearLayout(activity).apply{orientation=android.widget.LinearLayout.VERTICAL}
+        fun refresh(){
+            val values=listOf(guardLabel(),
+                if(defaultHome(activity)?.packageName==activity.packageName)"One" else "系统设置",
+                if(returnsAfterStandby(activity))"开启" else "关闭")
+            values.forEachIndexed{index,value->
+                val button=body.getChildAt(index) as android.widget.Button
+                button.setCompoundDrawablesRelative(null,null,NativeUi.trailing(button,value,ink=true),null)
+            }
+            changed()
+        }
+        labels.forEachIndexed{index,label->
+            val button=NativeUi.optionButton(activity,label)
+            body.addView(button,android.widget.LinearLayout.LayoutParams(-1,NativeUi.settingsRowHeight(activity)).apply{bottomMargin=NativeUi.settingsRowGap(activity)})
+            button.setOnClickListener{
+            when(index){
+                0->if(guarding()&&DesktopGuardService.connected){
+                    preferences.edit().putBoolean("desktop_guard",false).putBoolean("boot",false).remove("desktop_setup_pending").remove("desktop_setup_step").apply()
+                    cancel(activity)
+                    removeGuard(activity)
+                    refresh()
+                }else{
+                    enableHomeEntry(activity)
+                    preferences.edit().putBoolean("boot",true).putBoolean("desktop_guard",true).putBoolean("desktop_setup_pending",true).remove("desktop_setup_step").apply()
+                    finishSetup(activity,::refresh)
+                }
+                1->{enableHomeEntry(activity);chooseHome()}
+                2->{
+                    val next=!returnsAfterStandby(activity)
+                    preferences.edit().putBoolean("desktop_wake",next).apply()
+                    if(next&&!guarding())NativeUi.notice(activity,"请开启桌面守护，以便待机后返回 One")
+                    refresh()
+                }
+                3->restore(activity,::refresh)
+            }
+            }
+        }
+        refresh()
+        val dialog=NativeUi.show(AlertDialog.Builder(activity).setTitle("桌面应用").setView(body)
+            .setNegativeButton("关闭",null),widthDp=300,initialFocus=body.getChildAt(0))
+        dialog.window?.decorView?.viewTreeObserver?.addOnWindowFocusChangeListener{focused->if(focused&&dialog.isShowing)refresh()}
     }
     fun finishSetup(activity:Activity,changed:()->Unit){
         if(!prefs(activity).getBoolean("desktop_setup_pending",false))return

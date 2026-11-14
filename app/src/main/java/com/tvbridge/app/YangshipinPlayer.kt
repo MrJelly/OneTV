@@ -110,14 +110,12 @@ class YangshipinPlayer(
     }
 
     private fun notifyState(message: String, ready: Boolean) {
-        android.util.Log.i("YangshipinPlayer", "notifyState: msg='$message', ready=$ready (lastMsg='$lastStateMessage', lastReady=$lastStateReady)")
         if (message == lastStateMessage && ready == lastStateReady) return
         lastStateMessage = message
         lastStateReady = ready
         val epoch = generation
         handler.post {
             if (generation != epoch || !active) return@post
-            android.util.Log.i("YangshipinPlayer", "dispatching state to panel: msg='$message', ready=$ready")
             state(message, ready)
         }
     }
@@ -178,15 +176,23 @@ class YangshipinPlayer(
             val playTarget = proxy.proxyUrl(streamUrl)
 
             val epoch = generation
-            val player = NativePlayback.player(context,softwareTracks=softwareTracks,startupMs=if(lowRam)5000 else 2000,official=true).apply {
+            val player = NativePlayback.player(context,softwareTracks=softwareTracks,startupMs=if(lowRam)5000 else 4000,official=true).apply {
                 playWhenReady = true
                 addListener(object : Player.Listener {
+                    private val showRebuffering = Runnable {
+                        if (active && !suspended && generation == epoch && playbackState == Player.STATE_BUFFERING) {
+                            notifyState("加载中", false)
+                        }
+                    }
+                    private var playbackState = Player.STATE_IDLE
+
                     override fun onPlaybackStateChanged(playbackState: Int) {
-                        android.util.Log.i("YangshipinPlayer", "onPlaybackStateChanged: $playbackState (READY=${Player.STATE_READY}, BUF=${Player.STATE_BUFFERING}) active=$active")
+                        this.playbackState = playbackState
+                        handler.removeCallbacks(showRebuffering)
                         if (!active || generation != epoch) return
                         when (playbackState) {
                             Player.STATE_READY -> notifyState("正在播放", true)
-                            Player.STATE_BUFFERING -> notifyState("加载中", false)
+                            Player.STATE_BUFFERING -> if (rendered) handler.postDelayed(showRebuffering, 1000) else notifyState("加载中", false)
                             Player.STATE_ENDED -> {
                                 seekToDefaultPosition()
                                 prepare()
@@ -196,12 +202,10 @@ class YangshipinPlayer(
                     }
 
                     override fun onRenderedFirstFrame() {
-                        android.util.Log.i("YangshipinPlayer", "onRenderedFirstFrame: active=$active")
                         if (active && generation == epoch) {
                             rendered = true
                             lastProgressAt = SystemClock.elapsedRealtime()
                             val elapsed = android.os.SystemClock.elapsedRealtime() - startedAt
-                            android.util.Log.i("YangshipinPlayer", "firstFrameMs=$elapsed")
                             PlaybackDiagnostics.update("firstFrameMs", elapsed)
                             notifyState("正在播放", true)
                             playerView.visibility = View.VISIBLE

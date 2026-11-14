@@ -20,6 +20,7 @@ class BootReceiver : BroadcastReceiver() {
         if(!DesktopTakeover.unlocked(app)){DesktopTakeover.afterUnlock(app);return}
         val prefs=app.getSharedPreferences("startup",Context.MODE_PRIVATE)
         if(!prefs.getBoolean("boot",false))return
+        if(intent.action=="com.dangbei.action.STR_BOOT_COMPLETED"&&!DesktopTakeover.returnsAfterStandby(app))return
         if(intent.action==Intent.ACTION_MY_PACKAGE_REPLACED){DesktopTakeover.recover(app);return}
         if(DesktopGuardService.connected&&DesktopTakeover.wanted(app)){
             DesktopGuardService.onBootCompleted()
@@ -37,6 +38,7 @@ class BootReceiver : BroadcastReceiver() {
         prefs.edit().putString("boot_action",intent.action).putLong("boot_received_at",System.currentTimeMillis()).putString("boot_status","received").apply()
         if(!wake&&count>=0&&prefs.getInt("boot_arrived_count",-2)==count){prefs.edit().putString("boot_status","already_arrived").apply();return}
         if(!InstallHandoff.active(app)&&Hub.activity?.visible!=true&&BrowserActivity.active==null){
+            DesktopTakeover.schedule(app)
             try{
                 prefs.edit().putString("boot_status","launch_requested").apply()
                 app.startActivity(Intent(app,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra("from_boot",true))
@@ -44,7 +46,6 @@ class BootReceiver : BroadcastReceiver() {
                 prefs.edit().putString("boot_status","launch_rejected").putString("boot_error",e.javaClass.simpleName).apply()
             }
         }
-        DesktopTakeover.schedule(app)
         DesktopTakeover.recover(app)
     }
     companion object {

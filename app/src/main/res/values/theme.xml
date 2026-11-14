@@ -13,4 +13,5 @@
         <item name="android:colorBackground">#121820</item>
     </style>
     <style name="LiveTheme" parent="LiveThemeBase" />
+    <style name="FolderInput" parent="AppTheme" />
 </resources>

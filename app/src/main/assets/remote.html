@@ -3,12 +3,12 @@
 <style>
 :root{color-scheme:light;--text:#292f32;--muted:#697775;--accent:#59616d;--primary:linear-gradient(135deg,#7e8794,#4c545f);--surface:#ffffff50;--strong:#ffffff80;--input:#ffffff57;--border:#ffffffa0;--shadow:inset 0 1px #ffffffb0,0 2px 12px #374b4410;--blur:blur(24px) saturate(135%);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;background:#edf1ec;color:var(--text)}
 *{box-sizing:border-box;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}body{margin:0;min-height:100vh;min-height:100dvh;background:linear-gradient(125deg,#fff1e389 0%,#e9ebefd0 53%,#e8eef1bd 100%),#efefeb;background-attachment:fixed}body:before{content:'';position:fixed;inset:0;z-index:-1;background:radial-gradient(ellipse at 80% 35%,#bcddd438,transparent 60%);pointer-events:none}button,input,textarea,select{font:inherit;color:inherit}input,textarea{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}button{cursor:pointer;border:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}button:disabled{opacity:.48;cursor:wait}button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}button:active{transform:scale(.98)}svg{display:block;width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.symbols{display:none}[hidden]{display:none!important}
-.app{width:min(100%,480px);margin:0 auto;padding:calc(22px + env(safe-area-inset-top,0px)) 22px calc(116px + env(safe-area-inset-bottom,0px))}header{display:flex;align-items:center;gap:10px;min-height:36px;margin-bottom:36px}.brand-icon{color:var(--accent);width:30px;height:30px}.brand{font-size:20px;letter-spacing:-.6px;font-weight:650}.connection{margin-left:auto;display:flex;align-items:center;gap:6px;background:transparent;padding:8px 0 8px 12px;font-size:12px;color:var(--muted)}.dot{width:7px;height:7px;border-radius:50%;background:#9caaa4}.connection[data-state=online] .dot{background:#33a578}.connection[data-state=offline] .dot{background:#c18b58}h2{font-size:16px;font-weight:600;margin:0 0 10px}p{font-size:13px;line-height:1.75;color:var(--muted);margin:12px 0 0}label{display:block;font-size:14px;color:#4c545f;margin-bottom:9px}.glass{border:1px solid var(--border);border-radius:10px;background:linear-gradient(135deg,#ffffff30,#ffffff10),var(--surface);box-shadow:var(--shadow);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}.section{padding:18px;margin-bottom:16px}input:not([type=file]),textarea,select{display:block;width:100%;border:1px solid #c6d6d398;border-radius:6px;background:var(--input);box-shadow:inset 0 1px #ffffff80;padding:13px 12px;font-size:16px;line-height:22px;outline:none;min-width:0}input::placeholder,textarea::placeholder{color:#8b9994;font-size:14px;opacity:1}input:focus,textarea:focus{border-color:#72aaa3;box-shadow:0 0 0 3px #59616d0c}.primary,.secondary{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:12px 16px;border-radius:6px;font-size:15px;font-weight:550;width:100%;margin-top:12px}.primary{background:var(--primary);color:white;box-shadow:inset 0 1px #ffffff30,0 3px 9px #276e6b1c}.secondary{background:#ffffff60;border:1px solid #ffffff9c;color:#4c545f}.compact{margin:0;width:auto;min-height:44px;padding:10px 13px;font-size:13px}.split{display:flex;gap:10px}.split>*{flex:1}.text-button{color:var(--accent);background:transparent;padding:9px 0;font-size:14px}.small-note{font-size:12px;color:var(--muted);line-height:1.65}
-.tabs{position:fixed;z-index:20;bottom:0;left:0;right:0;transform:none;width:100%;height:calc(58px + env(safe-area-inset-bottom,0px));display:flex;align-items:stretch;padding:8px max(12px,env(safe-area-inset-right,0px)) calc(9px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));background:#f1f3f0f5;border:0;border-top:1px solid #dbe2df;border-radius:0;box-shadow:none;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}.tabs button{position:relative;flex:1;background:transparent;color:#697775;font-size:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border-radius:10px}.tabs button[aria-selected=true]{color:var(--accent);background:#ffffff35}.tabs svg{width:23px;height:23px}
-.dpad{position:relative;width:min(286px,100%);aspect-ratio:1;margin:16px auto 20px;border-radius:50%;background:linear-gradient(145deg,#ffffff70,#ffffff22);border:1px solid #ffffffd9;box-shadow:inset 0 1px #fff,0 10px 24px #4b6c5610;-webkit-user-select:none;user-select:none}.dpad:before,.dpad:after{content:'';position:absolute;left:50%;top:0;width:1px;height:100%;background:#ffffffaa;transform:rotate(45deg);pointer-events:none}.dpad:after{transform:rotate(-45deg)}.dpad button{position:absolute;background:transparent;color:#43655d;display:grid;place-items:center;width:30%;height:30%;border-radius:50%;touch-action:none;-webkit-touch-callout:none;z-index:1}.dpad button:active{background:#ffffff85}.dpad svg{width:30px;height:30px;stroke-width:2}.dpad .up{top:1%;left:35%}.dpad .down{bottom:1%;left:35%}.dpad .left{top:35%;left:1%}.dpad .right{top:35%;right:1%}.dpad .ok{width:37%;height:37%;left:31.5%;top:31.5%;font-size:20px;color:white;background:var(--primary);box-shadow:0 0 0 7px #ffffff75,inset 0 1px #ffffff7a,0 5px 16px #326f6328;border:1px solid #ffffffd0;z-index:2}.dpad .ok:active{background:#4c545f}.remote-row{display:flex;gap:10px;margin:14px 0}.remote-row button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:76px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);font-size:13px;color:#48665f}.volume{display:flex;overflow:hidden;border-radius:10px;margin:16px 0}.volume button{display:flex;align-items:center;justify-content:center;gap:10px;flex:1;background:transparent;min-height:55px;font-size:19px;color:#48665f}.volume button+button{border-left:1px solid #fff9}.remote-notice{font-size:12px;text-align:center}.remote-notice button{font-size:12px}.drop{position:relative;min-height:150px;padding:24px 15px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#42695e;border:1px dashed #92b0a3;border-radius:10px;background:#ffffff30;cursor:pointer;text-align:center}.drop svg{width:34px;height:34px;color:#6a9586}.drop span{font-size:13px;color:var(--muted)}input[type=file].file-input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.file-line{display:flex;gap:10px;align-items:center;padding:13px 0;border-bottom:1px solid #ffffff80;font-size:14px}.file-line:last-child{border-bottom:0}.file-line svg{color:#7b998d;width:20px;height:20px}.file-name{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.file-size{color:var(--muted);font-size:12px;white-space:nowrap}progress{display:block;width:100%;height:6px;accent-color:var(--accent);margin-top:16px}progress::-webkit-progress-bar{background:#dbe5df;border-radius:5px}progress::-webkit-progress-value{background:var(--accent);border-radius:5px}.empty{padding:24px 0;text-align:center;color:#7d8d85;font-size:13px}.heading-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:20px 0 10px}.heading-row h2{margin:0}
-.channel{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #ffffffb0}.channel:last-child{border:0}.channel-mark{display:grid;place-items:center;width:38px;height:38px;border:1px solid #fff9;background:#ffffff70;border-radius:6px;font-size:11px;font-weight:650;color:var(--accent);flex-shrink:0}.channel-info{flex:1;min-width:0}.channel-info strong{display:block;font-size:14px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.channel-info small{display:block;font-size:11px;color:var(--muted);margin-top:4px}.channel-play{border:1px solid #ffffffc9;background:#ffffff80;border-radius:6px;color:var(--accent);min-width:50px;min-height:44px;font-size:13px}.favorite{background:transparent;color:#7e968b;min-width:32px;min-height:44px;font-size:21px}.favorite[aria-pressed=true]{color:var(--accent)}.live-actions{position:fixed;z-index:19;left:50%;transform:translateX(-50%);bottom:calc(104px + env(safe-area-inset-bottom,0px));width:min(calc(100% - 28px),452px);display:flex;gap:8px;padding:8px;border:1px solid #ffffffc9;border-radius:10px;background:#f4f8f3ed;box-shadow:0 6px 24px #28443815;backdrop-filter:blur(24px)}#panel-live{padding-bottom:calc(var(--live-control-height,62px) - 38px)}#moreChannels{margin-bottom:18px;scroll-margin-bottom:calc(148px + env(safe-area-inset-bottom,0px))}.live-actions button{flex:1;min-width:0;padding-inline:3px;white-space:nowrap}.search{margin:16px 0 12px}.source-choices{display:flex;gap:8px;overflow:auto;padding:0 0 10px}.source-choices button{white-space:nowrap;flex-shrink:0;border:1px solid #fff9;background:#ffffff50;padding:9px 13px;border-radius:6px;font-size:12px;color:var(--muted)}.source-choices button.active{color:var(--accent);background:#d6e9df9c}.live-empty{text-align:center;padding:25px 8px;color:var(--muted);font-size:14px;line-height:1.8}
-.toast{position:fixed;z-index:50;bottom:calc(102px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);width:max-content;max-width:min(90%,430px);padding:13px 18px;border:1px solid #ffffff70;border-radius:10px;background:#243f39ee;color:white;box-shadow:0 8px 30px #213a2925;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);font-size:13px;line-height:1.6;pointer-events:none;white-space:pre-wrap}.toast[data-error=true]{background:#654b3cf0}dialog{padding:22px;border:1px solid #ffffffc9;border-radius:10px;background:#f1f6f0ed;color:var(--text);box-shadow:0 15px 65px #29443830;-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);width:min(430px,calc(100% - 28px));max-height:85vh;overflow:auto}dialog::backdrop{background:#25382e30;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}dialog h2{font-size:20px;margin-bottom:20px}dialog textarea{min-height:110px;resize:vertical}dialog label:not(:first-child){margin-top:16px}.dialog-close{position:absolute;right:14px;top:14px;background:transparent;color:var(--muted);padding:8px}.dialog-close svg{width:18px;height:18px}.manual-code{letter-spacing:8px;font-size:26px!important;text-align:center;font-variant-numeric:tabular-nums}.spinner{width:26px;height:26px;border:2px solid #adc9be;border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:24px auto}@keyframes spin{to{transform:rotate(360deg)}}
-@media(min-width:780px){.app{width:680px;padding:36px 30px 140px}.dpad{width:300px}.remote-row,.volume{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid #ffffffb0;border-radius:10px;background:#ffffff55;box-shadow:var(--shadow);margin-bottom:12px}.remote-notice{max-width:400px;margin-left:auto;margin-right:auto}header{margin-bottom:44px}.section{padding:24px}}@media(max-width:350px){.app{padding-left:16px;padding-right:16px}.section{padding:15px}.dpad{width:255px}.live-actions{gap:5px}.compact{padding:9px;font-size:12px}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.glass{background:#f7f9f4}.tabs{background:#f3f8f1}dialog{background:#f1f6f0}}@media(prefers-reduced-transparency:reduce){.glass,.tabs{background:#f7f9f4;backdrop-filter:none;-webkit-backdrop-filter:none}}
+.app{width:min(100%,480px);margin:0 auto;padding:calc(22px + env(safe-area-inset-top,0px)) 22px calc(116px + env(safe-area-inset-bottom,0px))}header{display:flex;align-items:center;gap:10px;min-height:36px;margin-bottom:36px}.brand-icon{color:var(--accent);width:30px;height:30px}.brand{font-size:20px;letter-spacing:-.6px;font-weight:650}.connection{margin-left:auto;display:flex;align-items:center;gap:6px;background:transparent;padding:8px 0 8px 12px;font-size:14px;color:var(--muted)}.dot{width:7px;height:7px;border-radius:50%;background:#9caaa4}.connection[data-state=online] .dot{background:#33a578}.connection[data-state=offline] .dot{background:#c18b58}h2{font-size:16px;font-weight:600;margin:0 0 10px}p{font-size:14px;line-height:1.75;color:var(--muted);margin:12px 0 0}label{display:block;font-size:14px;color:#4c545f;margin-bottom:9px}.glass{border:1px solid var(--border);border-radius:10px;background:linear-gradient(135deg,#ffffff30,#ffffff10),var(--surface);box-shadow:var(--shadow);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}.section{padding:18px;margin-bottom:16px}input:not([type=file]),textarea,select{display:block;width:100%;border:1px solid #c6d6d398;border-radius:6px;background:var(--input);box-shadow:inset 0 1px #ffffff80;padding:13px 12px;font-size:16px;line-height:22px;outline:none;min-width:0}input::placeholder,textarea::placeholder{color:#8b9994;font-size:14px;opacity:1}input:focus,textarea:focus{border-color:#72aaa3;box-shadow:0 0 0 3px #59616d0c}.primary,.secondary{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:12px 16px;border-radius:6px;font-size:15px;font-weight:550;width:100%;margin-top:12px}.primary{background:var(--primary);color:white;box-shadow:inset 0 1px #ffffff30,0 3px 9px #276e6b1c}.secondary{background:#ffffff60;border:1px solid #ffffff9c;color:#4c545f}.compact{margin:0;width:auto;min-height:44px;padding:10px 13px;font-size:14px}.split{display:flex;gap:10px}.split>*{flex:1}.text-button{color:var(--accent);background:transparent;padding:9px 0;font-size:14px}.small-note{font-size:14px;color:var(--muted);line-height:1.65}
+.tabs{position:fixed;z-index:20;bottom:0;left:0;right:0;transform:none;width:100%;height:calc(58px + env(safe-area-inset-bottom,0px));display:flex;align-items:stretch;padding:8px max(12px,env(safe-area-inset-right,0px)) calc(9px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));background:#f1f3f0f5;border:0;border-top:1px solid #dbe2df;border-radius:0;box-shadow:none;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}.tabs button{position:relative;flex:1;background:transparent;color:#697775;font-size:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border-radius:10px}.tabs button[aria-selected=true]{color:var(--accent);background:#ffffff35}.tabs svg{width:23px;height:23px}
+.dpad{position:relative;width:min(286px,100%);aspect-ratio:1;margin:16px auto 20px;border-radius:50%;background:linear-gradient(145deg,#ffffff70,#ffffff22);border:1px solid #ffffffd9;box-shadow:inset 0 1px #fff,0 10px 24px #4b6c5610;-webkit-user-select:none;user-select:none}.dpad:before,.dpad:after{content:'';position:absolute;left:50%;top:0;width:1px;height:100%;background:#ffffffaa;transform:rotate(45deg);pointer-events:none}.dpad:after{transform:rotate(-45deg)}.dpad button{position:absolute;background:transparent;color:#43655d;display:grid;place-items:center;width:30%;height:30%;border-radius:50%;touch-action:none;-webkit-touch-callout:none;z-index:1}.dpad button:active{background:#ffffff85}.dpad svg{width:30px;height:30px;stroke-width:2}.dpad .up{top:1%;left:35%}.dpad .down{bottom:1%;left:35%}.dpad .left{top:35%;left:1%}.dpad .right{top:35%;right:1%}.dpad .ok{width:37%;height:37%;left:31.5%;top:31.5%;font-size:20px;color:white;background:var(--primary);box-shadow:0 0 0 7px #ffffff75,inset 0 1px #ffffff7a,0 5px 16px #326f6328;border:1px solid #ffffffd0;z-index:2}.dpad .ok:active{background:#4c545f}.remote-row{display:flex;gap:10px;margin:14px 0}.remote-row button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:76px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);font-size:14px;color:#48665f}.volume{display:flex;overflow:hidden;border-radius:10px;margin:16px 0}.volume button{display:flex;align-items:center;justify-content:center;gap:10px;flex:1;background:transparent;min-height:55px;font-size:19px;color:#48665f}.volume button+button{border-left:1px solid #fff9}.remote-notice{font-size:14px;text-align:center}.remote-notice button{font-size:14px}.drop{position:relative;min-height:150px;padding:24px 15px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#42695e;border:1px dashed #92b0a3;border-radius:10px;background:#ffffff30;cursor:pointer;text-align:center}.drop svg{width:34px;height:34px;color:#6a9586}.drop span{font-size:14px;color:var(--muted)}input[type=file].file-input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.file-line{display:flex;gap:10px;align-items:center;padding:13px 0;border-bottom:1px solid #ffffff80;font-size:14px}.file-line:last-child{border-bottom:0}.file-line svg{color:#7b998d;width:20px;height:20px}.file-name{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.file-size{color:var(--muted);font-size:14px;white-space:nowrap}progress{display:block;width:100%;height:6px;accent-color:var(--accent);margin-top:16px}progress::-webkit-progress-bar{background:#dbe5df;border-radius:5px}progress::-webkit-progress-value{background:var(--accent);border-radius:5px}.empty{padding:24px 0;text-align:center;color:#7d8d85;font-size:14px}.heading-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:20px 0 10px}.heading-row h2{margin:0}
+.channel{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #ffffffb0}.channel:last-child{border:0}.channel-mark{display:grid;place-items:center;width:38px;height:38px;border:1px solid #fff9;background:#ffffff70;border-radius:6px;font-size:14px;font-weight:650;color:var(--accent);flex-shrink:0}.channel-info{flex:1;min-width:0}.channel-info strong{display:block;font-size:14px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.channel-info small{display:block;font-size:14px;color:var(--muted);margin-top:4px}.channel-play{border:1px solid #ffffffc9;background:#ffffff80;border-radius:6px;color:var(--accent);min-width:50px;min-height:44px;font-size:14px}.favorite{background:transparent;color:#7e968b;min-width:32px;min-height:44px;font-size:21px}.favorite[aria-pressed=true]{color:var(--accent)}.live-actions{position:fixed;z-index:19;left:50%;transform:translateX(-50%);bottom:calc(104px + env(safe-area-inset-bottom,0px));width:min(calc(100% - 28px),452px);display:flex;gap:8px;padding:8px;border:1px solid #ffffffc9;border-radius:10px;background:#f4f8f3ed;box-shadow:0 6px 24px #28443815;backdrop-filter:blur(24px)}#panel-live{padding-bottom:calc(var(--live-control-height,62px) - 38px)}#moreChannels{margin-bottom:18px;scroll-margin-bottom:calc(148px + env(safe-area-inset-bottom,0px))}.live-actions button{flex:1;min-width:0;padding-inline:3px;white-space:nowrap}.search{margin:16px 0 12px}.source-choices{display:flex;gap:8px;overflow:auto;padding:0 0 10px}.source-choices button{white-space:nowrap;flex-shrink:0;border:1px solid #fff9;background:#ffffff50;padding:9px 13px;border-radius:6px;font-size:14px;color:var(--muted)}.source-choices button.active{color:var(--accent);background:#d6e9df9c}.live-empty{text-align:center;padding:25px 8px;color:var(--muted);font-size:14px;line-height:1.8}
+.toast{position:fixed;z-index:50;bottom:calc(102px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);width:max-content;max-width:min(90%,430px);padding:13px 18px;border:1px solid #ffffff70;border-radius:10px;background:#243f39ee;color:white;box-shadow:0 8px 30px #213a2925;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);font-size:14px;line-height:1.6;pointer-events:none;white-space:pre-wrap}.toast[data-error=true]{background:#654b3cf0}dialog{padding:22px;border:1px solid #ffffffc9;border-radius:10px;background:#f1f6f0ed;color:var(--text);box-shadow:0 15px 65px #29443830;-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);width:min(430px,calc(100% - 28px));max-height:85vh;overflow:auto}dialog::backdrop{background:#25382e30;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}dialog h2{font-size:20px;margin-bottom:20px}dialog textarea{min-height:110px;resize:vertical}dialog label:not(:first-child){margin-top:16px}.dialog-close{position:absolute;right:14px;top:14px;background:transparent;color:var(--muted);padding:8px}.dialog-close svg{width:18px;height:18px}.manual-code{letter-spacing:8px;font-size:26px!important;text-align:center;font-variant-numeric:tabular-nums}.spinner{width:26px;height:26px;border:2px solid #adc9be;border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:24px auto}@keyframes spin{to{transform:rotate(360deg)}}
+@media(min-width:780px){.app{width:680px;padding:36px 30px 140px}.dpad{width:300px}.remote-row,.volume{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid #ffffffb0;border-radius:10px;background:#ffffff55;box-shadow:var(--shadow);margin-bottom:12px}.remote-notice{max-width:400px;margin-left:auto;margin-right:auto}header{margin-bottom:44px}.section{padding:24px}}@media(max-width:350px){.app{padding-left:16px;padding-right:16px}.section{padding:15px}.dpad{width:255px}.live-actions{gap:5px}.compact{padding:9px;font-size:14px}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.glass{background:#f7f9f4}.tabs{background:#f3f8f1}dialog{background:#f1f6f0}}@media(prefers-reduced-transparency:reduce){.glass,.tabs{background:#f7f9f4;backdrop-filter:none;-webkit-backdrop-filter:none}}
 
 :root{--text:#2d3d37;--muted:#687b70;--accent:#50685f;--primary:linear-gradient(145deg,#758c82e8,#4c655beF);--surface:#ffffff65;--strong:#ffffffa0;--input:#ffffff75;--border:#ffffffa0;--shadow:inset 0 1px #ffffffc0,0 6px 24px #36574009;--blur:blur(22px) saturate(115%);background:#deebdc}body{background:linear-gradient(145deg,#edf4e7,#dfeddc 55%,#cfe1d2);background-attachment:fixed}body:before{display:none}.app{padding-left:20px;padding-right:20px}header{margin-bottom:26px}.glass{background:linear-gradient(145deg,#ffffff88,#ffffff42);box-shadow:var(--shadow);border:1px solid var(--border)}.section{padding:22px;margin-bottom:18px}.primary{background:var(--primary);color:#fff;box-shadow:inset 0 1px #ffffff70,0 3px 14px #29463512}.secondary{background:linear-gradient(145deg,#ffffffc0,#ffffff60);color:#40574b;border-color:#ffffffa0;box-shadow:inset 0 1px #ffffffc0,0 3px 12px #36574008;backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}.section form,.section p{line-height:1.65}form>.primary{margin-top:20px}dialog{background:#edf5eaeF;padding:28px;box-shadow:0 15px 65px #29443820}dialog>button:not(.dialog-close){margin-top:18px}dialog::backdrop{background:#243b2f55}.toast{background:#344c42ef}.tabs{background:#f1f3f0f5}.tabs button[aria-selected=true]{color:#405d50;background:#ffffff90}.dpad{background:linear-gradient(145deg,#ffffff90,#ffffff38);border-color:#ffffffb0;box-shadow:inset 0 1px #ffffffd0,0 8px 30px #3a573008}.dpad button,.remote-row button,.volume button{color:#4b6558}.dpad:before,.dpad:after{background:#ffffff90}.dpad .ok{color:#fff;background:var(--primary);box-shadow:0 0 0 7px #ffffff60,inset 0 1px #ffffffa0}.drop{background:#ffffff25;color:#50685f;border-color:#9fb5a8}.drop svg,.file-line svg{color:#758c7e}.source-choices button.active{background:var(--primary);color:#fff}.source-choices button{background:#ffffff60}.favorite{color:#718b7d}.channel-play{background:#ffffff85}.remote-notice{margin-top:16px}input:not([type=file]),textarea,select{border-color:#ffffffa0;background:#ffffff70}.channel-filters{display:flex;align-items:center;gap:12px}.channel-filters select{flex:1;min-width:0;width:0}.channel-filters button{flex:0 0 84px;margin:0;min-height:48px}select:focus,select:focus-visible,input:focus,input:focus-visible,textarea:focus,textarea:focus-visible{outline:none;box-shadow:none;border-color:#ffffffa0;background:#ffffffb0}button:focus-visible{outline:none;box-shadow:inset 0 0 0 2px #50685f50}.channel-filters button:focus-visible{box-shadow:none}
 .primary,.secondary{min-height:44px;padding-top:10px;padding-bottom:10px}.channel-filters button{min-height:44px}.channel-filters select{padding-top:10px;padding-bottom:10px}
@@ -20,12 +20,12 @@ dialog{padding:0;overflow:hidden;max-height:85vh;max-height:85dvh}dialog[open]{d
 body{background:linear-gradient(130deg,#f4f5f2,#e8ece9 60%,#dfe5e2);background-attachment:fixed}.glass{background:linear-gradient(145deg,#ffffffe0,#ffffffa0)}
 .secondary,.dpad button,.remote-row button,.volume button{color:#526571}.tabs{background:#f1f3f0f5}.tabs button[aria-selected=true]{color:#455f72}.drop{color:#526571;border-color:#a5b2bb}.drop svg,.file-line svg,.favorite{color:#758b99}.dpad{box-shadow:inset 0 1px #fff,0 8px 30px #27344308}
 dialog{background:#f4f5f2f5}dialog::backdrop{background:#242a3260}.dialog-header{background:#f4f5f2d0}.toast{background:#343e47ef}
-.channel-filters{gap:8px;padding:4px;background:#ffffffa0;border-radius:10px}.channel-filters #favoriteChannels{flex:0 0 64px;border:0;box-shadow:none}.category-tabs{display:flex;flex:1;min-width:0;gap:3px}.category-tabs .category-tab{flex:1;min-width:0;min-height:44px;padding:8px 3px;background:transparent;color:#52606c;border-radius:6px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.category-tab[aria-selected=true]{background:var(--primary);color:#fff}.channel-filters select{border:0;background:transparent;box-shadow:none;min-height:44px}.channel-filters .category-tab:focus-visible{outline:0;box-shadow:none}#channelList{background:#ffffffc5;padding-top:6px;padding-bottom:6px}.channel{border-bottom-color:#e2e7e7}.channel-mark{background:#e7ecef;color:#5d7180}.channel-play{background:#e9eef1;color:#526c7e}
-.icon-label{display:inline-flex;align-items:center;justify-content:center;gap:8px}.favorite{display:flex;align-items:center;justify-content:center}.favorite[aria-pressed="true"] svg{fill:currentColor;fill-opacity:.16}.favorite svg{width:22px;height:22px}.remote-input-tabs{display:flex;gap:6px;padding:5px;border-radius:10px;background:#ffffff90;margin:18px 0}.remote-input-tabs button{flex:1;border-radius:6px;background:transparent;padding:11px;color:var(--muted)}.remote-input-tabs button[aria-pressed=true]{background:var(--primary);color:#fff}.touchpad{width:100%;height:286px;margin:16px auto 20px;position:relative;display:grid;place-items:center;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;border-radius:10px;background:radial-gradient(circle,#758b9926 1px,transparent 1px) 0 0/18px 18px,linear-gradient(145deg,#ffffffd0,#ffffff60);border:1px solid #fff;box-shadow:var(--shadow)}.touchpad.active{background-color:#d3dfe6}.touchpad span{font-size:14px;color:#77858e;pointer-events:none}.touchpad-note{position:absolute;bottom:18px;left:6px;right:6px;text-align:center;font-size:11px;margin:0;color:var(--muted);pointer-events:none}#playlistText{height:170px;min-height:170px;max-height:260px;overflow:auto;resize:vertical;touch-action:pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.channel-filters{gap:8px;padding:4px;background:#ffffffa0;border-radius:10px}.channel-filters #favoriteChannels{flex:0 0 64px;border:0;box-shadow:none}.category-tabs{display:flex;flex:1;min-width:0;gap:3px}.category-tabs .category-tab{flex:1;min-width:0;min-height:44px;padding:8px 3px;background:transparent;color:#52606c;border-radius:6px;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.category-tab[aria-selected=true]{background:var(--primary);color:#fff}.channel-filters select{border:0;background:transparent;box-shadow:none;min-height:44px}.channel-filters .category-tab:focus-visible{outline:0;box-shadow:none}#channelList{background:#ffffffc5;padding-top:6px;padding-bottom:6px}.channel{border-bottom-color:#e2e7e7}.channel-mark{background:#e7ecef;color:#5d7180}.channel-play{background:#e9eef1;color:#526c7e}
+.icon-label{display:inline-flex;align-items:center;justify-content:center;gap:8px}.favorite{display:flex;align-items:center;justify-content:center}.favorite[aria-pressed="true"] svg{fill:currentColor;fill-opacity:.58}.favorite svg{width:20px;height:20px}.remote-input-tabs{display:flex;gap:6px;padding:5px;border-radius:10px;background:#ffffff90;margin:18px 0}.remote-input-tabs button{flex:1;border-radius:6px;background:transparent;padding:11px;color:var(--muted)}.remote-input-tabs button[aria-pressed=true]{background:var(--primary);color:#fff}.touchpad{width:100%;height:286px;margin:16px auto 20px;position:relative;display:grid;place-items:center;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;border-radius:10px;background:radial-gradient(circle,#758b9926 1px,transparent 1px) 0 0/18px 18px,linear-gradient(145deg,#ffffffd0,#ffffff60);border:1px solid #fff;box-shadow:var(--shadow)}.touchpad.active{background-color:#d3dfe6}.touchpad span{font-size:14px;color:#77858e;pointer-events:none}.touchpad-note{position:absolute;bottom:7px;left:6px;right:6px;text-align:center;font-size:12px;margin:0;color:var(--muted);opacity:.72;pointer-events:none}#playlistText{height:170px;min-height:170px;max-height:260px;overflow:auto;resize:vertical;touch-action:pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 @media(min-width:780px){.touchpad{height:300px}}@media(max-width:350px){.touchpad{height:255px}}
 .remote-text .split{align-items:center}.remote-text input{min-width:0;margin:0}.remote-text button{flex:0 0 68px;min-height:46px}
 
-.remote-text-dialog{width:min(420px,calc(100% - 32px));padding:0;border-radius:10px}.remote-text-dialog .dialog-header{padding:18px 20px 12px}.remote-text-dialog .dialog-body{padding:0 20px 20px}.remote-text-dialog label{font-size:13px;color:var(--muted)}
+.remote-text-dialog{width:min(420px,calc(100% - 32px));padding:0;border-radius:10px}.remote-text-dialog .dialog-header{padding:18px 20px 12px}.remote-text-dialog .dialog-body{padding:0 20px 20px}.remote-text-dialog label{font-size:14px;color:var(--muted)}
 #favoriteChannels{background:transparent;color:#52606c;border-radius:6px;padding:8px 3px}#favoriteChannels[aria-selected=true]{background:var(--primary);color:#fff}
 .tabs{bottom:0;width:100%;border:0;border-top:1px solid #dbe2df;border-radius:0;box-shadow:none}.app{padding-bottom:calc(106px + env(safe-area-inset-bottom,0px))}.live-actions{bottom:calc(66px + env(safe-area-inset-bottom,0px))}
 
@@ -38,7 +38,7 @@ body[data-page="remote"] .app{padding-bottom:calc(82px + env(safe-area-inset-bot
 button.is-loading{opacity:1;cursor:wait}
 .is-loading:before{content:'';display:inline-block;width:15px;height:15px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .75s linear infinite;flex:0 0 15px}
 .drop.is-loading{pointer-events:none}
-.live-modes{display:flex;gap:8px;margin:0 0 18px;padding:5px;border:1px solid var(--border);border-radius:10px;background:var(--surface)}.live-modes button{flex:1;min-height:44px;border-radius:6px;background:transparent;font-size:14px;color:var(--muted)}.live-modes button[aria-selected=true]{background:var(--primary);color:white}.live-modes button[aria-busy=true]{opacity:.65}#externalLive{margin-top:16px}#externalLive h2{overflow-wrap:anywhere}#panel-live .live-modes{margin-bottom:8px}#panel-live #customLiveTools{gap:8px;margin-bottom:8px}#customLiveTools button{min-height:36px;padding:8px 12px;margin:0;font-size:13px;font-weight:500;background:var(--surface);border:1px solid var(--border);color:var(--text);box-shadow:none}#customLiveTools svg{width:17px;height:17px}#panel-live .search{margin:0 0 8px}#panel-live .channel-filters{margin:0 0 8px}#panel-live #channelList{margin:0 0 8px!important}#panel-live #moreChannels{margin:0 0 8px}#panel-live #externalLive{margin:0 0 8px}#panel-live{padding-bottom:var(--live-content-inset,0px)}.live-actions{bottom:calc(66px + env(safe-area-inset-bottom,0px))}#panel-live #moreChannels{margin:0}.volume [data-c=volumeMute]{font-size:13px;gap:6px}.volume [data-c=volumeMute] svg{width:21px;height:21px}
+.live-modes{display:flex;gap:8px;margin:0 0 18px;padding:5px;border:1px solid var(--border);border-radius:10px;background:var(--surface)}.live-modes button{flex:1;min-height:44px;border-radius:6px;background:transparent;font-size:14px;color:var(--muted)}.live-modes button[aria-selected=true]{background:var(--primary);color:white}.live-modes button[aria-busy=true]{opacity:.65}#externalLive{margin-top:16px}#externalLive h2{overflow-wrap:anywhere}#panel-live .live-modes{margin-bottom:8px}#panel-live #customLiveTools{gap:8px;margin-bottom:8px}#customLiveTools button{min-height:36px;padding:8px 12px;margin:0;font-size:14px;font-weight:500;background:var(--surface);border:1px solid var(--border);color:var(--text);box-shadow:none}#customLiveTools svg{width:17px;height:17px}#panel-live .search{margin:0 0 8px}#panel-live .channel-filters{margin:0 0 8px}#panel-live #channelList{margin:0 0 8px!important}#panel-live #moreChannels{margin:0 0 8px}#panel-live #externalLive{margin:0 0 8px}#panel-live{padding-bottom:var(--live-content-inset,0px)}.live-actions{bottom:calc(66px + env(safe-area-inset-bottom,0px))}#panel-live #moreChannels{margin:0}.volume [data-c=volumeMute]{font-size:14px;gap:6px}.volume [data-c=volumeMute] svg{width:21px;height:21px}
 
 :root{
   --text:#18283e;--muted:#475b72;--accent:#315a85;
@@ -127,9 +127,9 @@ input:not([type=file]):focus,textarea:focus,select:focus{
 #browserPadSlot{margin-top:8px}
 #remotePadSlot #touchPanel{position:relative}
 #pointerSetup{position:absolute;left:50%;top:58%;transform:translateX(-50%);white-space:nowrap}
-.file-line .file-delete{min-height:32px;padding:3px 8px;color:#854e51;background:#f2dadd72;border-color:transparent;box-shadow:none}
+
 .favorite[aria-pressed=true]{color:#995b12}
-.favorite[aria-pressed=true] svg{fill:currentColor;fill-opacity:1}
+.favorite[aria-pressed=true] svg{fill:currentColor;fill-opacity:.58}
 
 :root{--control-height:36px;--control-text:14px}
 .tabs{border-radius:6px 6px 0 0}.tabs button{border-radius:6px}
@@ -137,7 +137,7 @@ input:not([type=file]):focus,textarea:focus,select:focus{
 input::placeholder{font-size:var(--control-text)}
 input:not([type=file]):not([type=range]),textarea{font-size:16px}
 select,input:not([type=file]):not([type=range]){min-height:var(--control-height);padding-block:6px}
-#customLiveTools button,#remoteTextDialog #sendRemoteText,.file-line .file-delete{min-height:var(--control-height);font-size:var(--control-text)}
+#customLiveTools button,#remoteTextDialog #sendRemoteText,
 .browser-nav{margin-top:8px;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
 #browserControls .browser-search-row{gap:8px}
 select,.channel-filters select{height:var(--control-height);min-height:var(--control-height);padding-block:0;font-size:var(--control-text);line-height:16px}
@@ -146,7 +146,7 @@ select,.channel-filters select{height:var(--control-height);min-height:var(--con
 #browserPlayer{margin-top:10px;padding:12px}
 .browser-player-heading{display:flex;align-items:center;gap:8px}
 .browser-player-heading strong{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
-#browserMediaState{color:var(--muted);font-size:12px;white-space:nowrap}
+#browserMediaState{color:var(--muted);font-size:14px;white-space:nowrap}
 #browserPlayer #browserProgress{border:0;background:transparent;box-shadow:none;outline:0;height:18px;padding:0;margin:8px 0 0;accent-color:var(--accent)}
 #browserTime{text-align:right;line-height:18px;min-height:18px;font-variant-numeric:tabular-nums}
 #browserPlay{position:fixed;right:calc(20px + env(safe-area-inset-right,0px));bottom:calc(88px + env(safe-area-inset-bottom,0px));width:var(--control-height);height:var(--control-height);padding:0;z-index:18}
@@ -162,20 +162,130 @@ body button:not(.dpad button),
   height:var(--control-height);min-height:var(--control-height);padding-block:0;font-size:var(--control-text);line-height:16px;white-space:nowrap
 }
 #remoteControls .remote-action-grid button{height:54px;flex-direction:column;gap:4px;padding:7px 1px}
-#remoteControls .remote-action-grid svg{width:18px;height:18px;flex-shrink:0;stroke-width:2.4}
+#remoteControls .remote-action-grid svg{width:18px;height:18px;flex-shrink:0;stroke-width:1.7}
 
 .dpad .ok{font-size:18px;line-height:22px}
 body .tabs button{height:40px;gap:5px;line-height:16px;font-size:var(--control-text);font-weight:400;transform:none}.tabs svg{width:20px;height:20px;flex-shrink:0;stroke-width:1.8;transform:none}
 .dialog-close{width:var(--control-height);display:grid;place-items:center}
 .tabs button[aria-selected=true]{background:transparent;box-shadow:none;color:#315f95}
-.tabs button[aria-selected=true]::after{content:'';position:absolute;bottom:-5px;left:50%;transform:translateX(-50%);width:28px;height:2px;border-radius:1px;background:currentColor}
+.tabs button[aria-selected=true]::after{display:none;content:'';position:absolute;bottom:-5px;left:50%;transform:translateX(-50%);width:28px;height:2px;border-radius:1px;background:currentColor}
 
 .browser-query{position:relative;min-width:0}
 #browserControls .browser-query input{padding-right:36px}
 #browserControls #browserClear{position:absolute;right:0;top:0;background:transparent;color:var(--muted);display:grid;place-items:center}
 #browserClear svg{width:17px;height:17px}
+body[data-page="remote"] .app{width:100%;max-width:680px;padding-inline:max(10px,env(safe-area-inset-left,0px)) max(10px,env(safe-area-inset-right,0px))}
+#panel-apps .section{padding:12px}
+.app-layout-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.app-layout-actions{display:flex;gap:6px}
+#appList{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px 5px}
+.home-app{min-width:0;display:grid;gap:4px;text-align:center;user-select:none;-webkit-user-select:none}
+.home-app-face{display:grid;place-items:center;aspect-ratio:16/9;border-radius:7px;background:var(--input);color:var(--selection-ink);overflow:hidden}
+.home-app-face svg{width:47%;height:65%;fill:none;stroke:currentColor;stroke-width:1.7}
+.home-app span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.home-app[data-dragging=true]{opacity:.5;touch-action:none}
+.home-app[data-target=true] .home-app-face{outline:2px solid var(--selection-ink);outline-offset:1px}
+#appActions .secondary{justify-content:flex-start}
+#appList .live-empty{grid-column:1/-1}
+@media(max-width:350px){.home-app span{font-size:14px}}
+
+body .tabs button[aria-selected=true]{background:transparent;color:#0064ce;box-shadow:none}
+body .live-modes button[aria-selected=true],body .category-tabs .category-tab[aria-selected=true],
+body #favoriteChannels[aria-selected=true],body .remote-input-tabs button[aria-pressed=true],
+body .source-choices button.active{background:#fff;box-shadow:none}
+#remoteControls .remote-action-grid button{font-weight:400}
+body .live-actions{left:0;right:0;width:100%;transform:none;bottom:var(--nav-height,calc(58px + env(safe-area-inset-bottom,0px)));border-radius:0}
+.favorite[aria-pressed=true]{color:#648fa6}
+
+.file-line .set-background{color:#315f95;background:#e2eef9}
+#appList{position:relative;gap:14px 7px;padding:5px 7px 8px}
+.home-app{position:relative;gap:5px;padding:0;border:0;background:none;cursor:grab}
+.home-app-face{width:100%;border-radius:6px;box-shadow:0 1px 2px #0002}
+.home-app-face img{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none}
+.home-app[data-dragging=true]{opacity:1;z-index:2}
+.home-app[data-dragging=true] .home-app-face{transform:scale(1.12);box-shadow:0 8px 16px #0005}
+.home-app[data-dragging=true] span{opacity:0}
+.home-app-folder{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;align-content:start;align-items:start;padding:3px}.home-app-folder img{aspect-ratio:16/9;border-radius:2px}
+.app-shelf{position:absolute;left:2px;right:2px;top:1px;border-radius:11px;background:#ffffff42;pointer-events:none}
+
+
+.live-modes button,.remote-input-tabs button,.category-tabs .category-tab,#favoriteChannels{
+  padding:6px 3px;min-height:var(--control-height)
+}
+#panel-apps>.section{background:none;border:0;box-shadow:none;padding:0;backdrop-filter:none;-webkit-backdrop-filter:none}
+#appList{padding:8px 7px 10px;gap:14px 7px}
+.home-app-face{background:var(--input)}
+#appHiddenSection h2{margin:18px 5px 6px;color:var(--muted);font-weight:500;font-size:14px}
+#appHiddenList{border-radius:12px;overflow:hidden}
+.app-hidden-row{display:grid;grid-template-columns:64px 1fr auto;align-items:center;gap:10px;padding:10px 12px;min-height:55px}
+.app-hidden-row+.app-hidden-row{border-top:1px solid #8faed33b}
+.app-hidden-row button{padding:4px 0;background:none;text-align:left;font-size:14px;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.app-hidden-row button:last-child{color:#245d9e}
+.app-hidden-empty{padding:10px 12px;color:var(--muted);font-size:14px}
+#appEditDialog{position:fixed;inset:0 0 auto;width:100%;max-width:none;margin:0;padding:calc(12px + env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) 12px max(12px,env(safe-area-inset-left,0px));border:0;border-radius:0 0 14px 14px;background:#f1f5fb;color:#25354a}
+#appEditDialog h2{font-size:18px;margin:12px 2px}
+#appActions{background:white;border-radius:12px;overflow:hidden}
+.app-sheet-row{display:block;width:100%;min-height:46px;padding:8px 14px;text-align:left;background:white;color:#2c5b91;font-size:14px}
+.app-sheet-row+.app-sheet-row{border-top:1px solid #e1e9f4}
+#appEditDialog #closeAppEdit{margin-top:8px}
+
+
+body *{font-weight:400!important}
+.dpad svg{stroke-width:1.5}
+.favorite svg{stroke-width:1.4}
+#panel-live .live-modes,#panel-live .channel-filters{padding:4px;gap:3px;border:0}
+#panel-live .live-modes button,#panel-live .channel-filters .category-tab{
+  height:var(--control-height);min-height:var(--control-height);padding:6px 3px;
+  border:0;border-radius:6px;box-shadow:none;line-height:20px;color:var(--muted)
+}
+#panel-live .live-modes,#panel-live .channel-filters{border:1px solid var(--border);border-radius:10px;background:var(--surface)}
+#panel-live .live-modes button[aria-selected=true],#panel-live .channel-filters .category-tab[aria-selected=true]{background:#fff;color:var(--selection-ink)}
+body .live-actions{box-shadow:none}
+#panel-apps .app-layout-toolbar{padding:0 2px;margin-bottom:6px}
+#appsHeading{font-size:16px;line-height:20px}
+#appList{border-radius:12px;padding:12px 9px;gap:14px 7px}
+.app-shelf{left:4px;right:4px;top:4px;background:#7676801c}
+#appEditDialog{background:#e8effbf2;color:var(--text)}
+#appEditDialog h2{text-align:center;margin:10px 0 14px}
+.app-sheet-art{width:min(224px,65%);margin:14px auto 0;border-radius:12px;box-shadow:none}
+#appActions{background:transparent;overflow:visible}
+.app-sheet-group,.app-name-form{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+#appActions>.app-name-form{margin-bottom:10px}
+.app-sheet-row{text-align:center;background:transparent;color:var(--accent);font-size:14px}
+.app-sheet-row[data-danger=true],#folderDissolve{color:#cf3438}
+.app-name-form{display:flex;align-items:center;gap:6px;padding:0 12px}
+body .app-name-form input:not([type=file]){background:transparent;border:0;box-shadow:none;margin:0;min-width:0;padding:12px 0}
+.app-name-form button{color:#0064ce;padding:12px 0;white-space:nowrap}
+.app-name-form button:disabled{opacity:.4}
+.home-app{display:block;align-self:start;width:100%;height:auto;min-height:0;appearance:none;-webkit-appearance:none}
+.home-app .home-app-face{display:block;position:relative;height:auto;aspect-ratio:auto;padding:0}
+.home-app:focus,.home-app:focus-visible{outline:none;box-shadow:none}
+.home-app .home-app-face::before{content:"";display:block;padding-top:56.25%}
+.home-app .home-app-face>img{position:absolute;inset:0}
+.home-app .home-app-label{display:block;width:100%;margin-top:5px;font-size:12px;line-height:16px;color:var(--text)}
+.home-app .home-app-folder{background:linear-gradient(155deg,#636f83,#394457)}
+.home-app-folder-preview{position:absolute;inset:4px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-content:start;gap:2px}
+.home-app-folder-preview img{width:100%;height:auto;aspect-ratio:16/9;object-fit:contain;border-radius:2px}
+#appEditDialog[open]{display:block;overflow:auto;overscroll-behavior:contain;animation:app-dialog-in .18s ease-out}
+#appEditDialog .app-sheet-art{width:min(144px,48%);margin:4px auto 0}
+#appEditTitle:focus{outline:none}
+#appEditDialog .app-sheet-row,#appEditDialog #closeAppEdit{appearance:none;-webkit-appearance:none}
+#appEditDialog button:focus-visible{outline:2px solid #648fa6;outline-offset:-3px}
+.folder-app-scroll{container-type:inline-size}
+.folder-app-grid{overflow:auto;overscroll-behavior:contain;max-height:min(340px,50vh);max-height:min(calc(75cqw + 114px),50dvh);display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 8px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;margin:10px 0}
+#appEditDialog[data-mode=folder]{padding-top:calc(8px + env(safe-area-inset-top,0px));padding-bottom:8px}
+#appEditDialog[data-mode=folder] h2{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);margin:0}
+#appEditDialog[data-mode=folder] .app-name-form{margin-bottom:0}
+#appEditDialog[data-mode=folder] .folder-app-grid{margin:6px 0;padding:8px;max-height:min(calc(75cqw + 106px),50dvh)}
+#appEditDialog[data-mode=folder] #closeAppEdit{margin-top:6px}
+@keyframes app-dialog-in{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:none}}
+
 </style></head><body data-page="remote">
 <svg class="symbols" xmlns="http://www.w3.org/2000/svg"><defs>
+<symbol id="tabRemoteGlyph" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="12" cy="9" r="3"/><path d="M8 16h2m4 0h2"/></symbol>
+<symbol id="tabLiveGlyph" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="16" rx="4"/><path d="m10 7.5 6 3.5-6 3.5zM8 22h8"/></symbol>
+<symbol id="tabFilesGlyph" viewBox="0 0 24 24"><path d="M3 9V6a3 3 0 0 1 3-3h3l2 3h7a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3zM3 10h18"/></symbol>
+<symbol id="tabAppsGlyph" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
 <symbol id="star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z"/></symbol>
 <symbol id="layers" viewBox="0 0 24 24"><path d="m3 7 9-5 9 5-9 5ZM3 12l9 5 9-5M3 17l9 5 9-5"/></symbol>
 <symbol id="menuIcon" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h14"/></symbol>
@@ -199,9 +309,14 @@ body .tabs button{height:40px;gap:5px;line-height:16px;font-size:var(--control-t
 <div id="workspace" hidden>
 <div id="reconnect" class="glass section" hidden><p>连接中断。请确认电视在线，手机与电视在同一局域网。</p><button id="retryConnection" class="secondary">重新连接</button></div>
 <section id="panel-files" class="tab-panel" hidden><div class="glass section"><label class="drop" for="files"><svg aria-hidden="true"><use href="#uploadIcon"/></svg><strong>选择照片或文件</strong><span>图片、视频、APK</span><input class="file-input" id="files" type="file" multiple aria-label="选择要发送的文件"></label><div id="selectedFiles"></div><div class="split"><button class="primary" id="upload" disabled>发送到电视</button><button class="secondary" id="cancel" hidden>取消</button></div><progress id="progress" max="100" value="0" hidden></progress><p id="uploadState" aria-live="polite">单个文件最大 1 GB</p></div><div class="heading-row"><h2>电视已接收</h2><button class="text-button" id="refreshFiles">刷新</button></div><div id="receivedFiles" class="glass section"><div class="empty">暂无文件</div></div></section>
+<section id="panel-apps" class="tab-panel" hidden><div class="glass section">
+<div class="app-layout-toolbar"><strong id="appsHeading">电视首页</strong><div class="app-layout-actions"><button class="secondary compact" id="refreshApps">刷新</button></div></div>
+<div id="appList" class="glass"><div class="live-empty">正在读取应用列表。</div></div><section id="appHiddenSection"><h2>已隐藏</h2><div id="appHiddenList" class="glass"></div></section>
+</div></section>
+<dialog id="appEditDialog" class="input-dialog" aria-labelledby="appEditTitle"><div id="appSheetArt" class="home-app-face app-sheet-art"></div><h2 id="appEditTitle" tabindex="-1" autofocus></h2><div id="appActions"></div><button class="secondary" id="closeAppEdit">关闭</button></dialog>
 <section id="panel-remote" class="tab-panel">
 <div class="remote-input-tabs" role="group" aria-label="遥控模式">
-<button id="keysMode" aria-pressed="true">按键</button><button id="padMode" aria-pressed="false">滑动面板</button><button id="browserTools" aria-pressed="false">浏览器</button>
+<button id="keysMode" aria-pressed="true">按键控制</button><button id="padMode" aria-pressed="false">滑动控制</button><button id="browserTools" aria-pressed="false">浏览器控制</button>
 </div>
 <div id="remoteControls">
 <div id="remotePadSlot"><div id="touchPanel" hidden><div id="touchpad" class="touchpad" role="application" aria-label="滑动面板"><span id="touchPadTitle">滑动控制全局光标</span><p class="touchpad-note">单指移动 · 轻点选择 · 双指滚动</p></div><button id="pointerSetup" class="secondary compact" hidden>启用全局光标</button></div></div>
@@ -236,7 +351,7 @@ body .tabs button{height:40px;gap:5px;line-height:16px;font-size:var(--control-t
 </section>
 <section id="panel-live" class="tab-panel" hidden><div class="live-modes" role="tablist" aria-label="直播方式"><button id="liveModeOne" data-live-mode="one" role="tab" aria-selected="false">默认直播</button><button id="liveModeCustom" data-live-mode="default" role="tab" aria-selected="false">自定义直播</button></div><section id="externalLive" class="glass section" hidden><h2 id="externalPlayerName"></h2><p>可切换到上面的直播方式。</p></section><div id="internalLive"><div class="split" id="customLiveTools"><button class="secondary compact icon-label" id="sourcesButton"><svg aria-hidden="true"><use href="#layers"/></svg>切换直播源</button><button class="primary compact icon-label" id="addLive"><svg aria-hidden="true"><use href="#plus"/></svg>添加直播源</button></div><div class="live-actions"><button class="secondary compact" data-c="livePrev">上一台</button><button class="secondary compact" data-c="liveNext">下一台</button><button class="secondary compact" data-c="liveLine">换线路</button><button class="secondary compact" data-c="liveFull">频道列表</button></div><input class="search" id="channelSearch" type="search" placeholder="搜索频道" aria-label="搜索频道"><div class="channel-filters"><div id="channelTabs" class="category-tabs" role="tablist" aria-label="频道分类"></div><select id="channelGroup" aria-label="频道分类"><option>全部频道</option></select><button id="favoriteChannels" class="category-tab" role="tab" aria-selected="false">收藏</button></div><div id="channelList" class="glass section" style="margin-top:14px"><div class="live-empty">添加节目单订阅，或导入本地文件。</div></div><button class="secondary" id="moreChannels" hidden>显示更多频道</button></div></section>
 </div></main>
-<nav class="tabs" id="tabs" role="tablist" aria-label="手机控制功能" hidden><button id="tab-remote" data-tab="remote" role="tab" aria-selected="true" aria-controls="panel-remote"><svg><use href="#remote"/></svg><span>遥控</span></button><button id="tab-live" data-tab="live" role="tab" aria-selected="false" aria-controls="panel-live"><svg><use href="#live"/></svg><span>直播</span></button><button id="tab-files" data-tab="files" role="tab" aria-selected="false" aria-controls="panel-files"><svg><use href="#folder"/></svg><span>文件</span></button></nav>
+<nav class="tabs" id="tabs" role="tablist" aria-label="手机控制功能" hidden><button id="tab-remote" data-tab="remote" role="tab" aria-selected="true" aria-controls="panel-remote"><svg><use href="#tabRemoteGlyph"/></svg><span>遥控</span></button><button id="tab-live" data-tab="live" role="tab" aria-selected="false" aria-controls="panel-live"><svg><use href="#tabLiveGlyph"/></svg><span>直播</span></button><button id="tab-files" data-tab="files" role="tab" aria-selected="false" aria-controls="panel-files"><svg><use href="#tabFilesGlyph"/></svg><span>文件</span></button><button id="tab-apps" data-tab="apps" role="tab" aria-selected="false" aria-controls="panel-apps"><svg><use href="#tabAppsGlyph"/></svg><span>应用</span></button></nav>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <dialog id="deleteFileDialog"><div class="dialog-header"><h2>删除电视上的文件？</h2><button class="dialog-close" data-close="deleteFileDialog" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body"><p id="deleteFileName"></p><button class="primary" id="confirmDeleteFile">删除</button><button class="secondary" data-close="deleteFileDialog">取消</button></div></dialog>
 <dialog id="settings"><div class="dialog-header"><h2>连接设置</h2><button class="dialog-close" data-close="settings" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body"><p id="serverAddress"></p><button class="secondary" id="retry">检查连接</button><button class="secondary" id="disconnect">断开连接</button></div></dialog>
@@ -458,13 +573,15 @@ document.addEventListener('touchmove',e=>{
  if(!scroller||scroller.scrollHeight<=scroller.clientHeight||delta>0&&scroller.scrollTop<=0||delta<0&&scroller.scrollTop+scroller.clientHeight>=scroller.scrollHeight-1)e.preventDefault();
 },{passive:false});
 function syncLiveFooter(){
- const bar=document.querySelector('.live-actions'),box=bar.getBoundingClientRect();
+ const bar=document.querySelector('.live-actions');
+ document.documentElement.style.setProperty('--nav-height',$('tabs').offsetHeight+'px');
+ const box=bar.getBoundingClientRect();
  const base=parseFloat(getComputedStyle(document.querySelector('.app')).paddingBottom)||0;
  const inset=box.height>0?Math.max(0,innerHeight-box.top+8-base):0;
  document.documentElement.style.setProperty('--live-content-inset',Math.ceil(inset)+'px');
 }
-if(window.ResizeObserver)new ResizeObserver(syncLiveFooter).observe(document.querySelector('.live-actions'));else window.addEventListener('resize',syncLiveFooter);
-function switchTab(next){tab=next;document.body.dataset.page=next;document.querySelectorAll('[data-tab]').forEach(b=>{const selected=b.dataset.tab===next;b.setAttribute('aria-selected',String(selected));$('panel-'+b.dataset.tab).hidden=!selected;});window.scrollTo(0,0);if(next==='files')loadFiles();if(next==='live'){loadLive();syncLiveFooter();}if(next==='remote')check();}
+if(window.ResizeObserver){const footerObserver=new ResizeObserver(syncLiveFooter);footerObserver.observe(document.querySelector('.live-actions'));footerObserver.observe($('tabs'));}else window.addEventListener('resize',syncLiveFooter);
+function switchTab(next){tab=next;document.body.dataset.page=next;document.querySelectorAll('[data-tab]').forEach(b=>{const selected=b.dataset.tab===next;b.setAttribute('aria-selected',String(selected));$('panel-'+b.dataset.tab).hidden=!selected;});window.scrollTo(0,0);if(next==='files')loadFiles();if(next==='live'){loadLive();syncLiveFooter();}if(next==='apps')loadApps();if(next==='remote')check();}
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));document.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>queueRemoteKey(b.dataset.c));document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
 $('pairForm').onsubmit=e=>{e.preventDefault();pair($('pin').value)};
 $('retry').onclick=async()=>{await check();say(document.body.dataset.connection==='online'?'已连接':'连接中断')};
@@ -494,8 +611,8 @@ $('confirmDeleteFile').onclick=async()=>{
   }catch(error){say(error.message,true)}
   finally{button.disabled=false}
 };
-async function loadFiles(silent=false){try{const files=JSON.parse(await post('/files'));$('receivedFiles').replaceChildren(...files.map(file=>{const row=fileRow(file);if(/\.(jpe?g|png|webp|bmp|gif)$/i.test(file.name)){const background=document.createElement('button');background.className='secondary compact';background.textContent='设为背景';background.onclick=async()=>{if(await command('wallpaperSet',file.name))say('桌面背景已更新')};row.append(background)}const remove=document.createElement('button');remove.className='secondary compact file-delete';remove.textContent='删除';remove.setAttribute('aria-label','删除 '+file.name);remove.onclick=()=>{pendingDeleteFile=file.name;$('deleteFileName').textContent=file.name;openDialog('deleteFileDialog')};row.append(remove);return row}));if(!files.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='电视尚未收到文件';$('receivedFiles').append(empty);}}catch(e){if(!silent)say(e.message,true)}}
-$('refreshFiles').onclick=loadFiles;$('cancel').onclick=()=>activeUpload?.abort();
+async function loadFiles(silent=false){try{const files=JSON.parse(await post('/files'));$('receivedFiles').replaceChildren(...files.map(file=>{const row=fileRow(file);if(/\.(jpe?g|png|webp|bmp|gif)$/i.test(file.name)){const background=document.createElement('button');background.className='secondary compact set-background';background.textContent='设为背景';background.onclick=async()=>{if(await command('wallpaperSet',file.name))say('桌面背景已更新')};row.append(background)}const remove=document.createElement('button');remove.className='channel-play';remove.textContent='删除';remove.setAttribute('aria-label','删除 '+file.name);remove.onclick=()=>{pendingDeleteFile=file.name;$('deleteFileName').textContent=file.name;openDialog('deleteFileDialog')};row.append(remove);return row}));if(!files.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='电视尚未收到文件';$('receivedFiles').append(empty);}}catch(e){if(!silent)say(e.message,true)}}
+$('refreshFiles').onclick=loadFiles;$('refreshApps').onclick=()=>loadApps(true);$('cancel').onclick=()=>activeUpload?.abort();
 $('upload').onclick=async()=>{const files=Array.from($('files').files);if(!files.length)return;$('upload').disabled=true;$('files').disabled=true;$('cancel').hidden=false;$('progress').hidden=false;
 try{for(const file of files){if(file.size>1073741824)throw Error(file.name+' 超过 1 GB');$('progress').value=0;await new Promise((resolve,reject)=>{const x=new XMLHttpRequest();activeUpload=x;x.open('POST','/upload?name='+encodeURIComponent(file.name));x.setRequestHeader('X-TV-Token',token);x.timeout=3600000;x.upload.onprogress=e=>{if(e.lengthComputable){$('progress').value=e.loaded/e.total*100;$('uploadState').textContent='正在发送 '+file.name+' · '+Math.round(e.loaded/e.total*100)+'%';}};x.onload=()=>{if(x.status===200){$('uploadState').textContent=x.responseText;resolve();}else{if(x.status===401){token='';store.set('');render();}reject(Error(x.responseText||'上传失败'));}};x.onerror=()=>reject(Error('网络中断，请检查 Wi-Fi 后重试。'));x.onabort=()=>reject(Error('发送已取消，未完成文件会清理。'));x.ontimeout=()=>reject(Error('上传超时，请重试。'));x.send(file);});}say('文件已送达电视。');$('uploadState').textContent='全部文件发送完成。';$('files').value='';$('selectedFiles').replaceChildren();await loadFiles();}catch(e){$('uploadState').textContent=e.message;say(e.message,true);}finally{activeUpload=null;$('upload').disabled=!$('files').files.length;$('files').disabled=false;$('cancel').hidden=true;}};
 function categoryLabel(value){return {'全部频道':'全部','收藏频道':'收藏','央视频道':'央视','地方卫视':'卫视'}[value]||value;}
@@ -527,6 +644,206 @@ document.querySelectorAll('[data-live-mode]').forEach(button=>button.onclick=asy
  try{if(await command('livePlayer',button.dataset.liveMode,true))await loadLive(true);}
  finally{liveSwitching=false;document.querySelectorAll('[data-live-mode]').forEach(b=>{b.disabled=false;b.removeAttribute('aria-busy')});}
 });
+let appsData={apps:[],folders:{},version:''},appOrderBusy=false,appsRequest=0,dragApp=null;
+async function loadApps(force=false){
+  if(appOrderBusy||dragApp)return;
+  const request=++appsRequest;
+  try{
+    const snapshot=await post('/apps',force?'':appsData.version);
+    if(snapshot&&request===appsRequest&&!appOrderBusy&&!dragApp){appsData=JSON.parse(snapshot);renderApps();}
+  }catch(e){say(e.message,true)}
+}
+function appTiles(){
+  const seen=new Set();
+  return appsData.apps.filter(a=>!a.hidden).flatMap(a=>{
+    if(a.folder===null)return [a];
+    if(seen.has(a.folder))return [];
+    seen.add(a.folder);
+    return [{id:a.id,title:a.folder,folderTile:true}];
+  });
+}
+const appArt=new Map();
+let appArtVersion;
+function updateAppArtVersion(version){
+  if(version===appArtVersion)return;
+  appArtVersion=version;
+  for(const pending of appArt.values())pending.then(url=>{if(url)URL.revokeObjectURL(url)});
+  appArt.clear();
+}
+function addAppArtwork(face,id){
+  const img=document.createElement('img');img.alt='';img.draggable=false;
+  const version=appsData.artworkVersion||'';updateAppArtVersion(version);
+  const key=version+':'+id;
+  if(!appArt.has(key))appArt.set(key,fetch('/appArtwork',{method:'POST',headers:{'X-TV-Token':token,'Content-Type':'text/plain;charset=UTF-8'},body:id})
+    .then(r=>{if(!r.ok)throw Error();return r.blob()}).then(blob=>URL.createObjectURL(blob)).catch(()=>{appArt.delete(key);return ''}));
+  appArt.get(key).then(url=>{if(url&&version===appArtVersion)img.src=url;else img.remove()});
+  face.append(img);
+}
+function buildAppTiles(apps){
+  return apps.map(a=>{
+    const tile=document.createElement('div');tile.className='home-app';tile.dataset.id=a.id;
+    tile.setAttribute('role','button');tile.tabIndex=0;
+    tile.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();tile.click()}};
+    const face=document.createElement('span');face.className='home-app-face';
+    if(a.folderTile){
+      face.classList.add('home-app-folder');
+      const preview=document.createElement('span');preview.className='home-app-folder-preview';
+      appsData.apps.filter(item=>item.folder===a.title&&!item.hidden).slice(0,9).forEach(item=>addAppArtwork(preview,item.id));
+      face.append(preview);
+    }else addAppArtwork(face,a.id);
+    const title=document.createElement('span');title.className='home-app-label';title.textContent=a.title;
+    tile.append(face,title);
+    tile.onclick=()=>{if(a.folderTile)editFolder(a.title);else editApp(a)};
+    tile.oncontextmenu=e=>e.preventDefault();
+    {
+      tile.style.touchAction='pan-y';
+      tile.onpointerdown=e=>{
+        if(e.button!==0||appOrderBusy||dragApp)return;
+        const startX=e.clientX,startY=e.clientY;
+        let target=null,active=false;
+        const timer=setTimeout(()=>{active=true;dragApp=tile;tile.dataset.dragging='true'},330);
+        function move(ev){
+          if(ev.pointerId!==e.pointerId)return;
+          if(!active&&Math.hypot(ev.clientX-startX,ev.clientY-startY)>9){finish();return}
+          if(!active)return;
+          const next=document.elementFromPoint(ev.clientX,ev.clientY)?.closest('.home-app');
+          if(target)delete target.dataset.target;
+          target=next&&next!==tile?next:null;
+          if(target)target.dataset.target='true';
+        }
+        function stopTouchScroll(ev){
+          if(active&&ev.cancelable)ev.preventDefault();
+        }
+        function finish(ev){
+          if(ev?.pointerId!==undefined&&ev.pointerId!==e.pointerId)return;
+          clearTimeout(timer);
+          window.removeEventListener('touchmove',stopTouchScroll);
+          window.removeEventListener('pointermove',move);
+          window.removeEventListener('pointerup',finish);
+          window.removeEventListener('pointercancel',finish);
+          if(!active)return;
+          dragApp=null;delete tile.dataset.dragging;
+          if(target)delete target.dataset.target;
+          tile.addEventListener('click',event=>event.stopImmediatePropagation(),{once:true,capture:true});
+          if(target&&ev?.type==='pointerup')reorderHomeApp(a.id,target.dataset.id);
+          else setTimeout(renderApps,0);
+        }
+        if(e.pointerType==='touch')window.addEventListener('touchmove',stopTouchScroll,{passive:false});
+        window.addEventListener('pointermove',move);
+        window.addEventListener('pointerup',finish);
+        window.addEventListener('pointercancel',finish);
+      };
+    }
+    return tile;
+  });
+}
+function renderApps(){
+  const items=buildAppTiles(appTiles());
+  const list=$('appList');
+  list.replaceChildren(...items);
+  if(items.length){
+    const shelf=document.createElement('div');shelf.className='app-shelf';list.prepend(shelf);
+    shelf.style.height=(Math.max(...items.slice(0,5).map(tile=>tile.offsetTop+tile.offsetHeight))+4)+'px';
+  }
+  const hiddenList=$('appHiddenList');
+  {
+    const hidden=appsData.apps.filter(app=>app.hidden);
+    hiddenList.replaceChildren(...hidden.map(app=>{
+      const row=document.createElement('div');row.className='app-hidden-row';
+      const face=document.createElement('div');face.className='home-app-face';addAppArtwork(face,app.id);
+      const title=document.createElement('button');title.textContent=app.title;title.onclick=()=>editApp(app);
+      const show=document.createElement('button');show.textContent='恢复显示';show.onclick=()=>saveApps('appsEdit',{op:'show',id:app.id});
+      row.append(face,title,show);return row;
+    }));
+    if(!hidden.length){const empty=document.createElement('div');empty.className='app-hidden-empty';empty.textContent='没有隐藏的应用';hiddenList.append(empty)}
+  }
+  if(!items.length){const empty=document.createElement('div');empty.className='live-empty';empty.textContent='没有应用';$('appList').append(empty)}
+}
+async function saveApps(action,value,onSaved){
+  if(appOrderBusy)return;
+  appOrderBusy=true;++appsRequest;
+  let ok=false;
+  try{ok=await command(action,JSON.stringify(value),true);return ok}
+  finally{appOrderBusy=false;await loadApps(true);if(ok)onSaved?.()}
+}
+function reorderHomeApp(id,target){
+  const ids=appsData.apps.map(a=>a.id),from=ids.indexOf(id),to=ids.indexOf(target);
+  if(from<0||to<0||from===to)return;
+  ids.splice(to,0,ids.splice(from,1)[0]);
+  const name=appsData.apps.find(a=>a.id===id)?.folder;
+  saveApps('appsOrder',ids,()=>{if(name&&$('appEditDialog').open)editFolder(name)});
+}
+$('appEditDialog').addEventListener('click',event=>{if(event.target===$('appEditDialog'))$('appEditDialog').close()});
+function appNameForm(value,placeholder,maxLength,save,allowBlank){
+  const form=document.createElement('form');form.className='app-name-form';
+  const input=document.createElement('input');input.value=value;input.placeholder=placeholder;input.maxLength=maxLength;input.setAttribute('aria-label','名称');
+  const button=document.createElement('button');button.textContent='保存';button.type='submit';
+  const sync=()=>{const name=input.value.trim();button.disabled=name===value||(!allowBlank&&!name)};
+  input.oninput=sync;sync();
+  form.onsubmit=e=>{e.preventDefault();if(!button.disabled)save(input.value.trim())};
+  form.append(input,button);return form;
+}
+function editApp(app){
+  const actions=$('appActions'),dialog=$('appEditDialog'),art=$('appSheetArt');
+  actions.replaceChildren();art.replaceChildren();art.hidden=!!app.folderTile;
+  if(!app.folderTile)addAppArtwork(art,app.id);
+  dialog.dataset.mode=app.folderTile?'confirm':'app';
+  $('appEditTitle').textContent=app.title;
+  function group(){const el=document.createElement('div');el.className='app-sheet-group';actions.append(el);return el}
+  function add(parent,label,action,danger=false){
+    const b=document.createElement('button');b.className='app-sheet-row';b.textContent=label;
+    b.dataset.danger=String(danger);b.onclick=action;parent.append(b)
+  }
+  function submit(op,extra={}){dialog.close();saveApps('appsEdit',{op,id:app.id,...extra})}
+  if(app.folderTile){
+    add(group(),'确认解散文件夹',()=>submit('dissolve',{folder:app.title}),true);
+  }else{
+    const list=group();
+    if(app.folder)add(list,'移出文件夹',()=>submit('folder',{name:''}));
+    if(!app.hidden)add(list,'放进文件夹',()=>{
+      actions.replaceChildren();
+      const folders=Object.keys(appsData.folders);
+      const choices=group();
+      add(choices,'新建文件夹',()=>{
+        let name='文件夹',i=2;
+        while(folders.includes(name))name='文件夹 '+i++;
+        actions.replaceChildren();
+        const form=appNameForm('',name,20,value=>submit('newFolder',{name:value}),false);
+        const input=form.querySelector('input');input.value=name;input.oninput();
+        actions.append(form);input.focus();input.select();
+      });
+      folders.filter(name=>name!==app.folder).forEach(name=>add(choices,name,()=>submit('folder',{name})));
+    });
+    add(list,app.hidden?'恢复显示':'从主屏幕隐藏',()=>submit(app.hidden?'show':'hide'),!app.hidden);
+  }
+  const close=$('closeAppEdit');
+  close.onclick=()=>{if(app.folder&&!app.folderTile)editFolder(app.folder);else dialog.close()};
+  close.textContent=app.folder&&!app.folderTile?'返回文件夹':'关闭';
+  if(!dialog.open)dialog.showModal();
+  $('appEditTitle').focus({preventScroll:true});
+}
+function editFolder(name){
+  const dialog=$('appEditDialog'),actions=$('appActions'),art=$('appSheetArt');
+  art.hidden=true;art.replaceChildren();
+  dialog.dataset.mode='folder';
+  $('appEditTitle').textContent=name;
+  $('closeAppEdit').textContent='关闭';
+  $('closeAppEdit').onclick=()=>dialog.close();
+  const form=appNameForm(name,'文件夹名称',20,next=>saveApps('appsEdit',{op:'renameFolder',folder:name,name:next},()=>editFolder(next)),false);
+  const grid=document.createElement('div');grid.className='folder-app-grid';
+  const members=appsData.apps.filter(app=>!app.hidden&&app.folder===name);
+  grid.append(...buildAppTiles(members));
+  const dissolve=document.createElement('button');dissolve.className='app-sheet-row';
+  dissolve.dataset.danger='true';dissolve.textContent='解散文件夹';
+  dissolve.onclick=()=>editApp({title:name,folderTile:true});
+  const group=document.createElement('div');group.className='app-sheet-group';group.append(dissolve);
+  const scroll=document.createElement('div');scroll.className='folder-app-scroll';scroll.append(grid);
+  actions.replaceChildren(form,scroll,group);
+  if(!dialog.open)dialog.showModal();
+  $('appEditTitle').focus({preventScroll:true});
+}
+
+$('closeAppEdit').onclick=()=>$('appEditDialog').close();
 function renderChannels(){const query=$('channelSearch').value.trim().toLowerCase(),group=$('channelGroup').value;const pool=favoriteOnly?(liveData.favoriteChannels||liveData.channels.filter(c=>c.favorite)):liveData.channels;const filtered=pool.filter(c=>(c.name+' '+c.group).toLowerCase().includes(query)&&(favoriteOnly||group==='全部频道'||c.group===group));const items=filtered.slice(0,visibleLimit).map(c=>{const row=document.createElement('div');row.className='channel';const mark=document.createElement('span');mark.className='channel-mark';mark.textContent=c.name.slice(0,2);const info=document.createElement('div');info.className='channel-info';const title=document.createElement('strong');title.textContent=c.name;const detail=document.createElement('small');detail.textContent=categoryLabel(c.group)+(c.streams.length>1?' · '+c.streams.length+' 条线路':'');info.append(title,detail);const favorite=document.createElement('button');favorite.className='favorite';const star=document.createElementNS('http://www.w3.org/2000/svg','svg'),starUse=document.createElementNS('http://www.w3.org/2000/svg','use');starUse.setAttribute('href','#star');star.append(starUse);favorite.append(star);favorite.setAttribute('aria-label',(c.favorite?'取消收藏 ':'收藏 ')+c.name);favorite.setAttribute('aria-pressed',String(!!c.favorite));favorite.onclick=async()=>{if(await command('liveFavorite',c.id,true)){c.favorite=!c.favorite;await loadLive();}};const play=document.createElement('button');play.className='channel-play';play.textContent='播放';play.setAttribute('aria-label','播放 '+c.name);play.onclick=()=>command('livePlay',c.id);row.append(mark,info,favorite,play);return row;});$('channelList').replaceChildren(...items);if(!items.length){const empty=document.createElement('div');empty.className='live-empty';empty.textContent=favoriteOnly?'还没有收藏的频道':liveData.channels.length?'没有找到相关频道。':'添加节目单订阅，或导入本地文件。';$('channelList').append(empty);}$('moreChannels').hidden=filtered.length<=visibleLimit;}
 function restoreLastCategory(){if(!favoriteOnly)return;favoriteOnly=false;visibleLimit=80;updateFavoriteFilter();renderChannels()}
 $('channelGroup').addEventListener('focus',restoreLastCategory);$('channelGroup').addEventListener('pointerdown',restoreLastCategory);

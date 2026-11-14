@@ -37,7 +37,11 @@ object GithubUpdates {
         val v=numbers.take(if(tag.count{it=='.'}==1)2 else 3).joinToString(".")
         val list=root.optJSONArray("assets")?:return null
         val assets=(0 until list.length()).mapNotNull{list.optJSONObject(it)}
-        val apk=assets.firstOrNull{it.optString("name")=="One-$v.apk"&&it.optString("state")=="uploaded"}?:return null
+        val apk=assets.firstOrNull{asset->
+            val name=asset.optString("name")
+            name.startsWith("One-")&&name.endsWith(".apk")&&
+                version(name.removePrefix("One-").removeSuffix(".apk"))==numbers&&asset.optString("state")=="uploaded"
+        }?:return null
         val url=apk.optString("browser_download_url");if(!assetUrl(url))return null
         val size=apk.optLong("size");if(size !in 1..MAX_APK)return null
         val digest=apk.optString("digest").takeIf{it.matches(Regex("sha256:[a-fA-F0-9]{64}"))}?.substringAfter(':')?.lowercase()
@@ -99,7 +103,11 @@ object GithubUpdates {
             finally{close(c)}
         }
         private fun bytes(url:String,max:Long)=routes(url){address,_->readBytes(address,max)}
-        fun latest():Release?=routes(LATEST){address,_->parse(readBytes(address,2L*1024*1024).toString(Charsets.UTF_8))}
+        fun latest():Release?=routes(LATEST){address,canSwitch->
+            val release=parse(readBytes(address,2L*1024*1024).toString(Charsets.UTF_8))
+            if(release==null&&canSwitch)throw IOException("更新线路未返回可校验的安装包")
+            release
+        }
         fun download(context:Context,release:Release,progress:(Int)->Unit):File=synchronized(downloadLock){
             require(assetUrl(release.url)&&release.size in 1..MAX_APK&&
                 release.version.matches(Regex("""[0-9]+\.[0-9]+(?:\.[0-9]+)?"""))){"更新信息无效"}

@@ -30,6 +30,14 @@ class GithubUpdatesTest {
             val invalid=metadata();invalid.getJSONArray("assets").getJSONObject(0).put("browser_download_url",url);assertNull(GithubUpdates.parse(invalid.toString()))
         }
     }
+    @Test fun releaseTagCanIncludeTrailingZeroMissingFromApkName(){
+        val release=metadata().put("tag_name","v1.1.0")
+        release.getJSONArray("assets").getJSONObject(0).put("name","One-1.1.apk")
+            .put("browser_download_url","https://github.com/MrJelly/OneTV/releases/download/v1.1.0/One-1.1.apk")
+        val candidate=GithubUpdates.parse(release.toString())!!
+        assertEquals("One-1.1.apk",candidate.name)
+        assertFalse(GithubUpdates.newer(candidate.version,"1.1"))
+    }
     @Test fun checksumFallbackMatchesExactFileName(){
         val m=metadata();m.getJSONArray("assets").getJSONObject(0).remove("digest");assertNull(GithubUpdates.parse(m.toString()))
         m.getJSONArray("assets").put(JSONObject().put("name","SHA256SUMS.txt").put("browser_download_url","https://github.com/MrJelly/OneTV/releases/download/v/SHA256SUMS.txt"))

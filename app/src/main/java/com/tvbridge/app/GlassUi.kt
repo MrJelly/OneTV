@@ -174,6 +174,9 @@ object GlassUi {
         bottomCorners: Boolean = true
     ): Drawable = Material(view, radius, frost, video, dark, dense, border, faint, alphaBoost, bottomCorners)
 
+    fun homeGlass(view:View,radius:Float,screenLeft:Int?=null,screenTop:Int?=null):Drawable =
+        Material(view,radius,null,false,true,false,true,false,0,true,true,screenLeft,screenTop)
+
     fun selectedBorder(view: View, radius: Float = 18f): Drawable {
         val scale = NativeUi.scale(view.context)
         fun borderDrawable(stroke: Float, strokeColor: Int, fillColor: Int) = GradientDrawable().apply {
@@ -268,7 +271,10 @@ object GlassUi {
         private val border: Boolean = true,
         private val faint: Boolean = false,
         private val alphaBoost: Int = 0,
-        private val bottomCorners: Boolean = true
+        private val bottomCorners: Boolean = true,
+        private val homeGlass: Boolean = false,
+        private val screenLeft: Int? = null,
+        private val screenTop: Int? = null
     ) : Drawable() {
         private var sampled: Bitmap? = null
         private var sampledShader: BitmapShader? = null
@@ -293,9 +299,12 @@ object GlassUi {
             rect.set(bounds)
             val corner = radius * scale
             path.set(SmoothCorners.smoothRect(rect, corner, if (bottomCorners) corner else 0f))
-            val rimWidth = (if (isSelected) 1.8f else 1.2f) * scale
+            val rimWidth = (if(homeGlass) 2.4f else if (isSelected) 1.8f else 1.2f) * scale
             rimPaint.strokeWidth = rimWidth
-            rimPaint.color = Color.argb(if (isSelected) 178 else 56, 255, 255, 255)
+            rimPaint.color = if(homeGlass) Color.WHITE else Color.argb(if (isSelected) 178 else 56, 255, 255, 255)
+            if(homeGlass)rimPaint.shader=LinearGradient(rect.left,rect.top,rect.right,rect.bottom,
+                intArrayOf(0x20ffffff,0x1affffff,0x0fffffff,0x16ffffff),
+                floatArrayOf(0f,.35f,.7f,1f),Shader.TileMode.CLAMP)
             edgeRect.set(rect); edgeRect.inset(rimWidth / 2f, rimWidth / 2f)
             val edgeCorner = (corner - rimWidth / 2f).coerceAtLeast(0f)
             edgePath.set(SmoothCorners.smoothRect(edgeRect, edgeCorner, if (bottomCorners) edgeCorner else 0f))
@@ -314,6 +323,48 @@ object GlassUi {
             return false
         }
 
+        private var bakedGlass:Bitmap?=null
+        private var bakedSource:Bitmap?=null
+        private var bakedX=0
+        private var bakedY=0
+
+        private fun drawHomeGlass(canvas:Canvas,view:View){
+            val source=try{wallpaper(view.context)}catch(_:Exception){staticFrost(view.context)}
+            view.getLocationOnScreen(point)
+            val x=(screenLeft ?: (point[0]+(view.width*(view.scaleX-1f)/2f-view.translationX).toInt()))-source.left
+            val y=(screenTop ?: (point[1]+(view.height*(view.scaleY-1f)/2f-view.translationY).toInt()))-source.top
+            val w=bounds.width()
+            val h=bounds.height()
+            val cached=bakedGlass
+            if(cached==null||cached.width!=w||cached.height!=h||bakedSource!==source.bitmap||kotlin.math.abs(bakedX-x)>1||kotlin.math.abs(bakedY-y)>1){
+                val bitmap=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888)
+                val target=Canvas(bitmap)
+                target.translate(-bounds.left.toFloat(),-bounds.top.toFloat())
+                val saved=target.save()
+                target.clipPath(path)
+                val crop=RectF(rect.left-x,rect.top-y,rect.left-x+source.width,rect.top-y+source.height)
+                paint.shader=null
+                paint.alpha=255
+                paint.colorFilter=plateTintDark
+                target.drawBitmap(source.bitmap,null,crop,paint)
+                paint.colorFilter=null
+                paint.shader=LinearGradient(0f,rect.top,0f,rect.centerY(),0x1affffff,0x00ffffff,Shader.TileMode.CLAMP)
+                target.drawRect(rect,paint)
+                paint.shader=LinearGradient(rect.left,0f,rect.right,0f,
+                    intArrayOf(0x00ffffff,0x17ffffff,0x17ffffff,0x00ffffff),
+                    floatArrayOf(0f,.30f,.70f,1f),Shader.TileMode.CLAMP)
+                target.drawRect(rect,paint)
+                paint.shader=null
+                target.restoreToCount(saved)
+                target.drawPath(edgePath,rimPaint)
+                bakedGlass=bitmap
+                bakedSource=source.bitmap
+                bakedX=x
+                bakedY=y
+            }
+            bakedGlass?.let{canvas.drawBitmap(it,null,bounds,paint)}
+        }
+
         override fun draw(canvas: Canvas) {
             val view = target.get() ?: return
             val dark = forceDark ?: HomeAppearance.dark(view.context)
@@ -321,6 +372,7 @@ object GlassUi {
             geometry(scale)
             if (rect.width() <= 0 || rect.height() <= 0) return
 
+            if(homeGlass){drawHomeGlass(canvas,view);return}
             val saved = canvas.save()
             canvas.clipPath(path)
 
@@ -352,7 +404,7 @@ object GlassUi {
                 placement.postTranslate((source.left - point[0]).toFloat(), (source.top - point[1]).toFloat())
                 sampledShader!!.setLocalMatrix(placement)
                 paint.shader = sampledShader
-                paint.colorFilter = if (dark) plateTintDark else plateTintLight
+                paint.colorFilter = if(dark)plateTintDark else plateTintLight
                 paint.alpha = 255
                 canvas.drawRect(rect, paint)
                 paint.shader = null

@@ -37,7 +37,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         get(){
             nativePlayer?.let{return it}
             check(!released)
-            val created=NativePlayback.player(context)
+            val created=NativePlayback.player(context,live=true)
             nativePlayer=created;bindPlayer();playerView.player=created
             return created
         }
@@ -50,6 +50,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     private var officialFailed=false
     private fun officialPlaying()=current?.streams?.getOrNull(line)?.let(LiveCatalog::isPage)==true
     private var lastSource=""
+    private val autoRefreshTried=java.util.concurrent.atomic.AtomicBoolean(false)
     private val title=TextView(context)
     private val loading=LoadingSpinner(context).apply{visibility=View.GONE}
     private val groupButton=Button(context)
@@ -147,7 +148,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     }
     private fun configureDecoder(){
         if(softwarePlayer==attempts.softwareTracks)return
-        val next=try{NativePlayback.player(context,attempts.softwareTracks)}catch(t:Throwable){android.util.Log.w("TVBridgePlayer","configureDecoder failed: ${t.javaClass.simpleName} ${t.message}");return}
+        val next=try{NativePlayback.player(context,attempts.softwareTracks,live=true)}catch(t:Throwable){android.util.Log.w("TVBridgePlayer","configureDecoder failed: ${t.javaClass.simpleName} ${t.message}");return}
         val previous=nativePlayer;playerView.player=null
         softwarePlayer=attempts.softwareTracks;player=next
         bindPlayer();playerView.player=player
@@ -320,6 +321,20 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         fun adapter()=object:ArrayAdapter<LiveChannel>(context,android.R.layout.simple_list_item_1,shown){override fun getView(position:Int,convert:View?,parent:ViewGroup):View{val item=getItem(position)!!;val label=(convert as? TextView)?:TextView(context);label.text=item.name;label.setCompoundDrawablesRelative(null,null,null,null);if(current?.id==item.id||repo.favorite(item.id))AppIcons.bind(label,if(current?.id==item.id)"play"else "star",16f);NativeUi.textSize(label,28f);label.setTextColor(liveFocusColors());label.isSelected=parent.hasFocus()&&(parent as? AbsListView)?.selectedItemPosition==position;label.gravity=Gravity.CENTER_VERTICAL;label.setPadding(dp(8),0,dp(6),0);label.minHeight=dp(if(touchDevice)42 else 36);label.maxLines=2;label.ellipsize=android.text.TextUtils.TruncateAt.END;label.background=GlassUi.surface(label,GlassUi.CHIP_RADIUS,video=true,dark=true,faint=true);return label}}
         drawerList.adapter=adapter()
         if(current!=null)refreshTitle()
+        maybeAutoRefreshSubscription()
+    }
+    private fun maybeAutoRefreshSubscription(){
+        if(!autoRefreshTried.compareAndSet(false,true))return
+        val source=repo.sourceList().firstOrNull{it.url==repo.activeSource()}?:return
+        if(source.url=="local"||source.url==LiveRepository.DEFAULT_SOURCE)return
+        if(System.currentTimeMillis()-source.updated<12*3600_000L)return
+        val before=source.channels
+        Thread({
+            if(repo.subscribe(source.url)&&!released){
+                val after=repo.sourceList().firstOrNull{it.url==source.url}?.channels
+                if(after!=null&&after!=before)ui.post{if(!released)refresh()}
+            }
+        },"live-auto-update").start()
     }
     fun play(channel:LiveChannel,full:Boolean=false){
         if(current?.id==channel.id&&current?.streams==channel.streams){if(full)closePanels();if(if(officialPlaying())officialFailed else player.playbackState==Player.STATE_IDLE||player.playerError!=null){routes.manual();retries=0;lastFailure="";resetAttempt();startLine()};return}

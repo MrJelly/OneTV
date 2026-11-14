@@ -21,10 +21,69 @@ object Hub {
         try{LegacyTls.install(context)}catch(_:Throwable){}
         if(server!=null)return
         val app=context.applicationContext
+        val artworkCache=android.util.LruCache<String,ByteArray>(96)
+        val bundleVersion=runCatching{app.packageManager.getPackageInfo(app.packageName,0).lastUpdateTime}.getOrDefault(0L)
+        fun appArtwork(id:String):ByteArray?{
+            val res=when(id){
+                "module:live"->R.drawable.home_live_wide
+                "module:files"->R.drawable.home_files_wide
+                "module:browser"->R.drawable.home_browser_wide
+                else->null
+            }
+            if(res!=null)return app.resources.openRawResource(res).use{it.readBytes()}
+            val repository=LauncherApps(app)
+            val entry=repository.installed().firstOrNull{it.component.flattenToString()==id}?:return null
+            val key="$id:${entry.updated}:${AppArtwork.version()}"
+            artworkCache.get(key)?.let{return it}
+            return runCatching{
+                val bitmap=android.graphics.Bitmap.createBitmap(160,90,android.graphics.Bitmap.Config.ARGB_8888)
+                val canvas=android.graphics.Canvas(bitmap)
+                val banner=AppArtwork.tile(app,entry.component.packageName)?:repository.banner(entry)
+                val icon=banner?:repository.icon(entry)
+                val tint=repository.tileTint(entry)
+                val paint=android.graphics.Paint().apply{
+                    shader=android.graphics.LinearGradient(0f,0f,0f,90f,tint[0],tint[1],android.graphics.Shader.TileMode.CLAMP)
+                }
+                canvas.drawRect(0f,0f,160f,90f,paint)
+                val w=icon.intrinsicWidth.coerceAtLeast(1)
+                val h=icon.intrinsicHeight.coerceAtLeast(1)
+                val scale=if(banner!=null)maxOf(160f/w,90f/h) else 50f/maxOf(w,h)
+                val x=(160-w*scale)/2
+                val y=(90-h*scale)/2
+                icon.setBounds(x.toInt(),y.toInt(),(160-x).toInt(),(90-y).toInt())
+                icon.draw(canvas)
+                val output=java.io.ByteArrayOutputStream()
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.WEBP,87,output)
+                bitmap.recycle()
+                output.toByteArray().also{artworkCache.put(key,it)}
+            }.getOrNull()
+        }
+        fun appsSnapshot(known:String):String{
+            val repository=LauncherApps(app)
+            val ids=repository.orderedIds()
+            val byId=repository.installed().associateBy{it.component.flattenToString()}
+            val modules=AppModules.all.associateBy{it.id}
+            val hidden=repository.hiddenIds().toSet()
+            val folders=JSONObject()
+            val layout=repository.folderLayout(ids)
+            layout.forEach{(name,members)->folders.put(name,org.json.JSONArray(members))}
+            val membership=layout.entries.flatMap{(name,members)->members.map{it to name}}.toMap()
+            val arr=org.json.JSONArray()
+            ids.forEach{id->
+                val original=modules[id]?.title?:byId[id]?.label?:return@forEach
+                val folder=membership[id]
+                arr.put(JSONObject().put("id",id).put("title",repository.displayTitle(id,original))
+                    .put("original",original).put("hidden",id in hidden).put("folder",folder?:JSONObject.NULL))
+            }
+            val artVersion="$bundleVersion:${AppArtwork.version()}:${byId.mapValues{it.value.updated}.hashCode()}"
+            val version=(arr.toString()+folders.toString()+artVersion).hashCode().toString()
+            if(known==version)return ""
+            return JSONObject().put("version",version).put("apps",arr).put("folders",folders).put("artworkVersion",artVersion).toString()
+        }
         if(!::live.isInitialized)live=LiveRepository(app)
         if(!::adb.isInitialized)adb=AdbRemote(app)
         try{
-            server=LanServer(app.filesDir,app.assets.open("remote.html"),onFatal={dead->if(server===dead)server=null}){cmd,value->
+            server=LanServer(app.filesDir,app.assets.open("remote.html"),onFatal={dead->synchronized(this){if(server===dead)server=null}}){cmd,value->
                 if(cmd=="inputText"){
                     textMessage="请先选中电视输入框；控制其他应用需先连接系统遥控"
                     if(!RemoteText.valid(value))return@LanServer false
@@ -68,8 +127,38 @@ object Hub {
                     if(value!=file.name||!file.isFile||file.canonicalFile.parentFile!=folder.canonicalFile)return@LanServer false
                     try{HomeAppearance.importImage(app,file.inputStream());main.post{activity?.appearanceUpdated()};return@LanServer true}catch(_:Throwable){return@LanServer false}
                 }
-                if(cmd in setOf("liveImport","liveSubscribe","liveSource","liveRemove","liveDirect")&&(LiveLaunch.builtIn(app)||LiveLaunch.component(app)!=null))return@LanServer false
-                if(cmd=="livePlay"&&LiveLaunch.component(app)!=null)return@LanServer false
+                if(cmd=="appsEdit"){
+                    val ok=runCatching{
+                        val data=JSONObject(value)
+                        val repository=LauncherApps(app)
+                        val id=data.optString("id")
+                        val name=data.optString("name").trim()
+                        val folder=data.optString("folder")
+                        val valid=repository.appTitle(id)!=null
+                        val folders=repository.folderNames()
+                        when(data.optString("op")){
+                            "rename"->valid&&name.length<=30&&run{repository.setTitle(id,name);true}
+                            "hide","show"->valid&&run{repository.setHidden(id,data.getString("op")=="hide");true}
+                            "folder"->valid&&(name.isEmpty()||name in folders)&&run{repository.moveToFolder(id,name.ifEmpty{null});true}
+                            "newFolder"->valid&&name.length in 1..20&&name !in folders&&run{repository.moveToFolder(id,name);true}
+                            "renameFolder"->name.length in 1..20&&repository.renameFolder(folder,name)
+                            "dissolve"->folder in folders&&run{repository.dissolveFolder(folder);true}
+                            else->false
+                        }
+                    }.getOrDefault(false)
+                    if(ok)main.post{activity?.appsUpdated()}
+                    return@LanServer ok
+                }
+                if(cmd=="appsOrder"){
+                    val ok=try{
+                        val arr=org.json.JSONArray(value)
+                        val ids=(0 until arr.length()).map{arr.optString(it)}.filter{it.isNotEmpty()}
+                        if(ids.isEmpty())false else {LauncherApps(app).setOrder(ids);true}
+                    }catch(_:Exception){false}
+                    if(ok)main.post{activity?.appsUpdated()}
+                    return@LanServer ok
+                }
+                if(cmd in setOf("liveImport","liveSubscribe","liveSource","liveRemove","liveDirect")&&LiveLaunch.builtIn(app))return@LanServer false
                 if(cmd in setOf("liveImport","liveSubscribe","liveSource","liveFavorite","liveRemove","liveDirect")){
                     val ok=when(cmd){"liveImport"->live.importText(value);"liveSubscribe"->live.subscribe(value);"liveSource"->{live.selectSource(value);true};"liveFavorite"->{live.toggleFavorite(value);true};"liveRemove"->{live.removeSource(value);true};else->{val item=JSONObject(value);live.addDirect(item.optString("name"),item.optString("url"))}}
                     main.post{activity?.liveUpdated()};return@LanServer ok
@@ -112,7 +201,9 @@ object Hub {
                             if(BrowserActivity.active==null)app.startActivity(intent)
                             true
                         }
+                        cmd=="home"&&BrowserActivity.active?.returnToOneHome()==true->true
                         BrowserActivity.active?.remoteCommand(cmd,value)==true->true
+                        cmd=="home"&&a?.returnToOneHome()==true->true
                         cmd=="home"&&a?.visible==true->{a.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));true}
                         a?.visible==true&&cmd !in setOf("home","recents","power")->a.command(cmd,value)
                         else->false
@@ -131,7 +222,7 @@ object Hub {
                 false
             }.also{s->
                 s.capabilities{JSONObject().put("browser",JSONObject(BrowserActivity.active?.remotePlaybackState()?:"{}")).put("appearance",if(HomeAppearance.dark(app))"dark"else "light").put("systemRemote",adb.ready).put("adbEnabled",adb.enabled()).put("adbReady",adb.ready).put("adbMessage",adb.message).put("engineNeeded",false).put("engineInstalled",true).put("pointerReady",GlobalPointer.enabled&&adb.ready).put("overlayAllowed",GlobalPointer.permitted(app)).put("foreground",activity?.visible==true||BrowserActivity.active!=null).put("version",app.packageManager.getPackageInfo(app.packageName,0).versionName).put("bootEnabled",app.getSharedPreferences("startup",Context.MODE_PRIVATE).getBoolean("boot",false)).put("bootState",app.getSharedPreferences("startup",Context.MODE_PRIVATE).getString("boot_status","unknown")).toString()}
-                s.liveData{live.snapshot(it)};s.liveMessage{live.lastMessage};s.playbackData{PlaybackDiagnostics.snapshot()};s.textMessage{textMessage};s.start()
+                s.liveData{live.snapshot(it)};s.appsData{appsSnapshot(it)};s.appArtwork{appArtwork(it)};s.liveMessage{live.lastMessage};s.playbackData{PlaybackDiagnostics.snapshot()};s.textMessage{textMessage};s.start()
             };error=""
         }catch(e:Exception){error=e.message.orEmpty();server=null}
     }
