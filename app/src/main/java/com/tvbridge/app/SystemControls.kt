@@ -45,7 +45,7 @@ object SystemControls {
     fun openSources(activity:Activity){
         val unit=NativeUi.scale(activity);fun dp(n:Int)=(n*2*unit).toInt()
         val body=android.widget.LinearLayout(activity).apply{orientation=android.widget.LinearLayout.VERTICAL}
-        val loading=android.widget.TextView(activity).apply{text="正在读取信号源…";gravity=android.view.Gravity.CENTER;NativeUi.textSize(this,26f);setTextColor(GlassUi.ink(activity));setPadding(0,dp(16),0,dp(16))}
+        val loading=android.widget.TextView(activity).apply{text="正在读取信号源…";gravity=android.view.Gravity.CENTER;NativeUi.textSize(this,30f);setTextColor(GlassUi.ink(activity));setPadding(0,dp(16),0,dp(16))}
         body.addView(loading,android.widget.LinearLayout.LayoutParams(-1,-2))
         val list=android.widget.ListView(activity).apply{divider=null;dividerHeight=0;isVerticalScrollBarEnabled=false;visibility=android.view.View.GONE;selector=GlassUi.selectedBorder(this,18f)}
         body.addView(list,android.widget.LinearLayout.LayoutParams(-1,dp(250)))
@@ -56,7 +56,7 @@ object SystemControls {
             loading.visibility=android.view.View.GONE;list.visibility=android.view.View.VISIBLE
             list.adapter=object:android.widget.ArrayAdapter<String>(activity,android.R.layout.simple_list_item_1,inputs.map{it.label}){
                 override fun getView(position:Int,convert:android.view.View?,parent:android.view.ViewGroup):android.view.View=
-                    android.widget.TextView(activity).apply{text=getItem(position);gravity=android.view.Gravity.CENTER_VERTICAL;NativeUi.textSize(this,26f);setTextColor(GlassUi.ink(activity));setPadding(dp(12),0,dp(12),0);minHeight=dp(38)}
+                    android.widget.TextView(activity).apply{text=getItem(position);gravity=android.view.Gravity.CENTER_VERTICAL;NativeUi.textSize(this,30f);setTextColor(GlassUi.ink(activity));setPadding(dp(12),0,dp(12),0);minHeight=dp(38)}
             }
             list.setOnItemClickListener{_,_,index,_->
                 DesktopGuardService.sourceSwitchStarted()
@@ -105,17 +105,17 @@ object SystemControls {
         val unit=NativeUi.scale(activity);fun dp(n:Int)=(n*2*unit).toInt()
         val body=LinearLayout(activity).apply{orientation=LinearLayout.HORIZONTAL}
         val net=network(activity)
-        val buttonWidth=(android.graphics.Paint().apply{textSize=22*unit}.measureText("系统设置")+25*unit+dp(26)).toInt()
+        val buttonWidth=(android.graphics.Paint().apply{textSize=30*unit}.measureText("系统设置")+30*unit+dp(26)).toInt()
         fun row(title:String,icon:String,action:()->Unit){
             val b=Button(activity).apply{
                 text=title;isAllCaps=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0
-                NativeUi.textSize(this,22f);gravity=Gravity.CENTER;includeFontPadding=false
+                NativeUi.textSize(this,30f);gravity=Gravity.CENTER;includeFontPadding=false
                 setPadding(dp(10),0,dp(10),0);maxLines=1;setTextColor(GlassUi.colors(activity))
                 if(Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null}
                 background=GlassUi.surface(this,20f,faint=true)
-                val image=AppIcons.Vector(icon){currentTextColor}.apply{setBounds(0,0,(25*unit).toInt(),(25*unit).toInt())}
+                val image=AppIcons.Vector(icon){currentTextColor}.apply{setBounds(0,0,(30*unit).toInt(),(30*unit).toInt())}
                 setCompoundDrawablesRelative(image,null,null,null);compoundDrawablePadding=dp(6)
-                val inset=((buttonWidth-paint.measureText(title)-(25*unit).toInt()-compoundDrawablePadding)/2).toInt().coerceAtLeast(0)
+                val inset=((buttonWidth-paint.measureText(title)-(30*unit).toInt()-compoundDrawablePadding)/2).toInt().coerceAtLeast(0)
                 setPadding(inset,0,inset,0)
                 setOnClickListener{NativeUi.selectControl(this);action()};NativeUi.touchClicks(this)
             }

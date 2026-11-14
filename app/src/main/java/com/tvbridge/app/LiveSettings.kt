@@ -68,7 +68,7 @@ class LiveSettings(private val activity:Activity){
                     contentDescription=label+if(isSelected)"，已选择"else ""
                     isAllCaps=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;maxLines=1
                     ellipsize=android.text.TextUtils.TruncateAt.END;gravity=Gravity.START or Gravity.CENTER_VERTICAL
-                    setPadding(dp(12),0,dp(12),0);NativeUi.textSize(this,26f);setTextColor(GlassUi.colors(activity));background=GlassUi.surface(this,20f,faint=true)
+                    setPadding(dp(12),0,dp(12),0);NativeUi.textSize(this,30f);setTextColor(GlassUi.colors(activity));background=GlassUi.surface(this,20f,faint=true)
                     if(android.os.Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null}
                     if(isSelected){
                         val mark=AppIcons.Vector("check"){currentTextColor}.apply{setBounds(0,0,dp(14),dp(14))}

@@ -11,7 +11,7 @@ class ShortcutButton(context:Context):Button(context){
     var iconPixels=92f
     override fun onDraw(canvas:Canvas){
         val scale=NativeUi.scale(context);val iconSize=iconPixels*scale;val gap=16*scale
-        paint.textSize=26*scale;paint.color=currentTextColor
+        paint.textSize=30*scale;paint.color=currentTextColor
         val fm=paint.fontMetrics;val textHeight=fm.descent-fm.ascent
         val top=(height-iconSize-gap-textHeight)/2
         icon?.let{val left=(width-iconSize)/2;it.setBounds(left.toInt(),top.toInt(),(left+iconSize).toInt(),(top+iconSize).toInt());it.draw(canvas)}

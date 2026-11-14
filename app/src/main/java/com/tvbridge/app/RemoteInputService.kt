@@ -20,7 +20,7 @@ class RemoteInputService:InputMethodService(){
     override fun onEvaluateFullscreenMode()=false
     override fun onCreateInputView():View=LinearLayout(this).apply{
         gravity=Gravity.CENTER_VERTICAL;setPadding(24,12,24,12);setBackgroundColor(0xffe9ece9.toInt())
-        addView(TextView(context).apply{text="手机输入";setTextColor(0xff35445a.toInt());textSize=16f},LinearLayout.LayoutParams(0,-2,1f))
+        addView(TextView(context).apply{text="手机输入";setTextColor(0xff35445a.toInt());textSize=19f},LinearLayout.LayoutParams(0,-2,1f))
         addView(Button(context).apply{text="切换键盘";setOnClickListener{(getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()}})
     }
     private fun insert(text:String):Boolean {

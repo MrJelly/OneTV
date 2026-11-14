@@ -43,7 +43,7 @@ class UpdateController(private val activity:Activity,private val installer:ApkIn
         if(request!=null||!available())return
         val work=GithubUpdates.Request();request=work
         val row=LinearLayout(activity).apply{orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER}
-        val label=TextView(activity).apply{text="下载中 · 0%";gravity=Gravity.CENTER;NativeUi.textSize(this,26f);setTextColor(GlassUi.ink(activity))}
+        val label=TextView(activity).apply{text="下载中 · 0%";gravity=Gravity.CENTER;NativeUi.textSize(this,30f);setTextColor(GlassUi.ink(activity))}
         val bar=ProgressBar(activity,null,android.R.attr.progressBarStyleHorizontal).apply{max=100}
         row.addView(label);row.addView(bar,LinearLayout.LayoutParams(-1,(12*NativeUi.scale(activity)).toInt().coerceAtLeast(4)))
         val waiting=NativeUi.show(AlertDialog.Builder(activity).setTitle("更新 One").setView(row).setNegativeButton("取消"){_,_->work.cancel()});dialog=waiting;waiting.setOnCancelListener{work.cancel();if(request===work)request=null}

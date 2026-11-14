@@ -8,7 +8,7 @@ import android.view.*
 import android.widget.*
 import java.io.File
 
-class AppearanceController(private val activity:Activity,private val installer:ApkInstaller,private val changed:(keepDialog:Boolean)->Unit,private val connect:()->Unit){
+class AppearanceController(private val activity:Activity,private val changed:(keepDialog:Boolean)->Unit){
     companion object{const val IMAGE=61}
     private var importing=false
     private var wallpaperDialog:AlertDialog?=null
@@ -38,7 +38,7 @@ class AppearanceController(private val activity:Activity,private val installer:A
                 val preview=previews.getValue(mode);preview.removeAllViews()
                 val bitmap=draft.thumbnail(mode)
                 if(bitmap!=null)preview.addView(ImageView(activity).apply{scaleType=ImageView.ScaleType.CENTER_CROP;setImageBitmap(bitmap)},FrameLayout.LayoutParams(-1,-1))
-                else preview.addView(TextView(activity).apply{text="暂无";gravity=Gravity.CENTER;NativeUi.textSize(this,24f);setTextColor(GlassUi.muted(activity))},FrameLayout.LayoutParams(-1,-1))
+                else preview.addView(TextView(activity).apply{text="暂无";gravity=Gravity.CENTER;NativeUi.textSize(this,28f);setTextColor(GlassUi.muted(activity))},FrameLayout.LayoutParams(-1,-1))
                 tile.isEnabled=draft.available(mode);tile.isFocusable=tile.isEnabled
                 preview.invalidate()
             }
@@ -66,9 +66,9 @@ class AppearanceController(private val activity:Activity,private val installer:A
         }
         refreshTiles()
         val buttons=LinearLayout(activity).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER}
-        val wallpaperButtonWidth=listOf("确认","刷新壁纸","上传图片").maxOf{Button(activity).apply{NativeUi.textSize(this,26f)}.paint.measureText(it)+dp(16)}.toInt().coerceIn(dp(80),dp(200))
+        val wallpaperButtonWidth=listOf("确认","刷新壁纸","上传图片").maxOf{Button(activity).apply{NativeUi.textSize(this,30f)}.paint.measureText(it)+dp(16)}.toInt().coerceIn(dp(80),dp(200))
         fun makeButton(text:String,action:()->Unit){
-            val button=Button(activity).apply{setText(text);NativeUi.textSize(this,26f);setTextColor(GlassUi.colors(activity));isAllCaps=false;maxLines=1;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;if(android.os.Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null;elevation=0f};setPadding(dp(8),0,dp(8),0);background=GlassUi.surface(this,24f);setOnClickListener{if(draft.busy)message("正在处理图片，请稍候")else action()};NativeUi.touchClicks(this)}
+            val button=Button(activity).apply{setText(text);NativeUi.textSize(this,30f);setTextColor(GlassUi.colors(activity));isAllCaps=false;maxLines=1;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;if(android.os.Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null;elevation=0f};setPadding(dp(8),0,dp(8),0);background=GlassUi.surface(this,24f);setOnClickListener{if(draft.busy)message("正在处理图片，请稍候")else action()};NativeUi.touchClicks(this)}
             buttons.addView(button,LinearLayout.LayoutParams(wallpaperButtonWidth,dp(32)).apply{if(buttons.childCount>0)leftMargin=dp(10)})
         }
         makeButton("确认"){confirm()}

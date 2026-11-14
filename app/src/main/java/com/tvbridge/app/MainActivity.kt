@@ -29,7 +29,7 @@ class MainActivity:Activity() {
     private var appsEditing=false
     private var catalogReceiverRegistered=false
     private val catalogReceiver=object:BroadcastReceiver(){override fun onReceive(context:Context,intent:Intent){LauncherApps.invalidate(context);if(!intent.getBooleanExtra(Intent.EXTRA_REPLACING,false))LiveLaunch.component(context);if(::home.isInitialized){home.refreshApps();if(screen=="apps")showApps(appsEditing)}}}
-    private val appearanceUi by lazy{AppearanceController(this,apkInstaller,{keep->appearanceUpdated(keep)},{home.showConnection(Runnable{Hub.server?.refreshInvite();updateHome()})})}
+    private val appearanceUi by lazy{AppearanceController(this,{keep->appearanceUpdated(keep)})}
     private var pointerPermissionPending=false
     private var pointerConnecting=false
     private val startupPrefs by lazy{getSharedPreferences("startup",MODE_PRIVATE)}
@@ -65,10 +65,10 @@ class MainActivity:Activity() {
         if(screen=="live"||!startupPrefs.getBoolean("live",false))return
         var seconds=3
         val row=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
-        val notice=TextView(this).apply{gravity=Gravity.CENTER_VERTICAL;isSingleLine=true;NativeUi.textSize(this,26f);setTextColor(GlassUi.ink(this@MainActivity))}
+        val notice=TextView(this).apply{gravity=Gravity.CENTER_VERTICAL;isSingleLine=true;NativeUi.textSize(this,30f);setTextColor(GlassUi.ink(this@MainActivity))}
         row.addView(notice,LinearLayout.LayoutParams(0,dp(32),1f))
         var countdown:AlertDialog?=null
-        val cancel=Button(this).apply{text="取消";isAllCaps=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;setPadding(0,0,0,0);NativeUi.textSize(this,24f);setTextColor(GlassUi.colors(this@MainActivity));if(Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null;elevation=0f};background=GlassUi.surface(this);setOnClickListener{countdown?.dismiss()};NativeUi.touchClicks(this)}
+        val cancel=Button(this).apply{text="取消";isAllCaps=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;setPadding(0,0,0,0);NativeUi.textSize(this,28f);setTextColor(GlassUi.colors(this@MainActivity));if(Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null;elevation=0f};background=GlassUi.surface(this);setOnClickListener{countdown?.dismiss()};NativeUi.touchClicks(this)}
         row.addView(cancel,LinearLayout.LayoutParams(dp(58),dp(32)).apply{leftMargin=dp(12)})
         fun update(){notice.text="${seconds} 秒后进入直播"}
         update()
@@ -103,7 +103,7 @@ class MainActivity:Activity() {
     }
     private fun dp(value:Int)=(value*2*NativeUi.scale(this)).toInt()
     private fun button(parent:LinearLayout,label:String,action:()->Unit):Button {
-        val b=Button(this);if(android.os.Build.VERSION.SDK_INT>=21)b.backgroundTintList=null;if(android.os.Build.VERSION.SDK_INT>=21)b.stateListAnimator=null;if(android.os.Build.VERSION.SDK_INT>=26)b.defaultFocusHighlightEnabled=false;b.text=label;b.isAllCaps=false;NativeUi.textSize(b,26f);AppIcons.bind(b,size=25f);b.minWidth=0;b.minimumWidth=0;b.setPadding(dp(16),0,dp(16),0)
+        val b=Button(this);if(android.os.Build.VERSION.SDK_INT>=21)b.backgroundTintList=null;if(android.os.Build.VERSION.SDK_INT>=21)b.stateListAnimator=null;if(android.os.Build.VERSION.SDK_INT>=26)b.defaultFocusHighlightEnabled=false;b.text=label;b.isAllCaps=false;NativeUi.textSize(b,30f);AppIcons.bind(b,size=30f);b.minWidth=0;b.minimumWidth=0;b.setPadding(dp(16),0,dp(16),0)
         b.id=View.generateViewId();b.setTextColor(GlassUi.colors(this));b.background=GlassUi.surface(b,faint=true);b.setOnClickListener{action()};NativeUi.touchClicks(b)
         parent.addView(b,LinearLayout.LayoutParams(-2,dp(40)).apply{marginEnd=dp(8)});return b
     }
@@ -167,11 +167,11 @@ class MainActivity:Activity() {
         fun action(parent:LinearLayout,label:String,detail:String="",run:()->Unit):Button=button(parent,label,run).apply{
             setOnClickListener{NativeUi.selectControl(this);run()}
             layoutParams=LinearLayout.LayoutParams(-1,dp(46)).apply{bottomMargin=dp(6)}
-            gravity=Gravity.START or Gravity.CENTER_VERTICAL;setPadding(dp(16),0,dp(16),0);NativeUi.textSize(this,26f)
+            gravity=Gravity.START or Gravity.CENTER_VERTICAL;setPadding(dp(16),0,dp(16),0);NativeUi.textSize(this,30f)
             setCompoundDrawablesRelative(null,null,NativeUi.trailing(this,detail,ink=true),null)
         }
         fun toggle(parent:LinearLayout,label:String,checked:Boolean,change:(Boolean)->Unit){
-            val v=SettingsSwitch(this).apply{text=label;isChecked=checked;NativeUi.textSize(this,26f);setTextColor(GlassUi.colors(this@MainActivity));setPadding(dp(16),0,dp(16),0);background=GlassUi.surface(this,20f,faint=true);if(Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null};if(Build.VERSION.SDK_INT>=26)defaultFocusHighlightEnabled=false;setOnCheckedChangeListener{_,on->change(on)};NativeUi.touchClicks(this)}
+            val v=SettingsSwitch(this).apply{text=label;isChecked=checked;NativeUi.textSize(this,30f);setTextColor(GlassUi.colors(this@MainActivity));setPadding(dp(16),0,dp(16),0);background=GlassUi.surface(this,20f,faint=true);if(Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null};if(Build.VERSION.SDK_INT>=26)defaultFocusHighlightEnabled=false;setOnCheckedChangeListener{_,on->change(on)};NativeUi.touchClicks(this)}
             parent.addView(v,LinearLayout.LayoutParams(-1,dp(46)).apply{bottomMargin=dp(6)})
         }
         val desktop=action(body,"桌面应用",desktopLabel()){DesktopTakeover.settings(this,{chooseDefaultHome()},{if(screen=="settings")showAppSettings()})}
@@ -221,7 +221,7 @@ class MainActivity:Activity() {
                 val b=object:Button(this@MainActivity){
                     private val mark=AppIcons.Vector("star"){currentTextColor}
                     override fun onDraw(canvas:android.graphics.Canvas){super.onDraw(canvas);if(editing&&isSelected){val size=dp(11);mark.setBounds(width-dp(9)-size,dp(9),width-dp(9),dp(9)+size);mark.draw(canvas)}}
-                }.apply{text=entry.label;contentDescription=entry.label+(if(editing)if(selected)"，已添加到首页"else "，添加到首页"else "");isAllCaps=false;maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;NativeUi.textSize(this,26f);setPadding(dp(12),dp(12),dp(12),dp(12));if(android.os.Build.VERSION.SDK_INT>=21)backgroundTintList=null;if(android.os.Build.VERSION.SDK_INT>=21)stateListAnimator=null;if(android.os.Build.VERSION.SDK_INT>=26)defaultFocusHighlightEnabled=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;setTextColor(GlassUi.colors(this@MainActivity));background=GlassUi.surface(this,faint=true);isSelected=editing&&selected;isFocusableInTouchMode=true}
+                }.apply{text=entry.label;contentDescription=entry.label+(if(editing)if(selected)"，已添加到首页"else "，添加到首页"else "");isAllCaps=false;maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END;NativeUi.textSize(this,30f);setPadding(dp(12),dp(12),dp(12),dp(12));if(android.os.Build.VERSION.SDK_INT>=21)backgroundTintList=null;if(android.os.Build.VERSION.SDK_INT>=21)stateListAnimator=null;if(android.os.Build.VERSION.SDK_INT>=26)defaultFocusHighlightEnabled=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;setTextColor(GlassUi.colors(this@MainActivity));background=GlassUi.surface(this,faint=true);isSelected=editing&&selected;isFocusableInTouchMode=true}
                 try{val icon=repository.icon(entry);icon.setBounds(0,0,dp(34),dp(34));b.setCompoundDrawables(null,icon,null,null);b.compoundDrawablePadding=dp(8)}catch(_:Exception){}
                 b.tag=entry
                 if(!editing)b.setOnLongClickListener{showInstalledAppMenu(entry);true}
@@ -286,14 +286,14 @@ class MainActivity:Activity() {
         val qrTitleRow=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL or Gravity.CENTER_HORIZONTAL}
         val qrDot=View(this).apply{background=GradientDrawable().apply{shape=GradientDrawable.OVAL;setColor(if(home.connectionCount()>0)0xff4caf50.toInt() else Color.WHITE)}}
         qrTitleRow.addView(qrDot,LinearLayout.LayoutParams(dp(6),dp(6)))
-        qrTitleRow.addView(TextView(this).apply{text=title;NativeUi.textSize(this,26f);setTypeface(null,android.graphics.Typeface.BOLD);setTextColor(GlassUi.ink(this@MainActivity))},LinearLayout.LayoutParams(-2,-2).apply{leftMargin=dp(5)})
+        qrTitleRow.addView(TextView(this).apply{text=title;NativeUi.textSize(this,30f);setTypeface(null,android.graphics.Typeface.BOLD);setTextColor(GlassUi.ink(this@MainActivity))},LinearLayout.LayoutParams(-2,-2).apply{leftMargin=dp(5)})
         qrBox.addView(qrTitleRow,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(10)});controlQrDot=qrDot
         val qrSize=minOf(dp(160), (resources.displayMetrics.heightPixels*.36f).toInt()).coerceAtLeast(1)
         val qrImage=ImageView(this).apply{setImageBitmap(home.qrBitmap());scaleType=ImageView.ScaleType.FIT_CENTER;background=GradientDrawable().apply{setColor(Color.WHITE);cornerRadius=dp(8).toFloat()}}
         qrBox.addView(qrImage,LinearLayout.LayoutParams(qrSize,qrSize));controlQr=qrImage
-        val qrLabel=TextView(this).apply{text=home.connectionLineText();gravity=Gravity.CENTER;NativeUi.textSize(this,24f);setTextColor(GlassUi.ink(this@MainActivity));setPadding(0,dp(12),0,dp(12));maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END}
+        val qrLabel=TextView(this).apply{text=home.connectionLineText();gravity=Gravity.CENTER;NativeUi.textSize(this,28f);setTextColor(GlassUi.ink(this@MainActivity));setPadding(0,dp(12),0,dp(12));maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END}
         qrBox.addView(qrLabel);controlQrLabel=qrLabel
-        val refreshQr=Button(this).apply{tag="refresh-connection";text="刷新二维码";isAllCaps=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;if(android.os.Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null;elevation=0f};background=GlassUi.surface(this,faint=true);NativeUi.textSize(this,24f);setTextColor(GlassUi.colors(this@MainActivity));setPadding(dp(12),0,dp(12),0);setOnClickListener{cachedAddresses=emptyList();networkAddress="";if(Hub.server==null)Hub.start(this@MainActivity);Hub.server?.refreshInvite();updateHome()};NativeUi.touchClicks(this)}
+        val refreshQr=Button(this).apply{tag="refresh-connection";text="刷新二维码";isAllCaps=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;if(android.os.Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null;elevation=0f};background=GlassUi.surface(this,faint=true);NativeUi.textSize(this,28f);setTextColor(GlassUi.colors(this@MainActivity));setPadding(dp(12),0,dp(12),0);setOnClickListener{cachedAddresses=emptyList();networkAddress="";if(Hub.server==null)Hub.start(this@MainActivity);Hub.server?.refreshInvite();updateHome()};NativeUi.touchClicks(this)}
         qrBox.addView(refreshQr,LinearLayout.LayoutParams(-2,dp(32)))
         return qrBox
     }

@@ -126,7 +126,7 @@ class BrowserActivity : Activity() {
             background=null
         }
         address = EditText(this).apply {
-            setSingleLine(); hint = "输入网址"; textSize = 14f
+            setSingleLine(); hint = "输入网址"; textSize = 13f
             minWidth=0;minimumWidth=0;setHorizontallyScrolling(true)
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
             imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_GO
@@ -329,12 +329,12 @@ class BrowserActivity : Activity() {
                     setTypeface(null,android.graphics.Typeface.BOLD);setSingleLine();ellipsize=android.text.TextUtils.TruncateAt.END
                 },LinearLayout.LayoutParams(-1,-2))
                 label.addView(TextView(this).apply{
-                    text=Uri.parse(item.url).host.orEmpty().removePrefix("www.");textSize=12f;setTextColor(GlassUi.ink(this@BrowserActivity))
+                    text=Uri.parse(item.url).host.orEmpty().removePrefix("www.");textSize=13f;setTextColor(GlassUi.ink(this@BrowserActivity))
                     setSingleLine();ellipsize=android.text.TextUtils.TruncateAt.END
                 },LinearLayout.LayoutParams(-1,-2).apply{topMargin=dp(5)})
                 card.addView(label,LinearLayout.LayoutParams(0,-1,1f))
                 val remove=Button(this).apply{
-                    text="×";textSize=23f;contentDescription="删除收藏："+item.title
+                    text="×";textSize=22f;contentDescription="删除收藏："+item.title
                     isFocusable=false;isFocusableInTouchMode=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0
                     if(android.os.Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null}
                     setPadding(0,0,0,0);setTextColor(GlassUi.ink(this@BrowserActivity));background=GlassUi.surface(this,GlassUi.CIRCLE_RADIUS,faint=true)
@@ -385,7 +385,7 @@ class BrowserActivity : Activity() {
     private fun showButtonHint(anchor:View,title:String){
         buttonHint?.dismiss()
         if(!anchor.isShown||isFinishing)return
-        val label=TextView(this).apply{text=title;setTextColor(Color.WHITE);textSize=12f;setPadding(dp(10),dp(5),dp(10),dp(5));background=GlassUi.surface(this,12f,dense=true)}
+        val label=TextView(this).apply{text=title;setTextColor(Color.WHITE);textSize=13f;setPadding(dp(10),dp(5),dp(10),dp(5));background=GlassUi.surface(this,12f,dense=true)}
         buttonHint=PopupWindow(label,-2,-2,false).apply{isTouchable=false;showAsDropDown(anchor,0,dp(4))}
         label.postDelayed({buttonHint?.takeIf{it.contentView===label}?.dismiss()},1000)
     }
@@ -656,7 +656,7 @@ class BrowserActivity : Activity() {
             minimumHeight=0
             if(android.os.Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null;elevation=0f}
             if(android.os.Build.VERSION.SDK_INT>=26)defaultFocusHighlightEnabled=false
-            NativeUi.textSize(this,24f)
+            NativeUi.textSize(this,28f)
             maxLines=1
             setPadding(videoBarSize(14),0,videoBarSize(14),0)
             background=GlassUi.surface(this,24f,video=true,dark=true,faint=true)
@@ -743,7 +743,7 @@ class BrowserActivity : Activity() {
         barTime=TextView(this).apply{
             text="0:00 / --:--"
             setTextColor(Color.WHITE)
-            NativeUi.textSize(this,24f)
+            NativeUi.textSize(this,28f)
             gravity=Gravity.CENTER_VERTICAL
             isFocusable=false
             setSingleLine()

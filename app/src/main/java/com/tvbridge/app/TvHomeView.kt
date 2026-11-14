@@ -27,7 +27,7 @@ class TvHomeView(context:Context,live:Runnable,files:Runnable,settings:Runnable,
     private val controlButton=object:Button(context){
         private val icon=AppIcons.Vector("settings"){currentTextColor}
         override fun onDraw(canvas:Canvas){
-            val size=(32*NativeUi.scale(context)).toInt()
+            val size=(40*NativeUi.scale(context)).toInt()
             val left=(width-size)/2;val top=(height-size)/2
             icon.setBounds(left,top,left+size,top+size);icon.draw(canvas)
         }
@@ -46,6 +46,8 @@ class TvHomeView(context:Context,live:Runnable,files:Runnable,settings:Runnable,
     private var rememberedFocus=""
     private var activatedFocus=""
     private var lastClockMinute=-1L
+    private var labelInk:Rect?=null
+    private fun labelInkBounds():Rect{labelInk?.let{return it};val previousSize=paint.textSize;val previousTypeface=paint.typeface;paint.textSize=32f;paint.typeface=bold;val bounds=Rect();paint.getTextBounds("常用应用",0,4,bounds);paint.textSize=previousSize;paint.typeface=previousTypeface;labelInk=bounds;return bounds}
     private var connectionLabel=java.lang.ref.WeakReference<android.widget.TextView>(null)
     private var connectionImage=java.lang.ref.WeakReference<android.widget.ImageView>(null)
     private var connectionDot=java.lang.ref.WeakReference<android.view.View>(null)
@@ -61,9 +63,9 @@ class TvHomeView(context:Context,live:Runnable,files:Runnable,settings:Runnable,
             NativeUi.touchClicks(button);buttons.add(button);addView(button)
         }
         browseButton.apply{text="浏览器";contentDescription="浏览器";id=generateViewId();isAllCaps=false;isFocusableInTouchMode=true;if(android.os.Build.VERSION.SDK_INT>=21)backgroundTintList=null;if(android.os.Build.VERSION.SDK_INT>=21)stateListAnimator=null;if(android.os.Build.VERSION.SDK_INT>=26)defaultFocusHighlightEnabled=false;setTextColor(homeTextColors());setPadding(0,0,0,0);minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;setOnClickListener{activatedFocus="浏览器";rememberedFocus="浏览器";browse.run()}}
-        browseButton.setOnFocusChangeListener{v,focus->if(focus){rememberedFocus="浏览器";controlButton.nextFocusDownId=v.id}};AppIcons.bind(browseButton,"globe",28f);NativeUi.touchClicks(browseButton);addView(browseButton)
+        browseButton.setOnFocusChangeListener{v,focus->if(focus){rememberedFocus="浏览器";controlButton.nextFocusDownId=v.id}};AppIcons.bind(browseButton,"globe",34f);NativeUi.touchClicks(browseButton);addView(browseButton)
         allApps.apply{text="全部应用";contentDescription="全部应用";id=generateViewId();isAllCaps=false;isFocusableInTouchMode=true;if(android.os.Build.VERSION.SDK_INT>=21)backgroundTintList=null;if(android.os.Build.VERSION.SDK_INT>=21)stateListAnimator=null;if(android.os.Build.VERSION.SDK_INT>=26)defaultFocusHighlightEnabled=false;setTextColor(homeTextColors());setPadding(0,0,0,0);minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;setOnClickListener{activatedFocus="全部应用";rememberedFocus="全部应用";apps.run()}}
-        allApps.setOnFocusChangeListener{v,focus->if(focus){rememberedFocus="全部应用";controlButton.nextFocusDownId=v.id}};AppIcons.bind(allApps,"grid",28f);NativeUi.touchClicks(allApps);addView(allApps)
+        allApps.setOnFocusChangeListener{v,focus->if(focus){rememberedFocus="全部应用";controlButton.nextFocusDownId=v.id}};AppIcons.bind(allApps,"grid",34f);NativeUi.touchClicks(allApps);addView(allApps)
         buttons[2].visibility=View.GONE;buttons[2].isFocusable=false
         buttons[3].visibility=View.GONE;buttons[3].isFocusable=false
         controlButton.apply{text="";contentDescription="控制中心";id=generateViewId();isAllCaps=false;isFocusableInTouchMode=true;if(android.os.Build.VERSION.SDK_INT>=21)backgroundTintList=null;if(android.os.Build.VERSION.SDK_INT>=21)stateListAnimator=null;if(android.os.Build.VERSION.SDK_INT>=26)defaultFocusHighlightEnabled=false;setTextColor(homeTextColors());setPadding(0,0,0,0);minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;setOnClickListener{activatedFocus="控制中心";rememberedFocus="控制中心";settings.run()}}
@@ -120,7 +122,7 @@ class TvHomeView(context:Context,live:Runnable,files:Runnable,settings:Runnable,
         val popup=android.widget.ListPopupWindow(context);appMenu=popup;menuEntry=entry;moving=null;menuSelection=0
         popup.anchorView=anchor;popup.isModal=false;popup.width=if(anchor.width>0)anchor.width else (160*scale).toInt();popup.height=android.view.ViewGroup.LayoutParams.WRAP_CONTENT;popup.horizontalOffset=0;popup.verticalOffset=-anchor.height-(112*scale).toInt()
         popup.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-        popup.setAdapter(object:android.widget.ArrayAdapter<String>(context,android.R.layout.simple_list_item_1,listOf("移动","删除")){override fun getView(position:Int,convert:View?,parent:ViewGroup):View=android.widget.TextView(context).apply{text=getItem(position);NativeUi.textSize(this,26f);gravity=Gravity.CENTER;val s=(14*scale).toInt();val half=(7*scale).toInt();setPadding((20*scale).toInt(),if(position==0)s else half,(20*scale).toInt(),if(position==0)half else s);isSingleLine=true;isSelected=position==menuSelection;background=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT);setTypeface(null,if(isSelected)android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL);setTextColor(GlassUi.ink(context))}})
+        popup.setAdapter(object:android.widget.ArrayAdapter<String>(context,android.R.layout.simple_list_item_1,listOf("移动","删除")){override fun getView(position:Int,convert:View?,parent:ViewGroup):View=android.widget.TextView(context).apply{text=getItem(position);NativeUi.textSize(this,30f);gravity=Gravity.CENTER;val s=(14*scale).toInt();val half=(7*scale).toInt();setPadding((20*scale).toInt(),if(position==0)s else half,(20*scale).toInt(),if(position==0)half else s);isSingleLine=true;isSelected=position==menuSelection;background=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT);setTypeface(null,if(isSelected)android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL);setTextColor(GlassUi.ink(context))}})
         popup.setOnItemClickListener{_,_,position,_->if(position==0)enterMove(entry)else{launcherApps.remove(entry);popup.dismiss()}}
         popup.setOnDismissListener{appMenu=null;menuEntry=null;moving=null;refreshApps();focusEntry(entry);invalidate()}
         popup.show();popup.listView?.let{it.background=GlassUi.surface(it,20f);it.setPadding(0,0,0,0);it.divider=null;it.dividerHeight=0;it.setHeaderDividersEnabled(false);it.setFooterDividersEnabled(false);it.selector=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)};post{if(popup.isShowing)popup.setSelection(0)}
@@ -170,32 +172,32 @@ class TvHomeView(context:Context,live:Runnable,files:Runnable,settings:Runnable,
                     columnSpec=android.widget.GridLayout.spec(i%5);rowSpec=android.widget.GridLayout.spec(i/5)
                     marginEnd=if(i%5==4)0 else (32*scale).toInt();bottomMargin=if(i<5)(24*scale).toInt()else 0
                 }
-                button.iconPixels=if(button.tag==null)48f else if(twoRows)68f else 92f
+                button.iconPixels=if(button.tag==null)56f else if(twoRows)76f else 100f
             }
         }
         appRail.measure(MeasureSpec.makeMeasureSpec((1728*scale).toInt(),MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec(((if(twoRows)360 else 200)*scale).toInt(),MeasureSpec.EXACTLY))
         listOf(buttons[0],buttons[1],browseButton,allApps).forEach{b->
-            b.measure(MeasureSpec.makeMeasureSpec((320*scale).toInt(),MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec(((if(twoRows)88 else 104)*scale).toInt(),MeasureSpec.EXACTLY))
+            b.measure(MeasureSpec.makeMeasureSpec((320*scale).toInt(),MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec((100*scale).toInt(),MeasureSpec.EXACTLY))
         }
-        controlButton.measure(MeasureSpec.makeMeasureSpec((64*scale).toInt(),MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec((64*scale).toInt(),MeasureSpec.EXACTLY))
+        controlButton.measure(MeasureSpec.makeMeasureSpec((76*scale).toInt(),MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec((76*scale).toInt(),MeasureSpec.EXACTLY))
     }
     private fun updateButtonStyles(){
         listOf(buttons[0],buttons[1],browseButton,allApps).forEach{b->
-            b.setTextColor(homeTextColors());b.background=homeButtonBackground(b);NativeUi.textSize(b,26f)
-            b.gravity=Gravity.CENTER;AppIcons.bind(b,when(b){browseButton->"globe";allApps->"grid";else->if(b===buttons[0])"tv"else "folder"},29f)
-            val inset=((320*scale-29*scale-12*scale-b.paint.measureText(b.text.toString()))/2).toInt().coerceAtLeast((16*scale).toInt())
+            b.setTextColor(homeTextColors());b.background=homeButtonBackground(b);NativeUi.textSize(b,30f)
+            b.gravity=Gravity.CENTER;AppIcons.bind(b,when(b){browseButton->"globe";allApps->"grid";else->if(b===buttons[0])"tv"else "folder"},34f)
+            val inset=((320*scale-34*scale-12*scale-b.paint.measureText(b.text.toString()))/2).toInt().coerceAtLeast((16*scale).toInt())
             b.setPadding(inset,0,inset,0)
         }
         appButtons.forEach{button->button.setTextColor(homeTextColors());NativeUi.textSize(button,28f);button.background=appTileBackground(button)}
         controlButton.setTextColor(Color.WHITE);controlButton.background=GlassUi.surface(controlButton,GlassUi.CIRCLE_RADIUS,video=true,dark=true,faint=true)
     }
     override fun onLayout(changed:Boolean,l:Int,t:Int,r:Int,b:Int){
-        val y=(oy+(if(twoRows)452 else 546)*scale).toInt()
+        val y=(oy+(if(twoRows)452 else 570)*scale).toInt()
         listOf(buttons[0],buttons[1],browseButton,allApps).forEachIndexed{i,button->
             val x=(ox+(96+i*352)*scale).toInt();button.layout(x,y,x+button.measuredWidth,y+button.measuredHeight)
         }
         val connection=controlButton;val right=(ox+1824*scale).toInt();val cy=(oy+58*scale).toInt();connection.layout(right-connection.measuredWidth,cy,right,cy+connection.measuredHeight)
-        val ax=(ox+96*scale).toInt();val ay=(oy+(if(twoRows)624 else 762)*scale).toInt();appRail.layout(ax,ay,ax+appRail.measuredWidth,ay+appRail.measuredHeight)
+        val ax=(ox+96*scale).toInt();val buttonsBottom=(if(twoRows)452 else 570)+100;val ay=(oy+(buttonsBottom+60+labelInkBounds().height())*scale).toInt();appRail.layout(ax,ay,ax+appRail.measuredWidth,ay+appRail.measuredHeight)
         appButtons.forEach{button->
             button.contentDescription=button.text.toString()+(if(moving?.component==(button.tag as? LauncherApps.Entry)?.component&&moving!=null)"，移动中"else "")
             button.isSelected=moving?.component==(button.tag as? LauncherApps.Entry)?.component&&moving!=null
@@ -237,8 +239,8 @@ class TvHomeView(context:Context,live:Runnable,files:Runnable,settings:Runnable,
         paint.color=if(darkHome)0xd0f0ede0.toInt() else 0xd02a3a4a.toInt();c.drawText(time,96f,timeY,paint)
         paint.style=Paint.Style.STROKE;paint.strokeWidth=2f;paint.color=if(darkHome)0x66ffffff else 0x66404040.toInt();c.drawText(time,96f,timeY,paint)
         paint.style=Paint.Style.FILL;paint.strokeWidth=0f
-        text(c,dateFormat.format(now),100f,if(twoRows)334f else 384f,32f)
-        text(c,"常用应用",96f,if(twoRows)590f else 728f,28f,strong=true)
+        text(c,dateFormat.format(now),100f,if(twoRows)340f else 390f,36f)
+        val ink=labelInkBounds();text(c,"常用应用",96f,(if(twoRows)552f else 670f)+30f-ink.top,32f,strong=true)
         c.restore()
     }
     private fun connectionSummary()=listOf(if(connected>0)"手机已连接"else "扫码连接",address.ifEmpty{"请先联网"},if(code.isNotEmpty())"配对码  $code"else "").filter{it.isNotEmpty()}.joinToString("\n")
@@ -257,7 +259,7 @@ class TvHomeView(context:Context,live:Runnable,files:Runnable,settings:Runnable,
         val size=minOf((320*scale).toInt(),(resources.displayMetrics.heightPixels*.36f).toInt()).coerceAtLeast(1)
         val image=android.widget.ImageView(context).apply{setImageBitmap(qr);scaleType=android.widget.ImageView.ScaleType.FIT_CENTER;background=GradientDrawable().apply{setColor(Color.WHITE);cornerRadius=16*scale}}
         body.addView(image,android.widget.LinearLayout.LayoutParams(size,size))
-        val label=android.widget.TextView(context).apply{text=connectionLine();gravity=Gravity.CENTER;NativeUi.textSize(this,24f);setTextColor(GlassUi.ink(context));setPadding(0,(18*scale).toInt(),0,0);maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END}
+        val label=android.widget.TextView(context).apply{text=connectionLine();gravity=Gravity.CENTER;NativeUi.textSize(this,28f);setTextColor(GlassUi.ink(context));setPadding(0,(18*scale).toInt(),0,0);maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END}
         body.addView(label,android.widget.LinearLayout.LayoutParams(-1,-2));connectionLabel=java.lang.ref.WeakReference(label);connectionImage=java.lang.ref.WeakReference(image)
         NativeUi.show(android.app.AlertDialog.Builder(context).setView(body).setPositiveButton("刷新"){_,_->refresh.run();showConnection(refresh)}.setNegativeButton("关闭",null),widthDp=280,anchor=controlButton)
     }

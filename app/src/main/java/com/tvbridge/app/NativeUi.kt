@@ -26,7 +26,7 @@ object NativeUi {
             val root=activity.findViewById<android.widget.FrameLayout>(android.R.id.content)?:return@runOnUiThread
             val unit=scale(activity)
             val label=android.widget.TextView(activity).apply{
-                text=message;gravity=Gravity.CENTER;maxLines=3;setTextColor(GlassUi.ink(activity));NativeUi.textSize(this,26f)
+                text=message;gravity=Gravity.CENTER;maxLines=3;setTextColor(GlassUi.ink(activity));NativeUi.textSize(this,30f)
                 setPadding((24*unit).toInt(),(16*unit).toInt(),(24*unit).toInt(),(16*unit).toInt())
                 background=GlassUi.surface(this,22f,dense=true);isFocusable=false;isClickable=false
                 accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE
@@ -39,7 +39,7 @@ object NativeUi {
         }
     }
     fun trailing(view:android.widget.TextView,value:String,ink:Boolean=false):Drawable {
-        val unit=scale(view.context);val paint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply{textSize=24*unit}
+        val unit=scale(view.context);val paint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply{textSize=28*unit}
         val width=(paint.measureText(value)+56*unit).toInt();val height=(32*unit).toInt()
         return object:Drawable(){
             override fun draw(canvas:android.graphics.Canvas){
@@ -107,11 +107,11 @@ object NativeUi {
         val panel=android.widget.LinearLayout(context).apply{orientation=android.widget.LinearLayout.VERTICAL;setPadding(dp(16),dp(14),dp(16),dp(14));background=GlassUi.surface(this,28f,frost,video=video,dense=true)}
         if(compact)panel.setPadding(dp(12),dp(8),dp(12),dp(8))
         if(title!=null&&title.text.isNotBlank()){
-            detach(title);textSize(title,30f);title.setTextColor(GlassUi.ink(context));title.setTypeface(null,android.graphics.Typeface.BOLD);title.setPadding(0,0,0,0)
+            detach(title);textSize(title,34f);title.setTextColor(GlassUi.ink(context));title.setTypeface(null,android.graphics.Typeface.BOLD);title.setPadding(0,0,0,0)
             panel.addView(title,android.widget.LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(12)})
         }
         if(message!=null&&message.text.isNotBlank()){
-            detach(message);textSize(message,26f);message.setTextColor(GlassUi.ink(context));message.setLineSpacing(dp(5).toFloat(),1f);message.setPadding(0,0,0,0)
+            detach(message);textSize(message,30f);message.setTextColor(GlassUi.ink(context));message.setLineSpacing(dp(5).toFloat(),1f);message.setPadding(0,0,0,0)
             val scroll=android.widget.ScrollView(context).apply{isFillViewport=false;addView(message)}
             panel.addView(scroll,android.widget.LinearLayout.LayoutParams(-1,if(message.text.length>160)dp(150)else -2).apply{bottomMargin=dp(12)})
         }
@@ -127,7 +127,7 @@ object NativeUi {
                 override fun getItemId(position:Int)=original.getItemId(position)
                 override fun getView(position:Int,convert:View?,parent:ViewGroup):View=original.getView(position,convert,parent).also{row->
                     row.layoutParams=android.widget.AbsListView.LayoutParams(-1,dp(44))
-                    if(row is android.widget.TextView){row.setTextColor(GlassUi.colors(context));textSize(row,26f);row.gravity=android.view.Gravity.CENTER_VERTICAL;row.setPadding(dp(16),0,dp(16),0);row.minimumHeight=dp(38);row.background=null}
+                    if(row is android.widget.TextView){row.setTextColor(GlassUi.colors(context));textSize(row,30f);row.gravity=android.view.Gravity.CENTER_VERTICAL;row.setPadding(dp(16),0,dp(16),0);row.minimumHeight=dp(38);row.background=null}
                 }
             }
             checked.forEach{list.setItemChecked(it,true)}
@@ -138,7 +138,7 @@ object NativeUi {
             val maxButtonWidth=buttons.maxOf{(_,button)->(button.paint.measureText(button.text.toString())+dp(16)).toInt()}.coerceIn(dp(80),dp(200))
             var totalWidth=0
             buttons.forEach{(which,button)->
-                detach(button);button.isSoundEffectsEnabled=false;textSize(button,26f);button.isAllCaps=false;button.maxLines=1;button.ellipsize=android.text.TextUtils.TruncateAt.END;button.minWidth=0;button.minimumWidth=0;button.minHeight=0;button.minimumHeight=0;if(android.os.Build.VERSION.SDK_INT>=21)button.backgroundTintList=null;if(android.os.Build.VERSION.SDK_INT>=21)button.stateListAnimator=null;if(android.os.Build.VERSION.SDK_INT>=21)button.elevation=0f;button.setPadding(dp(8),0,dp(8),0);button.background=GlassUi.surface(button,24f,frost,video=video,faint=true);button.setTextColor(GlassUi.colors(context));button.setTypeface(null,android.graphics.Typeface.NORMAL)
+                detach(button);button.isSoundEffectsEnabled=false;textSize(button,30f);button.isAllCaps=false;button.maxLines=1;button.ellipsize=android.text.TextUtils.TruncateAt.END;button.minWidth=0;button.minimumWidth=0;button.minHeight=0;button.minimumHeight=0;if(android.os.Build.VERSION.SDK_INT>=21)button.backgroundTintList=null;if(android.os.Build.VERSION.SDK_INT>=21)button.stateListAnimator=null;if(android.os.Build.VERSION.SDK_INT>=21)button.elevation=0f;button.setPadding(dp(8),0,dp(8),0);button.background=GlassUi.surface(button,24f,frost,video=video,faint=true);button.setTextColor(GlassUi.colors(context));button.setTypeface(null,android.graphics.Typeface.NORMAL)
                 totalWidth+=maxButtonWidth
                 row.addView(button,android.widget.LinearLayout.LayoutParams(maxButtonWidth,dp(32)).apply{if(row.childCount>0)leftMargin=dp(10)})
             }
