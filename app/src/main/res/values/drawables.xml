@@ -1,0 +1,3 @@
+<resources>
+    <item name="one_adaptive" type="drawable">@drawable/one_icon</item>
+</resources>

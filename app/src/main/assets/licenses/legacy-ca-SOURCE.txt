@@ -1,0 +1,11 @@
+Mozilla public CA roots, extracted by curl's mk-ca-bundle.
+Source: https://curl.se/ca/cacert.pem
+Documentation: https://curl.se/docs/caextract.html
+Certificate data date: 2026-10-20
+Downloaded: 2026-10-29
+SHA-256 (original PEM bytes): 796f1389bfea13c0ed78f663b765baaff54a508e5483786bd6ece73c5e3e3cbe
+
+Used only on Android 4.4 / 4.4W to supplement the device's public CA roots.
+No server-supplied or user-supplied certificate is automatically trusted.
+System certificate-chain validation and HTTPS hostname verification remain enabled.
+Newer devices continue to use the system TLS implementation and trust store.

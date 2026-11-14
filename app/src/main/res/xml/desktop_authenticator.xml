@@ -1,0 +1,1 @@
+<account-authenticator xmlns:android="http://schemas.android.com/apk/res/android" android:accountType="com.tvbridge.app.desktop" android:label="@string/desktop_sync_label" android:icon="@drawable/one_adaptive" android:smallIcon="@drawable/one_adaptive" />

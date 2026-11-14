@@ -1,0 +1,8 @@
+H5E progressive runtime from NativeWasmTv
+Commit: be11b9e2f4d12878d747d2d7ee8cfd19e4373030
+Artifacts: app/src/h5eStreaming/jniLibs/<abi>/libh5estream.so
+Build sources: tools/cjs/build-h5e-streaming.py and referenced patches at the same commit.
+Base runtime: TvWasm/cjs sites/tv.cctv.com/native; MIT notice in cctv-h5e-MIT.txt.
+GPL integration notice: NativeWasmTv-GPL-3.0.txt and docs/LIVE-RUNTIME.md.
+armeabi-v7a SHA256: 2c1ce1e47f4ab519e191d95fb3d410d2732fc819892a3bf003ea7ce18c6816fb
+arm64-v8a SHA256: 81262eaf35126f40b0fdbb3877654eb6fcf814e7e660b71302fddb6293cc1241

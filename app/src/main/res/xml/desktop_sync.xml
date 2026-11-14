@@ -1,0 +1,2 @@
+
+<sync-adapter xmlns:android="http://schemas.android.com/apk/res/android" android:accountType="com.tvbridge.app.desktop" android:contentAuthority="settings" android:userVisible="false" android:supportsUploading="true" android:allowParallelSyncs="false" android:isAlwaysSyncable="true" />

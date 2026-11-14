@@ -1,0 +1,8 @@
+NextLib v0.8.2 (GPL-3.0)
+GPL-3.0 全文见同目录 NativeWasmTv-GPL-3.0.txt（两份原文件 md5 相同，只留一份）。
+Source commit: 50eedfd724336ad7c8cd78c2791080c8307f0760
+Source and native FFmpeg build configuration: https://github.com/anilbeesetti/nextlib/tree/v0.8.2
+Artifact: com.github.anilbeesetti.nextlib:nextlib-media3ext:v0.8.2
+The original AAR is used without modifications.
+Full license: NativeWasmTv-GPL-3.0.txt
+One integration source: https://github.com/MrJelly/OneTV

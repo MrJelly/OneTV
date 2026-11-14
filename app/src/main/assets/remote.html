@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><meta name="theme-color" content="#e2ebf9"><meta name="referrer" content="no-referrer"><title>One · 手机控制</title>
+<style>
+:root{color-scheme:light;--text:#292f32;--muted:#697775;--accent:#59616d;--primary:linear-gradient(135deg,#7e8794,#4c545f);--surface:#ffffff50;--strong:#ffffff80;--input:#ffffff57;--border:#ffffffa0;--shadow:inset 0 1px #ffffffb0,0 2px 12px #374b4410;--blur:blur(24px) saturate(135%);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;background:#edf1ec;color:var(--text)}
+*{box-sizing:border-box;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}body{margin:0;min-height:100vh;min-height:100dvh;background:linear-gradient(125deg,#fff1e389 0%,#e9ebefd0 53%,#e8eef1bd 100%),#efefeb;background-attachment:fixed}body:before{content:'';position:fixed;inset:0;z-index:-1;background:radial-gradient(ellipse at 80% 35%,#bcddd438,transparent 60%);pointer-events:none}button,input,textarea,select{font:inherit;color:inherit}input,textarea{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}button{cursor:pointer;border:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}button:disabled{opacity:.48;cursor:wait}button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}button:active{transform:scale(.98)}svg{display:block;width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}.symbols{display:none}[hidden]{display:none!important}
+.app{width:min(100%,480px);margin:0 auto;padding:calc(22px + env(safe-area-inset-top,0px)) 22px calc(116px + env(safe-area-inset-bottom,0px))}header{display:flex;align-items:center;gap:10px;min-height:36px;margin-bottom:36px}.brand-icon{color:var(--accent);width:30px;height:30px}.brand{font-size:20px;letter-spacing:-.6px;font-weight:650}.connection{margin-left:auto;display:flex;align-items:center;gap:6px;background:transparent;padding:8px 0 8px 12px;font-size:12px;color:var(--muted)}.dot{width:7px;height:7px;border-radius:50%;background:#9caaa4}.connection[data-state=online] .dot{background:#33a578}.connection[data-state=offline] .dot{background:#c18b58}h2{font-size:16px;font-weight:600;margin:0 0 10px}p{font-size:13px;line-height:1.75;color:var(--muted);margin:12px 0 0}label{display:block;font-size:14px;color:#4c545f;margin-bottom:9px}.glass{border:1px solid var(--border);border-radius:10px;background:linear-gradient(135deg,#ffffff30,#ffffff10),var(--surface);box-shadow:var(--shadow);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}.section{padding:18px;margin-bottom:16px}input:not([type=file]),textarea,select{display:block;width:100%;border:1px solid #c6d6d398;border-radius:6px;background:var(--input);box-shadow:inset 0 1px #ffffff80;padding:13px 12px;font-size:16px;line-height:22px;outline:none;min-width:0}input::placeholder,textarea::placeholder{color:#8b9994;font-size:14px;opacity:1}input:focus,textarea:focus{border-color:#72aaa3;box-shadow:0 0 0 3px #59616d0c}.primary,.secondary{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:12px 16px;border-radius:6px;font-size:15px;font-weight:550;width:100%;margin-top:12px}.primary{background:var(--primary);color:white;box-shadow:inset 0 1px #ffffff30,0 3px 9px #276e6b1c}.secondary{background:#ffffff60;border:1px solid #ffffff9c;color:#4c545f}.compact{margin:0;width:auto;min-height:44px;padding:10px 13px;font-size:13px}.split{display:flex;gap:10px}.split>*{flex:1}.text-button{color:var(--accent);background:transparent;padding:9px 0;font-size:14px}.small-note{font-size:12px;color:var(--muted);line-height:1.65}
+.tabs{position:fixed;z-index:20;bottom:0;left:0;right:0;transform:none;width:100%;height:calc(58px + env(safe-area-inset-bottom,0px));display:flex;align-items:stretch;padding:8px max(12px,env(safe-area-inset-right,0px)) calc(9px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));background:#f1f3f0f5;border:0;border-top:1px solid #dbe2df;border-radius:0;box-shadow:none;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}.tabs button{position:relative;flex:1;background:transparent;color:#697775;font-size:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border-radius:10px}.tabs button[aria-selected=true]{color:var(--accent);background:#ffffff35}.tabs svg{width:23px;height:23px}
+.dpad{position:relative;width:min(286px,100%);aspect-ratio:1;margin:16px auto 20px;border-radius:50%;background:linear-gradient(145deg,#ffffff70,#ffffff22);border:1px solid #ffffffd9;box-shadow:inset 0 1px #fff,0 10px 24px #4b6c5610;-webkit-user-select:none;user-select:none}.dpad:before,.dpad:after{content:'';position:absolute;left:50%;top:0;width:1px;height:100%;background:#ffffffaa;transform:rotate(45deg);pointer-events:none}.dpad:after{transform:rotate(-45deg)}.dpad button{position:absolute;background:transparent;color:#43655d;display:grid;place-items:center;width:30%;height:30%;border-radius:50%;touch-action:none;-webkit-touch-callout:none;z-index:1}.dpad button:active{background:#ffffff85}.dpad svg{width:30px;height:30px;stroke-width:2}.dpad .up{top:1%;left:35%}.dpad .down{bottom:1%;left:35%}.dpad .left{top:35%;left:1%}.dpad .right{top:35%;right:1%}.dpad .ok{width:37%;height:37%;left:31.5%;top:31.5%;font-size:20px;color:white;background:var(--primary);box-shadow:0 0 0 7px #ffffff75,inset 0 1px #ffffff7a,0 5px 16px #326f6328;border:1px solid #ffffffd0;z-index:2}.dpad .ok:active{background:#4c545f}.remote-row{display:flex;gap:10px;margin:14px 0}.remote-row button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:76px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);font-size:13px;color:#48665f}.volume{display:flex;overflow:hidden;border-radius:10px;margin:16px 0}.volume button{display:flex;align-items:center;justify-content:center;gap:10px;flex:1;background:transparent;min-height:55px;font-size:19px;color:#48665f}.volume button+button{border-left:1px solid #fff9}.remote-notice{font-size:12px;text-align:center}.remote-notice button{font-size:12px}.drop{position:relative;min-height:150px;padding:24px 15px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#42695e;border:1px dashed #92b0a3;border-radius:10px;background:#ffffff30;cursor:pointer;text-align:center}.drop svg{width:34px;height:34px;color:#6a9586}.drop span{font-size:13px;color:var(--muted)}input[type=file].file-input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.file-line{display:flex;gap:10px;align-items:center;padding:13px 0;border-bottom:1px solid #ffffff80;font-size:14px}.file-line:last-child{border-bottom:0}.file-line svg{color:#7b998d;width:20px;height:20px}.file-name{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.file-size{color:var(--muted);font-size:12px;white-space:nowrap}progress{display:block;width:100%;height:6px;accent-color:var(--accent);margin-top:16px}progress::-webkit-progress-bar{background:#dbe5df;border-radius:5px}progress::-webkit-progress-value{background:var(--accent);border-radius:5px}.empty{padding:24px 0;text-align:center;color:#7d8d85;font-size:13px}.heading-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:20px 0 10px}.heading-row h2{margin:0}
+.channel{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #ffffffb0}.channel:last-child{border:0}.channel-mark{display:grid;place-items:center;width:38px;height:38px;border:1px solid #fff9;background:#ffffff70;border-radius:6px;font-size:11px;font-weight:650;color:var(--accent);flex-shrink:0}.channel-info{flex:1;min-width:0}.channel-info strong{display:block;font-size:14px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.channel-info small{display:block;font-size:11px;color:var(--muted);margin-top:4px}.channel-play{border:1px solid #ffffffc9;background:#ffffff80;border-radius:6px;color:var(--accent);min-width:50px;min-height:44px;font-size:13px}.favorite{background:transparent;color:#7e968b;min-width:32px;min-height:44px;font-size:21px}.favorite[aria-pressed=true]{color:var(--accent)}.live-actions{position:fixed;z-index:19;left:50%;transform:translateX(-50%);bottom:calc(104px + env(safe-area-inset-bottom,0px));width:min(calc(100% - 28px),452px);display:flex;gap:8px;padding:8px;border:1px solid #ffffffc9;border-radius:10px;background:#f4f8f3ed;box-shadow:0 6px 24px #28443815;backdrop-filter:blur(24px)}#panel-live{padding-bottom:calc(var(--live-control-height,62px) - 38px)}#moreChannels{margin-bottom:18px;scroll-margin-bottom:calc(148px + env(safe-area-inset-bottom,0px))}.live-actions button{flex:1;min-width:0;padding-inline:3px;white-space:nowrap}.search{margin:16px 0 12px}.source-choices{display:flex;gap:8px;overflow:auto;padding:0 0 10px}.source-choices button{white-space:nowrap;flex-shrink:0;border:1px solid #fff9;background:#ffffff50;padding:9px 13px;border-radius:6px;font-size:12px;color:var(--muted)}.source-choices button.active{color:var(--accent);background:#d6e9df9c}.live-empty{text-align:center;padding:25px 8px;color:var(--muted);font-size:14px;line-height:1.8}
+.toast{position:fixed;z-index:50;bottom:calc(102px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);width:max-content;max-width:min(90%,430px);padding:13px 18px;border:1px solid #ffffff70;border-radius:10px;background:#243f39ee;color:white;box-shadow:0 8px 30px #213a2925;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);font-size:13px;line-height:1.6;pointer-events:none;white-space:pre-wrap}.toast[data-error=true]{background:#654b3cf0}dialog{padding:22px;border:1px solid #ffffffc9;border-radius:10px;background:#f1f6f0ed;color:var(--text);box-shadow:0 15px 65px #29443830;-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);width:min(430px,calc(100% - 28px));max-height:85vh;overflow:auto}dialog::backdrop{background:#25382e30;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}dialog h2{font-size:20px;margin-bottom:20px}dialog textarea{min-height:110px;resize:vertical}dialog label:not(:first-child){margin-top:16px}.dialog-close{position:absolute;right:14px;top:14px;background:transparent;color:var(--muted);padding:8px}.dialog-close svg{width:18px;height:18px}.manual-code{letter-spacing:8px;font-size:26px!important;text-align:center;font-variant-numeric:tabular-nums}.spinner{width:26px;height:26px;border:2px solid #adc9be;border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:24px auto}@keyframes spin{to{transform:rotate(360deg)}}
+@media(min-width:780px){.app{width:680px;padding:36px 30px 140px}.dpad{width:300px}.remote-row,.volume{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid #ffffffb0;border-radius:10px;background:#ffffff55;box-shadow:var(--shadow);margin-bottom:12px}.remote-notice{max-width:400px;margin-left:auto;margin-right:auto}header{margin-bottom:44px}.section{padding:24px}}@media(max-width:350px){.app{padding-left:16px;padding-right:16px}.section{padding:15px}.dpad{width:255px}.live-actions{gap:5px}.compact{padding:9px;font-size:12px}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.glass{background:#f7f9f4}.tabs{background:#f3f8f1}dialog{background:#f1f6f0}}@media(prefers-reduced-transparency:reduce){.glass,.tabs{background:#f7f9f4;backdrop-filter:none;-webkit-backdrop-filter:none}}
+
+:root{--text:#2d3d37;--muted:#687b70;--accent:#50685f;--primary:linear-gradient(145deg,#758c82e8,#4c655beF);--surface:#ffffff65;--strong:#ffffffa0;--input:#ffffff75;--border:#ffffffa0;--shadow:inset 0 1px #ffffffc0,0 6px 24px #36574009;--blur:blur(22px) saturate(115%);background:#deebdc}body{background:linear-gradient(145deg,#edf4e7,#dfeddc 55%,#cfe1d2);background-attachment:fixed}body:before{display:none}.app{padding-left:20px;padding-right:20px}header{margin-bottom:26px}.glass{background:linear-gradient(145deg,#ffffff88,#ffffff42);box-shadow:var(--shadow);border:1px solid var(--border)}.section{padding:22px;margin-bottom:18px}.primary{background:var(--primary);color:#fff;box-shadow:inset 0 1px #ffffff70,0 3px 14px #29463512}.secondary{background:linear-gradient(145deg,#ffffffc0,#ffffff60);color:#40574b;border-color:#ffffffa0;box-shadow:inset 0 1px #ffffffc0,0 3px 12px #36574008;backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}.section form,.section p{line-height:1.65}form>.primary{margin-top:20px}dialog{background:#edf5eaeF;padding:28px;box-shadow:0 15px 65px #29443820}dialog>button:not(.dialog-close){margin-top:18px}dialog::backdrop{background:#243b2f55}.toast{background:#344c42ef}.tabs{background:#f1f3f0f5}.tabs button[aria-selected=true]{color:#405d50;background:#ffffff90}.dpad{background:linear-gradient(145deg,#ffffff90,#ffffff38);border-color:#ffffffb0;box-shadow:inset 0 1px #ffffffd0,0 8px 30px #3a573008}.dpad button,.remote-row button,.volume button{color:#4b6558}.dpad:before,.dpad:after{background:#ffffff90}.dpad .ok{color:#fff;background:var(--primary);box-shadow:0 0 0 7px #ffffff60,inset 0 1px #ffffffa0}.drop{background:#ffffff25;color:#50685f;border-color:#9fb5a8}.drop svg,.file-line svg{color:#758c7e}.source-choices button.active{background:var(--primary);color:#fff}.source-choices button{background:#ffffff60}.favorite{color:#718b7d}.channel-play{background:#ffffff85}.remote-notice{margin-top:16px}input:not([type=file]),textarea,select{border-color:#ffffffa0;background:#ffffff70}.channel-filters{display:flex;align-items:center;gap:12px}.channel-filters select{flex:1;min-width:0;width:0}.channel-filters button{flex:0 0 84px;margin:0;min-height:48px}select:focus,select:focus-visible,input:focus,input:focus-visible,textarea:focus,textarea:focus-visible{outline:none;box-shadow:none;border-color:#ffffffa0;background:#ffffffb0}button:focus-visible{outline:none;box-shadow:inset 0 0 0 2px #50685f50}.channel-filters button:focus-visible{box-shadow:none}
+.primary,.secondary{min-height:44px;padding-top:10px;padding-bottom:10px}.channel-filters button{min-height:44px}.channel-filters select{padding-top:10px;padding-bottom:10px}
+
+dialog{padding:0;overflow:hidden;max-height:85vh;max-height:85dvh}dialog[open]{display:flex;flex-direction:column}.dialog-header{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:20px 22px 16px;background:#f0f6edb0}.dialog-header h2{margin:0;font-size:20px}.dialog-body{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:8px 22px 24px;max-height:calc(85vh - 76px);max-height:calc(85dvh - 76px)}.dialog-close,.dialog-close:focus,.dialog-close:focus-visible{position:static;display:grid;place-items:center;flex:0 0 36px;width:36px;height:36px;padding:9px;border:0;outline:none;box-shadow:none;background:transparent;appearance:none;-webkit-appearance:none}.dialog-body .section{padding:18px}.dialog-body>button{margin-top:14px}#defaultSource{margin-bottom:20px}
+
+
+:root{--text:#2b3137;--muted:#727a81;--accent:#586f7e;--primary:linear-gradient(135deg,#788c99,#526877);--surface:#ffffff90;--strong:#ffffffb0;--border:#ffffffb8;--shadow:inset 0 1px #ffffffc0,0 3px 16px #28303b08;background:#eef0ed}
+body{background:linear-gradient(130deg,#f4f5f2,#e8ece9 60%,#dfe5e2);background-attachment:fixed}.glass{background:linear-gradient(145deg,#ffffffe0,#ffffffa0)}
+.secondary,.dpad button,.remote-row button,.volume button{color:#526571}.tabs{background:#f1f3f0f5}.tabs button[aria-selected=true]{color:#455f72}.drop{color:#526571;border-color:#a5b2bb}.drop svg,.file-line svg,.favorite{color:#758b99}.dpad{box-shadow:inset 0 1px #fff,0 8px 30px #27344308}
+dialog{background:#f4f5f2f5}dialog::backdrop{background:#242a3260}.dialog-header{background:#f4f5f2d0}.toast{background:#343e47ef}
+.channel-filters{gap:8px;padding:4px;background:#ffffffa0;border-radius:10px}.channel-filters #favoriteChannels{flex:0 0 64px;border:0;box-shadow:none}.category-tabs{display:flex;flex:1;min-width:0;gap:3px}.category-tabs .category-tab{flex:1;min-width:0;min-height:44px;padding:8px 3px;background:transparent;color:#52606c;border-radius:6px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.category-tab[aria-selected=true]{background:var(--primary);color:#fff}.channel-filters select{border:0;background:transparent;box-shadow:none;min-height:44px}.channel-filters .category-tab:focus-visible{outline:0;box-shadow:none}#channelList{background:#ffffffc5;padding-top:6px;padding-bottom:6px}.channel{border-bottom-color:#e2e7e7}.channel-mark{background:#e7ecef;color:#5d7180}.channel-play{background:#e9eef1;color:#526c7e}
+.icon-label{display:inline-flex;align-items:center;justify-content:center;gap:8px}.favorite{display:flex;align-items:center;justify-content:center}.favorite[aria-pressed="true"] svg{fill:currentColor;fill-opacity:.16}.favorite svg{width:22px;height:22px}.remote-input-tabs{display:flex;gap:6px;padding:5px;border-radius:10px;background:#ffffff90;margin:18px 0}.remote-input-tabs button{flex:1;border-radius:6px;background:transparent;padding:11px;color:var(--muted)}.remote-input-tabs button[aria-pressed=true]{background:var(--primary);color:#fff}.touchpad{width:100%;height:286px;margin:16px auto 20px;position:relative;display:grid;place-items:center;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;border-radius:10px;background:radial-gradient(circle,#758b9926 1px,transparent 1px) 0 0/18px 18px,linear-gradient(145deg,#ffffffd0,#ffffff60);border:1px solid #fff;box-shadow:var(--shadow)}.touchpad.active{background-color:#d3dfe6}.touchpad span{font-size:14px;color:#77858e;pointer-events:none}.touchpad-note{position:absolute;bottom:18px;left:6px;right:6px;text-align:center;font-size:11px;margin:0;color:var(--muted);pointer-events:none}#playlistText{height:170px;min-height:170px;max-height:260px;overflow:auto;resize:vertical;touch-action:pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+@media(min-width:780px){.touchpad{height:300px}}@media(max-width:350px){.touchpad{height:255px}}
+.remote-text .split{align-items:center}.remote-text input{min-width:0;margin:0}.remote-text button{flex:0 0 68px;min-height:46px}
+
+.remote-text-dialog{width:min(420px,calc(100% - 32px));padding:0;border-radius:10px}.remote-text-dialog .dialog-header{padding:18px 20px 12px}.remote-text-dialog .dialog-body{padding:0 20px 20px}.remote-text-dialog label{font-size:13px;color:var(--muted)}
+#favoriteChannels{background:transparent;color:#52606c;border-radius:6px;padding:8px 3px}#favoriteChannels[aria-selected=true]{background:var(--primary);color:#fff}
+.tabs{bottom:0;width:100%;border:0;border-top:1px solid #dbe2df;border-radius:0;box-shadow:none}.app{padding-bottom:calc(106px + env(safe-area-inset-bottom,0px))}.live-actions{bottom:calc(66px + env(safe-area-inset-bottom,0px))}
+
+
+.file-line:has(button){flex-wrap:wrap;gap:8px}.file-line button{margin-left:auto}
+
+
+body[data-page="remote"] .app{padding-bottom:calc(82px + env(safe-area-inset-bottom,0px))}
+#panel-remote .volume{margin-bottom:0}
+button.is-loading{opacity:1;cursor:wait}
+.is-loading:before{content:'';display:inline-block;width:15px;height:15px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .75s linear infinite;flex:0 0 15px}
+.drop.is-loading{pointer-events:none}
+.live-modes{display:flex;gap:8px;margin:0 0 18px;padding:5px;border:1px solid var(--border);border-radius:10px;background:var(--surface)}.live-modes button{flex:1;min-height:44px;border-radius:6px;background:transparent;font-size:14px;color:var(--muted)}.live-modes button[aria-selected=true]{background:var(--primary);color:white}.live-modes button[aria-busy=true]{opacity:.65}#externalLive{margin-top:16px}#externalLive h2{overflow-wrap:anywhere}#panel-live .live-modes{margin-bottom:8px}#panel-live #customLiveTools{gap:8px;margin-bottom:8px}#customLiveTools button{min-height:36px;padding:8px 12px;margin:0;font-size:13px;font-weight:500;background:var(--surface);border:1px solid var(--border);color:var(--text);box-shadow:none}#customLiveTools svg{width:17px;height:17px}#panel-live .search{margin:0 0 8px}#panel-live .channel-filters{margin:0 0 8px}#panel-live #channelList{margin:0 0 8px!important}#panel-live #moreChannels{margin:0 0 8px}#panel-live #externalLive{margin:0 0 8px}#panel-live{padding-bottom:var(--live-content-inset,0px)}.live-actions{bottom:calc(66px + env(safe-area-inset-bottom,0px))}#panel-live #moreChannels{margin:0}.volume [data-c=volumeMute]{font-size:13px;gap:6px}.volume [data-c=volumeMute] svg{width:21px;height:21px}
+
+:root{
+  --text:#18283e;--muted:#475b72;--accent:#315a85;
+  --primary:#a8c9daaa;--selection-ink:#23445a;--surface:#ffffff70;--strong:#ffffffb5;
+  --input:#ffffff85;--border:#ffffffae;--shadow:0 8px 28px #203c6a12;
+  --blur:blur(22px) saturate(135%);background:#e2ebf9
+}
+body{
+  background:radial-gradient(ellipse at 8% 28%,#b9e5e8,transparent 58%),
+    radial-gradient(ellipse at 94% 68%,#d4c7f0,transparent 60%),
+    linear-gradient(145deg,#f3f7ff,#d9e7f9 55%,#ebeffa);
+  background-attachment:fixed
+}
+body:before{content:none}
+.glass,.dpad,.tabs,dialog,.live-actions,.remote-row,.volume,.remote-input-tabs,
+.channel-filters,.live-modes,#channelList,#customLiveTools button,.dialog-header{
+  background:var(--surface);border-color:var(--border);box-shadow:none
+}
+.glass,.tabs,dialog,.live-actions{
+  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)
+}
+.tabs{background:#e7effbc9;border-top:1px solid var(--border)}
+#panel-remote .remote-row{background:transparent}
+dialog{background:#e8effbe6;border:1px solid var(--border);box-shadow:var(--shadow)}
+dialog::backdrop{background:#162b4866}
+.dialog-header{background:transparent}
+.secondary,.dpad button,.remote-row button,.volume button,.drop,
+.drop svg,.file-line svg,.favorite,.channel-mark,.channel-play,.tabs button{
+  color:var(--accent)
+}
+.secondary,.channel-mark,.channel-play,.touchpad,.source-choices button,
+input:not([type=file]),textarea,select{background:var(--input);border-color:var(--border);box-shadow:none}
+.dpad .ok,.primary,.tabs button[aria-selected=true],
+.live-modes button[aria-selected=true],.source-choices button.active,
+.category-tabs .category-tab[aria-selected=true],#favoriteChannels[aria-selected=true],
+.remote-input-tabs button[aria-pressed=true]{
+  color:var(--selection-ink);background:var(--primary);box-shadow:0 0 0 1px #648fa65c
+}
+.dpad:before,.dpad:after,.channel{border-color:#ffffff96}
+.channel-mark{background:#d7e6f5a0}
+.toast{background:#e4f1f6ed;color:var(--selection-ink)}
+button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px
+}
+
+
+.app{padding:calc(12px + env(safe-area-inset-top,0px)) 14px calc(90px + env(safe-area-inset-bottom,0px))}
+.section{padding:14px;margin-bottom:8px}
+.remote-input-tabs{margin:0 0 8px}
+dialog{width:min(440px,calc(100% - 28px));border-radius:10px;color:var(--text);background:#e8effbf2}
+.dialog-header{padding:14px 14px 8px;gap:10px}
+.dialog-header h2{font-size:17px;font-weight:650}
+.dialog-body{padding:0 14px 14px}
+.dialog-body p,.dialog-body label{color:var(--muted)}
+.dialog-body p{margin-top:4px}
+.dialog-body .section{padding:12px}
+dialog.input-dialog{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));bottom:auto;left:0;right:0;margin:0 auto}
+.browser-search-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.browser-search-row select{padding:8px 10px}
+.toast,.toast[data-error=true]{inset:calc(10px + env(safe-area-inset-top,0px)) auto auto 50%;margin:0;background:#e4f1f6f5;color:var(--selection-ink);border-color:var(--border);box-shadow:var(--shadow)}
+.toast[data-error=true]{color:#753d39}
+dialog>.toast{position:absolute;top:4px}
+
+.remote-action-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}
+.remote-action-grid button{width:100%;min-width:0;min-height:58px;flex-direction:column;gap:4px;padding:6px 2px}
+.remote-action-grid svg{width:20px;height:20px}
+#remoteControls .dpad{margin:8px auto 12px}
+#browserControls .browser-search-row{grid-template-columns:minmax(62px,76px) minmax(0,1fr) var(--control-height);margin:0 0 8px;gap:6px;align-items:stretch}
+#browserControls .browser-search-row button{width:var(--control-height);height:var(--control-height);padding:0;margin:0}
+#browserControls .browser-search-row input,#browserControls .browser-search-row select{padding:4px 9px;height:var(--control-height)}
+#browserPadSlot .touchpad{height:clamp(190px,35vh,286px);margin:0}
+#remoteTextDialog{width:min(360px,calc(100% - 28px))}
+#remoteTextDialog .dialog-header{padding-bottom:4px}
+#remoteTextDialog .remote-text .split{gap:6px}
+#remoteTextDialog #remoteText{min-height:40px;padding:8px 10px;border:0;outline:0;box-shadow:none;background:#ffffff95;line-height:20px}
+#remoteTextDialog #sendRemoteText{min-height:40px;flex-basis:54px;padding:0;margin:0}
+#deleteFileName{overflow-wrap:anywhere}
+
+input:not([type=file]):focus,textarea:focus,select:focus{
+  border-color:transparent;outline:none;box-shadow:none
+}
+:root{--pad-height:min(286px,calc(100vw - 28px))}
+#remoteControls .dpad{width:var(--pad-height);height:var(--pad-height);margin:8px auto 12px}
+#remotePadSlot #touchPanel{margin:8px 0 12px}
+#remotePadSlot .touchpad,#browserPadSlot .touchpad{height:var(--pad-height);margin:0}
+#browserPadSlot{margin-top:8px}
+#remotePadSlot #touchPanel{position:relative}
+#pointerSetup{position:absolute;left:50%;top:58%;transform:translateX(-50%);white-space:nowrap}
+.file-line .file-delete{min-height:32px;padding:3px 8px;color:#854e51;background:#f2dadd72;border-color:transparent;box-shadow:none}
+.favorite[aria-pressed=true]{color:#995b12}
+.favorite[aria-pressed=true] svg{fill:currentColor;fill-opacity:1}
+
+:root{--control-height:36px;--control-text:14px}
+.tabs{border-radius:6px 6px 0 0}.tabs button{border-radius:6px}
+.primary,.secondary,.remote-input-tabs button,.remote-action-grid button,.live-modes button,.category-tabs .category-tab,.channel-play{min-height:var(--control-height);font-size:var(--control-text);padding-block:6px}
+input::placeholder{font-size:var(--control-text)}
+input:not([type=file]):not([type=range]),textarea{font-size:16px}
+select,input:not([type=file]):not([type=range]){min-height:var(--control-height);padding-block:6px}
+#customLiveTools button,#remoteTextDialog #sendRemoteText,.file-line .file-delete{min-height:var(--control-height);font-size:var(--control-text)}
+.browser-nav{margin-top:8px;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
+#browserControls .browser-search-row{gap:8px}
+select,.channel-filters select{height:var(--control-height);min-height:var(--control-height);padding-block:0;font-size:var(--control-text);line-height:16px}
+#channelSearch{height:var(--control-height);padding-block:0}
+.browser-nav .secondary,#browserPlayer .secondary{box-shadow:none}
+#browserPlayer{margin-top:10px;padding:12px}
+.browser-player-heading{display:flex;align-items:center;gap:8px}
+.browser-player-heading strong{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+#browserMediaState{color:var(--muted);font-size:12px;white-space:nowrap}
+#browserPlayer #browserProgress{border:0;background:transparent;box-shadow:none;outline:0;height:18px;padding:0;margin:8px 0 0;accent-color:var(--accent)}
+#browserTime{text-align:right;line-height:18px;min-height:18px;font-variant-numeric:tabular-nums}
+#browserPlay{position:fixed;right:calc(20px + env(safe-area-inset-right,0px));bottom:calc(88px + env(safe-area-inset-bottom,0px));width:var(--control-height);height:var(--control-height);padding:0;z-index:18}
+#browserPlay:not([hidden]){display:grid;place-items:center}
+#browserPlay svg{display:block;width:24px;height:24px}
+#browserSpeedChoice{background:var(--surface);display:block;margin:0;height:var(--control-height);min-height:var(--control-height);padding:0 8px}
+#browserEngine,#browserSpeedChoice{color:#526571;-webkit-text-fill-color:currentColor}
+#browserSpeedChoice:focus{border-color:transparent;outline:0;box-shadow:none}
+#browserPlayer [aria-pressed=true]{background:var(--primary);color:var(--selection-ink)}
+#browserPlayer .remote-action-grid:last-of-type{grid-template-columns:repeat(3,minmax(0,1fr))}
+body button:not(.dpad button),
+#customLiveTools button,#remoteTextDialog #sendRemoteText{
+  height:var(--control-height);min-height:var(--control-height);padding-block:0;font-size:var(--control-text);line-height:16px;white-space:nowrap
+}
+#remoteControls .remote-action-grid button{height:54px;flex-direction:column;gap:4px;padding:7px 1px}
+#remoteControls .remote-action-grid svg{width:18px;height:18px;flex-shrink:0;stroke-width:2.4}
+
+.dpad .ok{font-size:18px;line-height:22px}
+body .tabs button{height:40px;gap:5px;line-height:16px;font-size:var(--control-text);font-weight:400;transform:none}.tabs svg{width:20px;height:20px;flex-shrink:0;stroke-width:1.8;transform:none}
+.dialog-close{width:var(--control-height);display:grid;place-items:center}
+.tabs button[aria-selected=true]{background:transparent;box-shadow:none;color:#315f95}
+.tabs button[aria-selected=true]::after{content:'';position:absolute;bottom:-5px;left:50%;transform:translateX(-50%);width:28px;height:2px;border-radius:1px;background:currentColor}
+
+.browser-query{position:relative;min-width:0}
+#browserControls .browser-query input{padding-right:36px}
+#browserControls #browserClear{position:absolute;right:0;top:0;background:transparent;color:var(--muted);display:grid;place-items:center}
+#browserClear svg{width:17px;height:17px}
+</style></head><body data-page="remote">
+<svg class="symbols" xmlns="http://www.w3.org/2000/svg"><defs>
+<symbol id="star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z"/></symbol>
+<symbol id="layers" viewBox="0 0 24 24"><path d="m3 7 9-5 9 5-9 5ZM3 12l9 5 9-5M3 17l9 5 9-5"/></symbol>
+<symbol id="menuIcon" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h14"/></symbol>
+<symbol id="keyboard" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 9h1m3 0h1m3 0h1M7 12h1m3 0h1m3 0h1M8 16h8"/></symbol>
+<symbol id="muteIcon" viewBox="0 0 24 24"><path d="M11 4 5 9H2v6h3l6 5ZM15 9l6 6m0-6-6 6"/></symbol>
+<symbol id="reloadIcon" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2 6m2-12v6h-6"/></symbol>
+<symbol id="playIcon" viewBox="0 0 24 24"><path d="m8 5 12 7-12 7z"/></symbol>
+<symbol id="searchIcon" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m14.5 14.5 5 5"/></symbol>
+<symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+<symbol id="tv" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="13" rx="3"/><path d="M8 22h8m-4-4v4m-2-13 5 2.5-5 2.5Z"/></symbol>
+<symbol id="folder" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm0 1h18"/></symbol>
+<symbol id="remote" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="3"/><circle cx="12" cy="9" r="2.4"/><path d="M9 16h1m4 0h1M9 19h1m4 0h1"/></symbol>
+<symbol id="live" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3ZM8 22h8"/></symbol>
+<symbol id="up" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></symbol><symbol id="down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol><symbol id="left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol><symbol id="right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+<symbol id="back" viewBox="0 0 24 24"><path d="m14 5-7 7 7 7"/></symbol><symbol id="home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8M5 10v10h14V10"/></symbol><symbol id="powerIcon" viewBox="0 0 24 24"><path d="M12 2v10M6 5a9 9 0 1 0 12 0"/></symbol><symbol id="sound" viewBox="0 0 24 24"><path d="M11 4 5 9H2v6h3l6 5ZM15 8q6 4 0 8m3-11q9 7 0 14"/></symbol>
+<symbol id="uploadIcon" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M3 16v4a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-4"/></symbol><symbol id="file" viewBox="0 0 24 24"><path d="M14 2H5v20h14V7ZM14 2v5h5"/></symbol><symbol id="close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+</defs></svg>
+<main class="app">
+<section id="pairing"><div class="glass section"><div id="connecting" hidden><div class="spinner"></div><p style="text-align:center">正在连接电视…</p></div><form id="pairForm"><label for="pin">输入电视上的 6 位配对码</label><input id="pin" class="manual-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" required><button class="primary">连接电视</button></form><p>扫码可自动连接</p></div><p>手机与电视需连接同一 Wi-Fi</p></section>
+<div id="workspace" hidden>
+<div id="reconnect" class="glass section" hidden><p>连接中断。请确认电视在线，手机与电视在同一局域网。</p><button id="retryConnection" class="secondary">重新连接</button></div>
+<section id="panel-files" class="tab-panel" hidden><div class="glass section"><label class="drop" for="files"><svg aria-hidden="true"><use href="#uploadIcon"/></svg><strong>选择照片或文件</strong><span>图片、视频、APK</span><input class="file-input" id="files" type="file" multiple aria-label="选择要发送的文件"></label><div id="selectedFiles"></div><div class="split"><button class="primary" id="upload" disabled>发送到电视</button><button class="secondary" id="cancel" hidden>取消</button></div><progress id="progress" max="100" value="0" hidden></progress><p id="uploadState" aria-live="polite">单个文件最大 1 GB</p></div><div class="heading-row"><h2>电视已接收</h2><button class="text-button" id="refreshFiles">刷新</button></div><div id="receivedFiles" class="glass section"><div class="empty">暂无文件</div></div></section>
+<section id="panel-remote" class="tab-panel">
+<div class="remote-input-tabs" role="group" aria-label="遥控模式">
+<button id="keysMode" aria-pressed="true">按键</button><button id="padMode" aria-pressed="false">滑动面板</button><button id="browserTools" aria-pressed="false">浏览器</button>
+</div>
+<div id="remoteControls">
+<div id="remotePadSlot"><div id="touchPanel" hidden><div id="touchpad" class="touchpad" role="application" aria-label="滑动面板"><span id="touchPadTitle">滑动控制全局光标</span><p class="touchpad-note">单指移动 · 轻点选择 · 双指滚动</p></div><button id="pointerSetup" class="secondary compact" hidden>启用全局光标</button></div></div>
+<div id="keyPanel" class="dpad" aria-label="方向遥控器"><button class="up" data-c="up" aria-label="上"><svg><use href="#up"/></svg></button><button class="left" data-c="left" aria-label="左"><svg><use href="#left"/></svg></button><button class="ok" data-c="ok">确认</button><button class="right" data-c="right" aria-label="右"><svg><use href="#right"/></svg></button><button class="down" data-c="down" aria-label="下"><svg><use href="#down"/></svg></button></div>
+<div class="remote-action-grid"><button class="secondary compact" data-c="volumeUp"><svg aria-hidden="true"><use href="#sound"/></svg><span>音量＋</span></button><button class="secondary compact" data-c="back"><svg aria-hidden="true"><use href="#back"/></svg><span>返回</span></button><button class="secondary compact" data-c="home"><svg aria-hidden="true"><use href="#home"/></svg><span>主页</span></button><button class="secondary compact" data-c="menu"><svg aria-hidden="true"><use href="#menuIcon"/></svg><span>菜单</span></button><button class="secondary compact" data-c="volumeDown"><svg aria-hidden="true"><use href="#sound"/></svg><span>音量－</span></button><button class="secondary compact" id="toggleRemoteText" aria-expanded="false" aria-controls="remoteTextDialog" aria-haspopup="dialog"><svg aria-hidden="true"><use href="#keyboard"/></svg><span>发送文字</span></button><button class="secondary compact" data-c="volumeMute"><svg aria-hidden="true"><use href="#muteIcon"/></svg><span>静音</span></button><button class="secondary compact" id="power"><svg aria-hidden="true"><use href="#powerIcon"/></svg><span>关机</span></button></div>
+</div>
+<div id="browserControls" hidden>
+<form id="browserSearchForm" class="browser-search-row">
+<select id="browserEngine" aria-label="搜索引擎"><option value="bing">必应</option><option value="baidu">百度</option><option value="google">Google</option></select>
+<div class="browser-query"><input id="browserQuery" type="text" maxlength="2000" inputmode="search" enterkeyhint="search" placeholder="网址或关键词" aria-label="网址或关键词" required><button type="button" id="browserClear" aria-label="清空搜索" hidden><svg aria-hidden="true"><use href="#close"/></svg></button></div>
+<button class="primary compact" aria-label="搜索"><svg aria-hidden="true"><use href="#searchIcon"/></svg></button>
+</form>
+<div class="remote-action-grid browser-nav">
+<button class="secondary compact" data-browser="browserHome" aria-label="首页"><svg aria-hidden="true"><use href="#home"/></svg></button>
+<button class="secondary compact" data-browser="browserBack" aria-label="后退"><svg aria-hidden="true"><use href="#left"/></svg></button>
+<button class="secondary compact" data-browser="browserForward" aria-label="前进"><svg aria-hidden="true"><use href="#right"/></svg></button>
+<button class="secondary compact" data-browser="browserReload" aria-label="刷新"><svg aria-hidden="true"><use href="#reloadIcon"/></svg></button>
+<button class="secondary compact" data-browser="browserBookmark" aria-label="收藏"><svg aria-hidden="true"><use href="#star"/></svg></button>
+<button class="secondary compact" data-browser="browserDesktopUa" aria-label="电脑版"><svg aria-hidden="true"><use href="#monitor"/></svg></button>
+</div><button class="primary compact" id="browserPlay" aria-label="播放"><svg aria-hidden="true"><use href="#playIcon"/></svg></button>
+<section id="browserPlayer" class="glass section" hidden>
+<div class="browser-player-heading"><strong id="browserMediaTitle"></strong><span id="browserMediaState" role="status"></span></div>
+<input id="browserProgress" type="range" min="0" max="1" value="0" aria-label="播放进度" disabled>
+<div id="browserTime" class="small-note">--:-- / --:--</div>
+<div class="remote-action-grid">
+<button class="secondary compact" data-browser="browserRewind" aria-label="快退 10 秒">快退</button><button class="secondary compact" id="browserToggle" aria-label="暂停">暂停</button><button class="secondary compact" data-browser="browserFastForward" aria-label="快进 10 秒">快进</button><button class="secondary compact" data-browser="browserStop" aria-label="退出播放">退出播放</button>
+</div>
+<div class="remote-action-grid"><button class="secondary compact" data-browser="browserFullscreen" aria-label="全屏">全屏</button><select id="browserSpeedChoice" class="secondary compact" aria-label="播放倍速"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select><button class="secondary compact" data-browser="browserLoop" aria-label="循环播放">循环播放</button></div><label id="browserSources" hidden>视频源<select id="browserSourceChoice"></select></label>
+</section>
+<div id="browserPadSlot"></div>
+</div>
+</section>
+<section id="panel-live" class="tab-panel" hidden><div class="live-modes" role="tablist" aria-label="直播方式"><button id="liveModeOne" data-live-mode="one" role="tab" aria-selected="false">默认直播</button><button id="liveModeCustom" data-live-mode="default" role="tab" aria-selected="false">自定义直播</button></div><section id="externalLive" class="glass section" hidden><h2 id="externalPlayerName"></h2><p>可切换到上面的直播方式。</p></section><div id="internalLive"><div class="split" id="customLiveTools"><button class="secondary compact icon-label" id="sourcesButton"><svg aria-hidden="true"><use href="#layers"/></svg>切换直播源</button><button class="primary compact icon-label" id="addLive"><svg aria-hidden="true"><use href="#plus"/></svg>添加直播源</button></div><div class="live-actions"><button class="secondary compact" data-c="livePrev">上一台</button><button class="secondary compact" data-c="liveNext">下一台</button><button class="secondary compact" data-c="liveLine">换线路</button><button class="secondary compact" data-c="liveFull">频道列表</button></div><input class="search" id="channelSearch" type="search" placeholder="搜索频道" aria-label="搜索频道"><div class="channel-filters"><div id="channelTabs" class="category-tabs" role="tablist" aria-label="频道分类"></div><select id="channelGroup" aria-label="频道分类"><option>全部频道</option></select><button id="favoriteChannels" class="category-tab" role="tab" aria-selected="false">收藏</button></div><div id="channelList" class="glass section" style="margin-top:14px"><div class="live-empty">添加节目单订阅，或导入本地文件。</div></div><button class="secondary" id="moreChannels" hidden>显示更多频道</button></div></section>
+</div></main>
+<nav class="tabs" id="tabs" role="tablist" aria-label="手机控制功能" hidden><button id="tab-remote" data-tab="remote" role="tab" aria-selected="true" aria-controls="panel-remote"><svg><use href="#remote"/></svg><span>遥控</span></button><button id="tab-live" data-tab="live" role="tab" aria-selected="false" aria-controls="panel-live"><svg><use href="#live"/></svg><span>直播</span></button><button id="tab-files" data-tab="files" role="tab" aria-selected="false" aria-controls="panel-files"><svg><use href="#folder"/></svg><span>文件</span></button></nav>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="deleteFileDialog"><div class="dialog-header"><h2>删除电视上的文件？</h2><button class="dialog-close" data-close="deleteFileDialog" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body"><p id="deleteFileName"></p><button class="primary" id="confirmDeleteFile">删除</button><button class="secondary" data-close="deleteFileDialog">取消</button></div></dialog>
+<dialog id="settings"><div class="dialog-header"><h2>连接设置</h2><button class="dialog-close" data-close="settings" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body"><p id="serverAddress"></p><button class="secondary" id="retry">检查连接</button><button class="secondary" id="disconnect">断开连接</button></div></dialog>
+<dialog id="powerDialog"><div class="dialog-header"><h2>电视电源菜单</h2><button class="dialog-close" data-close="powerDialog" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body"><p>请在电视上确认关机。</p><button class="primary" id="confirmPower">打开电源菜单</button><button class="secondary" data-close="powerDialog">取消</button></div></dialog>
+<dialog id="remoteTextDialog" class="input-dialog"><div class="dialog-header"><h2>发送文字</h2><button class="dialog-close" data-close="remoteTextDialog" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body"><form id="remoteTextForm" class="remote-text"><label for="remoteText" hidden>文字输入</label><div class="split"><input id="remoteText" type="text" maxlength="2000" placeholder="先选中电视输入框" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="send"><button id="sendRemoteText" class="primary compact">发送</button></div></form></div></dialog>
+<dialog id="liveDialog" class="input-dialog"><div class="dialog-header"><h2>添加频道</h2><button class="dialog-close" data-close="liveDialog" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body"><form id="subscriptionForm"><label for="subscription">节目单订阅链接</label><input id="subscription" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="HTTPS / HTTP / GitHub 链接" required><button class="primary">保存订阅到电视</button></form><div class="heading-row"><h2>从文件导入</h2></div><label class="drop" style="min-height:86px">选择节目单文件<span>M3U、TXT、JSON、PLS、CSV、XSPF · 最大 20 MB</span><input class="file-input" id="playlistFile" type="file" accept=".m3u,.m3u8,.txt,.json,.pls,.csv,.xspf"></label><form id="pasteForm" style="margin-top:18px"><label for="playlistText">或粘贴节目单内容</label><textarea id="playlistText" placeholder="频道名称,http://直播地址" required></textarea><button class="secondary">导入节目单</button></form><form id="directForm" style="margin-top:24px"><label for="directUrl">单个直播直链</label><input id="directUrl" inputmode="url" autocapitalize="off" placeholder="HTTP / HTTPS / RTSP / UDP 地址" required><label for="directName">频道名称</label><input id="directName" placeholder="自定义直播" maxlength="100"><button class="secondary">添加直链</button></form></div></dialog>
+<dialog id="sourceDialog"><div class="dialog-header"><h2>直播源</h2><button class="dialog-close" data-close="sourceDialog" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body"><div id="sourceList"></div><button class="secondary" id="addSource">添加频道</button></div></dialog>
+<script>
+'use strict';
+const $=id=>document.getElementById(id),store={get(){try{return localStorage.getItem('tv-token')||sessionStorage.getItem('tv-token')||''}catch{try{return sessionStorage.getItem('tv-token')||''}catch{return ''}}},set(v){for(const name of ['localStorage','sessionStorage'])try{if(v)window[name].setItem('tv-token',v);else window[name].removeItem('tv-token')}catch{}}};
+let livePending=null,lastLiveSnapshot="",liveSwitching=false;
+let token=store.get(),tab='remote',activeUpload=null,toastTimer,liveData={channels:[],sources:[]},visibleLimit=80,liveBusy=false,favoriteOnly=false;
+if(token)store.set(token);
+const invite=new URL(location.href),secret=new URLSearchParams(invite.hash.slice(1)).get('connect')||invite.searchParams.get('connect');if(invite.hash||invite.searchParams.has('connect')){invite.hash='';invite.searchParams.delete('connect');history.replaceState(null,'',invite.pathname+invite.search)}
+function say(message,error=false){
+  clearTimeout(toastTimer);
+  const toast=$('toast'),modal=document.querySelector('dialog[open]');
+  if(typeof toast.showPopover==='function'){
+    toast.setAttribute('popover','manual');
+  }else{
+    (modal||document.body).append(toast);
+  }
+  toast.textContent=message;
+  toast.dataset.error=String(error);
+  toast.hidden=false;
+  if(typeof toast.showPopover==='function')toast.showPopover();
+  toastTimer=setTimeout(()=>{
+    if(typeof toast.hidePopover==='function')toast.hidePopover();
+    toast.hidden=true;
+  },1000);
+}
+function connection(state,label){document.body.dataset.connection=state;$('reconnect').hidden=!token||state!=='offline';}
+function render(){const paired=!!token;$('workspace').hidden=!paired;$('tabs').hidden=!paired;$('pairing').hidden=paired;if(!paired)connection('offline','未连接');}
+async function post(path,body='',timeout=15000){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout);try{const r=await fetch(path,{method:'POST',headers:{'X-TV-Token':token,'Content-Type':'text/plain;charset=UTF-8'},body,signal:controller.signal,cache:'no-store'});const text=await r.text();if(r.status===401){token='';store.set('');render();throw Error('连接已过期，请重新扫描电视二维码。')}if(!r.ok){const error=Error(text||'操作失败');error.status=r.status;throw error;}return text;}catch(e){if(e.name==='AbortError')throw Error('连接超时，请检查手机与电视的网络。');if(e instanceof TypeError)throw Error('暂时无法连接电视，请检查同一 Wi-Fi 及本地网络权限。');throw e;}finally{clearTimeout(timer)}}
+let checkPending=null;
+async function ensurePad(status=null){
+ if(!padMode||!token)return false;
+ if(browserMode)return true;
+ if(padSync)return padSync;
+ padSync=(async()=>{
+  let s=status||JSON.parse(await post('/status','',5000));
+  if(!s.pointerReady&&s.adbReady&&s.overlayAllowed){await post('/command','pointerMode\non',10000);s=JSON.parse(await post('/status','',5000))}
+  padReady=!!s.pointerReady;return padReady;
+ })();
+ try{return await padSync}finally{padSync=null}
+}
+async function check(){
+ if(!token)return;
+ if(checkPending)return checkPending;
+ checkPending=(async()=>{
+   let status;
+   try{status=JSON.parse(await post('/status','',5000))}
+   catch(e){padReady=false;connection('offline','连接中断');if(!token)say(e.message,true);return false}
+   connection('online','已连接');
+   if(browserMode)renderBrowser(status.browser);
+   padReady=!!status.pointerReady;
+   refreshPadSetup();
+   return true;
+ })();
+ try{return await checkPending}finally{checkPending=null}
+}
+async function pair(code){$('connecting').hidden=false;$('pairForm').hidden=true;try{token=await post('/pair',code);store.set(token);render();switchTab('remote');connection('online','已连接');if(await check())say('已连接电视，可以开始使用。')}catch(e){render();if(token)await check();else say(e.message,true)}finally{$('connecting').hidden=true;$('pairForm').hidden=false;}}
+$('retryConnection').onclick=async()=>{const button=$('retryConnection');button.disabled=true;try{if(await check())say('已重新连接');else if(token)say('暂时无法连接电视，请确认电视地址和网络。',true)}finally{button.disabled=false}};
+async function command(cmd,value='',quiet=false){try{await post('/command',cmd+'\n'+value);if(!quiet)say(cmd==='livePlay'?'已在电视全屏打开频道。':'已执行');return true;}catch(e){say(e.message,true);return false;}}
+
+function showRemoteText(show){$('toggleRemoteText').setAttribute('aria-expanded',String(show));if(show){openDialog('remoteTextDialog');$('remoteText').focus()}else{$('remoteTextDialog').close();$('remoteText').blur();$('toggleRemoteText').focus()}}
+$('remoteTextDialog').addEventListener('close',()=>{$('toggleRemoteText').setAttribute('aria-expanded','false')});
+$('toggleRemoteText').onclick=()=>showRemoteText(!$('remoteTextDialog').open);
+$('remoteTextForm').onsubmit=async e=>{e.preventDefault();const value=$('remoteText').value;if(!value.length)return;const send=$('sendRemoteText');send.disabled=true;try{const result=await post('/command','inputText\n'+value,30000);$('remoteText').value='';showRemoteText(false);say(result||'已输入到电视')}catch(error){say(error.message,true)}finally{send.disabled=false}};
+let padReady=false,padSync=null,padMode=false,padGesture=null,padPending={x:0,y:0,scroll:false},padSending=false,padTimer=null;
+function resetPad(){padReady=false;padGesture=null;padPending={x:0,y:0,scroll:false};clearTimeout(padTimer);padTimer=null;$('touchpad').classList.remove('active')}
+const pendingRemoteKeys=[];
+let sendingRemoteKeys=false;
+async function queueRemoteKey(key){
+  if(pendingRemoteKeys.length>=8)return;
+  pendingRemoteKeys.push(key);
+  if(sendingRemoteKeys)return;
+  sendingRemoteKeys=true;
+  const session=token;
+  try{
+    while(pendingRemoteKeys.length&&session&&token===session){
+      if(!await command(pendingRemoteKeys.shift(),'',true))break;
+      await new Promise(resolve=>setTimeout(resolve,45));
+    }
+  }finally{
+    pendingRemoteKeys.length=0;
+    sendingRemoteKeys=false;
+  }
+}
+let browserMode=false;
+function refreshPadSetup(){ $('pointerSetup').hidden=!padMode||browserMode||padReady; }
+function setRemoteMode(mode){
+  resetPad();
+  pendingRemoteKeys.length=0;
+  browserMode=mode==='browser';
+  padMode=mode!=='keys';
+  $('remoteControls').hidden=browserMode;
+  $('browserControls').hidden=!browserMode;
+  $(browserMode?'browserPadSlot':'remotePadSlot').append($('touchPanel'));
+  $('touchPadTitle').textContent=browserMode?'滑动控制网页光标':'滑动控制全局光标';
+  $('keyPanel').hidden=padMode;
+  $('touchPanel').hidden=!padMode;
+  $('keysMode').setAttribute('aria-pressed',String(mode==='keys'));
+  $('padMode').setAttribute('aria-pressed',String(mode==='pad'));
+  $('browserTools').setAttribute('aria-pressed',String(browserMode));
+  refreshPadSetup();
+  try{localStorage.setItem('one-pad-mode',mode)}catch{}
+}
+$('keysMode').onclick=()=>setRemoteMode('keys');
+$('padMode').onclick=()=>{setRemoteMode('pad');check()};
+$('pointerSetup').onclick=()=>command('pointerSetup','',true);
+$('browserTools').onclick=()=>{setRemoteMode('browser');check()};
+try{const saved=localStorage.getItem('one-pad-mode');setRemoteMode(saved==='pad'||saved==='browser'?saved:'keys')}catch{setRemoteMode('keys')}
+async function flushPad(){
+ clearTimeout(padTimer);padTimer=null;if(padSending||!padMode)return;
+ const p=padPending;if(!p.x&&!p.y)return;padPending={x:0,y:0,scroll:p.scroll};padSending=true;
+ const body=(browserMode?(p.scroll?'browserTouchScroll':'browserTouchMove'):(p.scroll?'touchScroll':'touchMove'))+'\n'+Math.round(p.x)+','+Math.round(p.y);
+ try{
+  if(!padReady&&!await ensurePad())throw Error('请先在遥控设置中开启系统遥控和全局光标');
+  if(!padMode)return;
+  try{await post('/command',body,4000)}catch(e){padReady=false;if(e.status===409&&!p.scroll&&await ensurePad())await post('/command',body,4000);else throw e}
+ }catch(e){padReady=false;padPending.x=padPending.y=0;say(e.message,true)}finally{padSending=false;if(padMode&&(padPending.x||padPending.y))padTimer=setTimeout(flushPad,40)}
+}
+async function tapPad(){try{if(!padReady&&!await ensurePad())throw Error('请先在遥控设置中开启系统遥控和全局光标');if(padMode&&!await command(browserMode?'browserTouchClick':'touchClick','',true))padReady=false}catch(e){padReady=false;say(e.message,true)}}
+function queuePad(x,y,scroll){if(padPending.scroll!==scroll){padPending.x=padPending.y=0}padPending.scroll=scroll;padPending.x=Math.max(-240,Math.min(240,padPending.x+x));padPending.y=Math.max(-240,Math.min(240,padPending.y+y));if(!padTimer&&!padSending)padTimer=setTimeout(flushPad,40)}
+const pad=$('touchpad');
+function touchCenter(touches){return {x:Array.from(touches).reduce((n,t)=>n+t.clientX,0)/touches.length,y:Array.from(touches).reduce((n,t)=>n+t.clientY,0)/touches.length}}
+pad.addEventListener('touchstart',e=>{e.preventDefault();const c=touchCenter(e.touches);if(!padGesture)padGesture={start:Date.now(),distance:0,multi:false};Object.assign(padGesture,{x:c.x,y:c.y,count:e.touches.length,multi:padGesture.multi||e.touches.length>1});pad.classList.add('active')},{passive:false});
+pad.addEventListener('touchmove',e=>{e.preventDefault();if(!padGesture)return;const c=touchCenter(e.touches),g=padGesture;if(e.touches.length===g.count){const x=c.x-g.x,y=c.y-g.y;g.distance+=Math.hypot(x,y);queuePad(g.multi?-x*2:x*1.8,g.multi?-y*2:y*1.8,g.multi)}Object.assign(g,{x:c.x,y:c.y,count:e.touches.length})},{passive:false});
+pad.addEventListener('touchend',e=>{e.preventDefault();if(e.touches.length){if(padGesture){const c=touchCenter(e.touches);Object.assign(padGesture,{x:c.x,y:c.y,count:e.touches.length})}return}const g=padGesture;padGesture=null;pad.classList.remove('active');flushPad();if(g&&!g.multi&&g.distance<8&&Date.now()-g.start<350)tapPad()},{passive:false});
+pad.addEventListener('touchcancel',()=>{padGesture=null;padPending.x=padPending.y=0;clearTimeout(padTimer);padTimer=null;pad.classList.remove('active')});
+
+
+const engines={
+  bing:'https://cn.bing.com/search?q=',
+  baidu:'https://www.baidu.com/s?wd=',
+  google:'https://www.google.com/search?q='
+};
+try{const engine=localStorage.getItem('browser-engine');if(engines[engine])$('browserEngine').value=engine}catch{}
+$('browserEngine').onchange=()=>{try{localStorage.setItem('browser-engine',$('browserEngine').value)}catch{}};
+const browserQuery=$('browserQuery'),browserClear=$('browserClear');
+browserQuery.addEventListener('input',()=>{browserClear.hidden=!browserQuery.value});
+browserClear.onclick=()=>{browserQuery.value='';browserClear.hidden=true;browserQuery.focus()};
+$('browserSearchForm').onsubmit=async event=>{
+  event.preventDefault();
+  const input=$('browserQuery'),value=input.value.trim();
+  if(!value)return;
+  const direct=/^https?:\/\//i.test(value)?value:/^[^\s/]+\.[^\s]+$/.test(value)?'https://'+value:null;
+  if(await command('browserNavigate',direct||engines[$('browserEngine').value]+encodeURIComponent(value),true))input.blur();
+};
+let browserCommandPending=false,browserDragging=false;
+const browserLabels={searching:'正在查找视频',loading:'正在加载',playing:'正在播放',paused:'已暂停',ended:'播放结束',failed:'视频无法播放'};
+const browserTime=ms=>{const seconds=Math.floor((ms||0)/1000);return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0')};
+function renderBrowser(state={}){
+  const phase=state.phase||'idle',session=phase!=='idle';
+  const playing=phase==='playing';
+  $('browserPlayer').hidden=!session;
+  const sourceList=Array.isArray(state.sources)?state.sources:[];
+  const sources=$('browserSourceChoice'),sourceKey=sourceList.join('|');
+  $('browserSources').hidden=sourceList.length<2;
+  if(sources.dataset.key!==sourceKey){
+    sources.replaceChildren(...sourceList.map((label,index)=>new Option(label,String(index))));
+    sources.dataset.key=sourceKey;
+  }
+  sources.value=String(state.sourceIndex||0);
+  $('browserPlay').hidden=session&&phase!=='failed';
+  $('browserMediaTitle').textContent=state.title||'网页视频';
+  $('browserMediaState').textContent=browserLabels[phase]||'';
+  $('browserToggle').setAttribute('aria-label',playing?'暂停':'播放');
+  $('browserToggle').textContent=playing?'暂停':'播放';
+  $('browserToggle').disabled=!['playing','paused','ended'].includes(phase);
+  const seek=$('browserProgress'),duration=state.duration||0;
+  seek.disabled=!state.seekable||duration<=0;
+  if(!browserDragging){seek.max=Math.max(1,duration);seek.value=Math.min(state.position||0,duration)}
+  $('browserTime').textContent=duration>0?browserTime(browserDragging?seek.value:state.position)+' / '+browserTime(duration):'--:-- / --:--';
+  document.querySelectorAll('[data-browser=browserRewind],[data-browser=browserFastForward]').forEach(b=>b.disabled=seek.disabled);
+  $('browserSpeedChoice').value=String(state.speed||1);
+  document.querySelector('[data-browser=browserLoop]').setAttribute('aria-pressed',String(!!state.loop));
+  const fullscreen=document.querySelector('[data-browser=browserFullscreen]');
+  fullscreen.textContent=state.fullscreen?'退出全屏':'全屏';
+  fullscreen.setAttribute('aria-label',fullscreen.textContent);
+  document.querySelector('[data-browser=browserDesktopUa]').setAttribute('aria-label',state.desktop===false?'切换到电脑版':'切换到手机版');
+}
+async function sendBrowser(cmd,value='',hint=''){
+  if(browserCommandPending)return;
+  browserCommandPending=true;
+  try{
+    await post('/command',cmd+'\n'+value);
+    await check();
+  }catch(error){
+    say(cmd==='browserPlay'&&error.status===409?'请先打开电视浏览器中的视频页面。':error.message,true);
+  }finally{browserCommandPending=false}
+}
+document.querySelectorAll('[data-browser]').forEach(button=>button.onclick=()=>sendBrowser(button.dataset.browser,'',button.getAttribute('aria-label')));
+$('browserPlay').onclick=()=>sendBrowser('browserPlay','','播放');
+$('browserToggle').onclick=()=>sendBrowser('browserPlay','', browserToggle.getAttribute('aria-label'));
+$('browserSpeedChoice').onchange=()=>sendBrowser('browserSpeed',$('browserSpeedChoice').value,'倍速 '+$('browserSpeedChoice').value+'×');
+$('browserSourceChoice').onchange=()=>sendBrowser('browserSelectSource',$('browserSourceChoice').value);
+$('browserProgress').addEventListener('input',()=>{browserDragging=true;$('browserTime').textContent=browserTime($('browserProgress').value)+' / '+browserTime($('browserProgress').max)});
+$('browserProgress').addEventListener('change',()=>{browserDragging=false;sendBrowser('browserSeek',$('browserProgress').value)});
+$('browserProgress').addEventListener('pointercancel',()=>{browserDragging=false});
+setInterval(()=>{if(!document.hidden&&token&&tab==='remote'&&browserMode)check()},1200);
+
+let pageScrollLock=null;
+function openDialog(id){
+ if(!pageScrollLock){pageScrollLock={y:window.scrollY,position:document.body.style.position,top:document.body.style.top,width:document.body.style.width,overflow:document.body.style.overflow};Object.assign(document.body.style,{position:'fixed',top:-pageScrollLock.y+'px',width:'100%',overflow:'hidden'});}
+ $(id).showModal();
+}
+document.querySelectorAll('dialog').forEach(dialog=>dialog.addEventListener('close',()=>{
+ if(document.querySelector('dialog[open]')||!pageScrollLock)return;
+ const saved=pageScrollLock;pageScrollLock=null;Object.assign(document.body.style,{position:saved.position,top:saved.top,width:saved.width,overflow:saved.overflow});window.scrollTo(0,saved.y);
+}));
+let modalTouchY=0;
+document.addEventListener('touchstart',e=>{modalTouchY=e.touches[0]?.clientY||0},{passive:true});
+document.addEventListener('touchmove',e=>{
+ if(!pageScrollLock||e.touches.length!==1)return;
+ const scroller=e.target.closest('textarea,.dialog-body'),nextY=e.touches[0].clientY,delta=nextY-modalTouchY;modalTouchY=nextY;
+ if(e.target.closest('textarea'))return;
+ if(!scroller||scroller.scrollHeight<=scroller.clientHeight||delta>0&&scroller.scrollTop<=0||delta<0&&scroller.scrollTop+scroller.clientHeight>=scroller.scrollHeight-1)e.preventDefault();
+},{passive:false});
+function syncLiveFooter(){
+ const bar=document.querySelector('.live-actions'),box=bar.getBoundingClientRect();
+ const base=parseFloat(getComputedStyle(document.querySelector('.app')).paddingBottom)||0;
+ const inset=box.height>0?Math.max(0,innerHeight-box.top+8-base):0;
+ document.documentElement.style.setProperty('--live-content-inset',Math.ceil(inset)+'px');
+}
+if(window.ResizeObserver)new ResizeObserver(syncLiveFooter).observe(document.querySelector('.live-actions'));else window.addEventListener('resize',syncLiveFooter);
+function switchTab(next){tab=next;document.body.dataset.page=next;document.querySelectorAll('[data-tab]').forEach(b=>{const selected=b.dataset.tab===next;b.setAttribute('aria-selected',String(selected));$('panel-'+b.dataset.tab).hidden=!selected;});window.scrollTo(0,0);if(next==='files')loadFiles();if(next==='live'){loadLive();syncLiveFooter();}if(next==='remote')check();}
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));document.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>queueRemoteKey(b.dataset.c));document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
+$('pairForm').onsubmit=e=>{e.preventDefault();pair($('pin').value)};
+$('retry').onclick=async()=>{await check();say(document.body.dataset.connection==='online'?'已连接':'连接中断')};
+$('disconnect').onclick=()=>{if(activeUpload)activeUpload.abort();token='';store.set('');$('settings').close();render();say('已断开此浏览器。')};$('power').onclick=()=>openDialog('powerDialog');$('confirmPower').onclick=async()=>{
+ const button=$('confirmPower');
+ button.disabled=true;
+ try{
+   await post('/command','power\n');
+   $('powerDialog').close();
+ }catch(e){say(e.status===409?'无法打开电视电源菜单，请先启用 One 无障碍服务或连接系统遥控。':e.message,true)}
+ finally{button.disabled=false}
+};
+function size(n){return n<1048576?(n/1024).toFixed(1)+' KB':n<1073741824?(n/1048576).toFixed(1)+' MB':(n/1073741824).toFixed(2)+' GB'}
+function fileRow(file){const row=document.createElement('div');row.className='file-line';const icon=document.createElementNS('http://www.w3.org/2000/svg','svg'),use=document.createElementNS('http://www.w3.org/2000/svg','use');use.setAttribute('href','#file');icon.append(use);const name=document.createElement('span');name.className='file-name';name.textContent=file.name;const bytes=document.createElement('span');bytes.className='file-size';bytes.textContent=size(file.size);row.append(icon,name,bytes);return row;}
+$('files').onchange=()=>{$('selectedFiles').replaceChildren(...Array.from($('files').files).map(fileRow));$('upload').disabled=!$('files').files.length;};
+let pendingDeleteFile='';
+$('confirmDeleteFile').onclick=async()=>{
+  const name=pendingDeleteFile;
+  if(!name)return;
+  const button=$('confirmDeleteFile');
+  button.disabled=true;
+  try{
+    await post('/files/delete',name);
+    $('deleteFileDialog').close();
+    await loadFiles(true);
+    say('已删除文件');
+  }catch(error){say(error.message,true)}
+  finally{button.disabled=false}
+};
+async function loadFiles(silent=false){try{const files=JSON.parse(await post('/files'));$('receivedFiles').replaceChildren(...files.map(file=>{const row=fileRow(file);if(/\.(jpe?g|png|webp|bmp|gif)$/i.test(file.name)){const background=document.createElement('button');background.className='secondary compact';background.textContent='设为背景';background.onclick=async()=>{if(await command('wallpaperSet',file.name))say('桌面背景已更新')};row.append(background)}const remove=document.createElement('button');remove.className='secondary compact file-delete';remove.textContent='删除';remove.setAttribute('aria-label','删除 '+file.name);remove.onclick=()=>{pendingDeleteFile=file.name;$('deleteFileName').textContent=file.name;openDialog('deleteFileDialog')};row.append(remove);return row}));if(!files.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='电视尚未收到文件';$('receivedFiles').append(empty);}}catch(e){if(!silent)say(e.message,true)}}
+$('refreshFiles').onclick=loadFiles;$('cancel').onclick=()=>activeUpload?.abort();
+$('upload').onclick=async()=>{const files=Array.from($('files').files);if(!files.length)return;$('upload').disabled=true;$('files').disabled=true;$('cancel').hidden=false;$('progress').hidden=false;
+try{for(const file of files){if(file.size>1073741824)throw Error(file.name+' 超过 1 GB');$('progress').value=0;await new Promise((resolve,reject)=>{const x=new XMLHttpRequest();activeUpload=x;x.open('POST','/upload?name='+encodeURIComponent(file.name));x.setRequestHeader('X-TV-Token',token);x.timeout=3600000;x.upload.onprogress=e=>{if(e.lengthComputable){$('progress').value=e.loaded/e.total*100;$('uploadState').textContent='正在发送 '+file.name+' · '+Math.round(e.loaded/e.total*100)+'%';}};x.onload=()=>{if(x.status===200){$('uploadState').textContent=x.responseText;resolve();}else{if(x.status===401){token='';store.set('');render();}reject(Error(x.responseText||'上传失败'));}};x.onerror=()=>reject(Error('网络中断，请检查 Wi-Fi 后重试。'));x.onabort=()=>reject(Error('发送已取消，未完成文件会清理。'));x.ontimeout=()=>reject(Error('上传超时，请重试。'));x.send(file);});}say('文件已送达电视。');$('uploadState').textContent='全部文件发送完成。';$('files').value='';$('selectedFiles').replaceChildren();await loadFiles();}catch(e){$('uploadState').textContent=e.message;say(e.message,true);}finally{activeUpload=null;$('upload').disabled=!$('files').files.length;$('files').disabled=false;$('cancel').hidden=true;}};
+function categoryLabel(value){return {'全部频道':'全部','收藏频道':'收藏','央视频道':'央视','地方卫视':'卫视'}[value]||value;}
+function renderCategoryFilters(){const groups=[...new Set(liveData.channels.map(c=>c.group).filter(g=>g!=='全部频道'&&g!=='收藏频道'))];const tabs=$('channelTabs');tabs.hidden=groups.length>3;$('channelGroup').hidden=!tabs.hidden;tabs.replaceChildren(...['全部频道',...groups].map(g=>{const b=document.createElement('button');b.textContent=categoryLabel(g);b.className='category-tab';b.setAttribute('role','tab');b.setAttribute('aria-selected',String(!favoriteOnly&&$('channelGroup').value===g));b.onclick=()=>{favoriteOnly=false;$('channelGroup').value=g;visibleLimit=80;updateFavoriteFilter();renderChannels()};return b}));}
+async function loadLive(force=false){
+ if(livePending){await livePending;if(!force)return;}
+ const task=(async()=>{try{
+  const snapshot=await post('/live',force?'':(liveData.version||''));if(!snapshot||(snapshot===lastLiveSnapshot&&!force))return;
+  const data=JSON.parse(snapshot);if(!Array.isArray(data.channels))throw Error('直播数据暂不可用');
+  const previous=liveData.playerMode;liveData=data;lastLiveSnapshot=snapshot;
+  const mode=data.playerMode||'default',external=mode==='external';
+  if(previous!==mode){favoriteOnly=false;visibleLimit=80;$('channelSearch').value='';if(mode!=='default')['liveDialog','sourceDialog'].forEach(id=>{if($(id).open)$(id).close()});}
+  document.querySelectorAll('[data-live-mode]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.liveMode===mode)));
+  $('externalLive').hidden=!external;$('externalPlayerName').textContent='正在使用：'+(data.playerName||'其他应用');
+  $('internalLive').hidden=external;$('customLiveTools').hidden=mode!=='default';
+  document.querySelector('.live-actions').hidden=external||!data.channels.length;
+  if(external){$('channelList').replaceChildren();syncLiveFooter();return;}
+  const current=$('channelGroup').value,groups=['全部频道',...new Set(data.channels.map(c=>c.group).filter(g=>g!=='全部频道'&&g!=='收藏频道'))];
+  $('channelGroup').replaceChildren(...groups.map(g=>{const option=document.createElement('option');option.value=g;option.textContent=categoryLabel(g);return option}));
+  if(groups.includes(current))$('channelGroup').value=current;
+  document.querySelector('[data-c=liveLine]').textContent=mode==='one'?'重新加载':'换线路';
+  $('favoriteChannels').setAttribute('aria-selected',String(favoriteOnly));renderCategoryFilters();renderChannels();syncLiveFooter();
+ }catch(e){say(e.message,true)}})();
+ livePending=task;try{await task}finally{if(livePending===task)livePending=null;}
+}
+document.querySelectorAll('[data-live-mode]').forEach(button=>button.onclick=async()=>{
+ if(liveSwitching||button.getAttribute('aria-selected')==='true')return;
+ liveSwitching=true;document.querySelectorAll('[data-live-mode]').forEach(b=>b.disabled=true);button.setAttribute('aria-busy','true');
+ try{if(await command('livePlayer',button.dataset.liveMode,true))await loadLive(true);}
+ finally{liveSwitching=false;document.querySelectorAll('[data-live-mode]').forEach(b=>{b.disabled=false;b.removeAttribute('aria-busy')});}
+});
+function renderChannels(){const query=$('channelSearch').value.trim().toLowerCase(),group=$('channelGroup').value;const pool=favoriteOnly?(liveData.favoriteChannels||liveData.channels.filter(c=>c.favorite)):liveData.channels;const filtered=pool.filter(c=>(c.name+' '+c.group).toLowerCase().includes(query)&&(favoriteOnly||group==='全部频道'||c.group===group));const items=filtered.slice(0,visibleLimit).map(c=>{const row=document.createElement('div');row.className='channel';const mark=document.createElement('span');mark.className='channel-mark';mark.textContent=c.name.slice(0,2);const info=document.createElement('div');info.className='channel-info';const title=document.createElement('strong');title.textContent=c.name;const detail=document.createElement('small');detail.textContent=categoryLabel(c.group)+(c.streams.length>1?' · '+c.streams.length+' 条线路':'');info.append(title,detail);const favorite=document.createElement('button');favorite.className='favorite';const star=document.createElementNS('http://www.w3.org/2000/svg','svg'),starUse=document.createElementNS('http://www.w3.org/2000/svg','use');starUse.setAttribute('href','#star');star.append(starUse);favorite.append(star);favorite.setAttribute('aria-label',(c.favorite?'取消收藏 ':'收藏 ')+c.name);favorite.setAttribute('aria-pressed',String(!!c.favorite));favorite.onclick=async()=>{if(await command('liveFavorite',c.id,true)){c.favorite=!c.favorite;await loadLive();}};const play=document.createElement('button');play.className='channel-play';play.textContent='播放';play.setAttribute('aria-label','播放 '+c.name);play.onclick=()=>command('livePlay',c.id);row.append(mark,info,favorite,play);return row;});$('channelList').replaceChildren(...items);if(!items.length){const empty=document.createElement('div');empty.className='live-empty';empty.textContent=favoriteOnly?'还没有收藏的频道':liveData.channels.length?'没有找到相关频道。':'添加节目单订阅，或导入本地文件。';$('channelList').append(empty);}$('moreChannels').hidden=filtered.length<=visibleLimit;}
+function restoreLastCategory(){if(!favoriteOnly)return;favoriteOnly=false;visibleLimit=80;updateFavoriteFilter();renderChannels()}
+$('channelGroup').addEventListener('focus',restoreLastCategory);$('channelGroup').addEventListener('pointerdown',restoreLastCategory);
+$('channelSearch').oninput=()=>{visibleLimit=80;renderChannels()};$('channelGroup').onchange=()=>{favoriteOnly=false;updateFavoriteFilter();visibleLimit=80;renderChannels()};function updateFavoriteFilter(){$('favoriteChannels').setAttribute('aria-selected',String(favoriteOnly));$('favoriteChannels').className='category-tab';renderCategoryFilters();}$('favoriteChannels').onclick=()=>{favoriteOnly=true;updateFavoriteFilter();visibleLimit=80;renderChannels()};$('moreChannels').onclick=()=>{visibleLimit+=80;renderChannels()};function openLiveDialog(){if(liveData.playerMode==='default')openDialog('liveDialog');}$('addLive').onclick=openLiveDialog;$('addSource').onclick=()=>{$('sourceDialog').close();openLiveDialog()};
+async function liveJob(path,body,control=null,label='处理中'){
+ if(liveBusy){say('正在处理直播源，请稍候。');return false;}
+ liveBusy=true;
+ const states=Array.from(document.querySelectorAll('#liveDialog button:not(.dialog-close),#liveDialog input,#liveDialog textarea,#sourceDialog button:not(.dialog-close)'),node=>[node,node.disabled]);
+ const caption=control?(control.tagName==='BUTTON'?control:control.querySelector('span')):null,original=caption?caption.innerHTML:'';
+ states.forEach(([node])=>node.disabled=true);
+ if(control){control.classList.add('is-loading');control.setAttribute('aria-busy','true');if(caption)caption.textContent=label+'…';}
+ try{const value=typeof body==='function'?await body():body;const result=await post(path,value,120000);say(result);await loadLive();return true;}
+ catch(e){say(e.message,true);return false;}
+ finally{liveBusy=false;states.forEach(([node,disabled])=>node.disabled=disabled);if(control){control.classList.remove('is-loading');control.removeAttribute('aria-busy');if(caption)caption.innerHTML=original;}}
+}
+$('subscriptionForm').onsubmit=async e=>{e.preventDefault();if(await liveJob('/live/subscribe',$('subscription').value,e.submitter||e.target.querySelector('button'),'保存中'))$('liveDialog').close();};
+$('pasteForm').onsubmit=async e=>{e.preventDefault();if(await liveJob('/live/import',$('playlistText').value,e.submitter||e.target.querySelector('button'),'导入中')){$('playlistText').value='';$('liveDialog').close();}};
+$('playlistFile').onchange=async()=>{const file=$('playlistFile').files[0];if(!file)return;if(file.size>20971520){say('节目单最大 20 MB',true);$('playlistFile').value='';return;}try{if(await liveJob('/live/import',()=>file.text(),$('playlistFile').closest('.drop'),'导入中'))$('liveDialog').close();}finally{$('playlistFile').value=''}};
+$('directForm').onsubmit=async e=>{e.preventDefault();const body='liveDirect\n'+JSON.stringify({name:$('directName').value,url:$('directUrl').value});if(await liveJob('/command',body,e.submitter||e.target.querySelector('button'),'保存中'))$('liveDialog').close();};
+$('sourcesButton').onclick=async()=>{await loadLive();if(liveData.playerMode!=='default')return;$('sourceList').replaceChildren(...liveData.sources.map(s=>{const section=document.createElement('div');section.className='section glass';const title=document.createElement('h2');title.textContent=(s.name)+' · '+s.count+' 个频道';const controls=document.createElement('div');controls.className='split';const choose=document.createElement('button');choose.className='secondary compact';choose.textContent=s.url===liveData.active?'使用中':'切换';choose.disabled=s.url===liveData.active;choose.onclick=async()=>{await command('liveSource',s.url,true);await loadLive();$('sourceDialog').close()};controls.append(choose);if(s.url!=='local'){const update=document.createElement('button');update.className='secondary compact';update.textContent='更新频道';update.onclick=()=>liveJob('/live/subscribe',s.url);controls.append(update)}const remove=document.createElement('button');remove.className='text-button';remove.textContent='删除';remove.onclick=async()=>{if(confirm('删除这个直播源？')){await command('liveRemove',s.url,true);await loadLive();section.remove()}};controls.append(remove);section.append(title,controls);return section}));openDialog('sourceDialog');};
+
+function resumeConnection(){resetPad();if(!document.hidden)check()}
+document.addEventListener('visibilitychange',resumeConnection);window.addEventListener('pageshow',resumeConnection);window.addEventListener('online',resumeConnection);setInterval(()=>{if(!document.hidden&&token){if(tab!=='remote'||!browserMode)check();if(tab==='files'&&!activeUpload)loadFiles(true);if(tab==='live'&&!liveSwitching)loadLive()}},6000);
+render();switchTab('remote');
+(async()=>{
+  if(token)await check();
+  if(secret&&!token)await pair(secret);
+})();
+</script></body></html>

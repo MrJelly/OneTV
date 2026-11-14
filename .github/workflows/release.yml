@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Check version and install Android SDK
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          apk_version="$(sed -n "s/^ *versionName '\([^']*\)'$/\1/p" app/build.gradle)"
+          [[ "$apk_version" == "$version" || "$version" == "$apk_version.0" ]]
+          echo "APK_VERSION=$apk_version" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" >/dev/null
+      - name: Check for staged packages
+        id: stage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          status="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null || true)"
+          if [[ "$status" == false ]]; then
+            echo 'published=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$status" == true ]]; then
+            mkdir staged
+            gh release download "$GITHUB_REF_NAME" --dir staged
+            if [[ -f staged/SHA256SUMS.txt && -f "staged/One-$VERSION.apk" && -f "staged/One-$VERSION-arm64-v8a.apk" && -f "staged/One-$VERSION-armeabi-v7a.apk" ]]; then
+              echo 'ready=true' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+      - name: Build signed APKs
+        if: steps.stage.outputs.published != 'true' && steps.stage.outputs.ready != 'true'
+        env:
+          KEY_DATA: ${{ secrets.ONE_KEYSTORE_BASE64 }}
+          ONE_KEYSTORE_PASSWORD: ${{ secrets.ONE_KEYSTORE_PASSWORD }}
+          ONE_KEY_ALIAS: ${{ secrets.ONE_KEY_ALIAS }}
+          ONE_KEY_PASSWORD: ${{ secrets.ONE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_DATA"
+          umask 077
+          export ONE_KEYSTORE_PATH="$RUNNER_TEMP/one.keystore"
+          trap 'rm -f "$ONE_KEYSTORE_PATH"' EXIT
+          printf '%s' "$KEY_DATA" | base64 --decode > "$ONE_KEYSTORE_PATH"
+          ./gradlew :app:assembleRelease
+      - name: Verify packages and prepare assets
+        if: steps.stage.outputs.published != 'true'
+        env:
+          STAGED: ${{ steps.stage.outputs.ready }}
+        run: |
+          set -euo pipefail
+          dir=app/build/outputs/apk/release
+          if [[ "$STAGED" == true ]]; then
+            python3 scripts/verify-apks.py staged/*.apk
+            (cd staged && sha256sum -c SHA256SUMS.txt)
+          else
+            python3 scripts/verify-apks.py "$dir"/*release.apk
+          fi
+          expected=2157f906b100ae2b111f582978bc31cd56df6c40154741900cd336d391bc84ab
+          code="$(sed -n 's/^ *versionCode \([0-9]*\)$/\1/p' app/build.gradle)"
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          mkdir dist
+          for abi in universal arm64-v8a armeabi-v7a; do
+            name="One-$VERSION"
+            if [[ "$abi" != universal ]]; then name="$name-$abi"; fi
+            apk="$dir/app-$abi-release.apk"
+            if [[ "$STAGED" == true ]]; then apk="staged/$name.apk"; fi
+            cert="$("$tools/apksigner" verify --print-certs "$apk")"
+            if ! grep -Fx "Signer #1 certificate SHA-256 digest: $expected" <<< "$cert"; then
+              grep -F "certificate SHA-256 digest:" <<< "$cert"
+              exit 1
+            fi
+            badging="$("$tools/aapt" dump badging "$apk")"
+            grep -F "versionCode='$code' versionName='$APK_VERSION'" <<< "$badging"
+            if [[ "$abi" != universal ]]; then
+              grep -Fx "native-code: '$abi'" <<< "$badging"
+            else
+              grep -Fx "native-code: 'arm64-v8a' 'armeabi-v7a'" <<< "$badging"
+            fi
+            cp "$apk" "dist/$name.apk"
+          done
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+      - name: Publish release
+        if: steps.stage.outputs.published != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGED: ${{ steps.stage.outputs.ready }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if status="$(gh release view "$tag" --json isDraft --jq .isDraft)"; then
+            [[ "$status" == true ]] || exit 0
+          else
+            gh release create "$tag" --verify-tag --draft --title "OneTV $VERSION" --notes '修复了一些已知问题。'
+          fi
+          if [[ "$STAGED" != true ]]; then gh release upload "$tag" dist/* --clobber; fi
+          gh release edit "$tag" --draft=false --latest

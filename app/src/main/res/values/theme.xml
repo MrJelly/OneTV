@@ -1,0 +1,16 @@
+<resources>
+    <style name="AppTheme" parent="android:style/Theme.Holo.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">#162233</item>
+    </style>
+    <style name="LiveThemeBase" parent="AppTheme">
+        <item name="android:windowBackground">#121820</item>
+        <item name="android:windowDisablePreview">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:colorBackground">#121820</item>
+    </style>
+    <style name="LiveTheme" parent="LiveThemeBase" />
+</resources>

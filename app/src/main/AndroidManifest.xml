@@ -1,0 +1,98 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <uses-sdk tools:overrideLibrary="io.github.anilbeesetti.nextlib.media3ext" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.READ_SYNC_SETTINGS" /><uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS" />
+    <uses-permission android:name="android.permission.GET_ACCOUNTS" android:maxSdkVersion="22" /><uses-permission android:name="android.permission.AUTHENTICATE_ACCOUNTS" android:maxSdkVersion="22" />
+    <uses-permission android:name="android.permission.MANAGE_ACCOUNTS" android:maxSdkVersion="22" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+
+
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <queries>
+        <package android:name="cn.formovie.fengos.settings" />
+        <package android:name="com.jmgo.tv" />
+        <intent><action android:name="com.android.sky.SendHotKey" /></intent>
+        <package android:name="com.gitv.dvb.live" />
+        <package android:name="com.android.newsettings" /><package android:name="com.xgimi.xhplayer" /><package android:name="com.konka.tvsettings" />
+        <package android:name="com.jamdeo.tv.service" /><package android:name="com.hisense.tv.tiletransition" /><package android:name="com.droidlogic.tvsource" />
+        <package android:name="com.skyworth.tv" /><package android:name="com.skyworth.setting" /><package android:name="com.tcl.tv" /><package android:name="com.xiaomi.mitv.tvplayer" />
+        <package android:name="com.mylejia.launcher" /><package android:name="com.coocaa.aigc.home" /><package android:name="com.jamdeo.tv.vod" />
+        <package android:name="com.hisense.vidaaassistant" /><package android:name="com.keylab.speech.view.vidaa" /><package android:name="com.tianci.tv" />
+        <package android:name="com.ktcp.launcher" /><package android:name="com.skyworth.panasonichome" /><package android:name="com.tianci.movieplatform" />
+        <package android:name="com.stv.deskplatform" /><package android:name="com.mitv.tvhome" /><package android:name="com.tvfengmi.launcher" />
+        <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="content" /></intent>
+        <intent><action android:name="android.settings.TV_INPUT_SETTINGS" /></intent>
+        <package android:name="com.tcl.settings" /><package android:name="com.hisense.tv.inputs" /><package android:name="com.xiaomi.mitv.settings" />
+        <intent><action android:name="android.intent.action.MAIN" /></intent>
+        <intent><action android:name="android.settings.SETTINGS" /></intent>
+        <intent><action android:name="android.settings.WIFI_SETTINGS" /></intent>
+        <intent><action android:name="android.settings.DISPLAY_SETTINGS" /></intent>
+        <intent><action android:name="android.intent.action.VIEW"/><data android:mimeType="application/vnd.android.package-archive"/></intent>
+
+        <intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.HOME"/></intent>
+        <intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent>
+        <intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LEANBACK_LAUNCHER"/></intent>
+        <intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.APPSTORE_LAUNCHER"/></intent>
+    </queries>
+    <application android:name="androidx.multidex.MultiDexApplication" android:label="One" android:theme="@style/AppTheme" android:banner="@drawable/launcher_display" android:icon="@drawable/one_adaptive" android:roundIcon="@drawable/one_adaptive" android:allowBackup="false" android:usesCleartextTraffic="true" android:supportsRtl="true">
+        <receiver android:name=".BootReceiver" android:exported="false" android:directBootAware="true">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /><action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" /><action android:name="android.intent.action.USER_UNLOCKED" /><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /><action android:name="com.dangbei.action.BOOT_COMPLETED" /><action android:name="com.dangbei.action.STR_BOOT_COMPLETED" /></intent-filter>
+        </receiver>
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" /></provider>
+        <service android:name=".RemoteInputService" android:label="One 手机输入" android:permission="android.permission.BIND_INPUT_METHOD" android:exported="true">
+            <intent-filter><action android:name="android.view.InputMethod" /></intent-filter>
+            <meta-data android:name="android.view.im" android:resource="@xml/remote_input_method" />
+        </service>
+        <receiver android:name=".BootAttemptReceiver" android:exported="false" />
+        <service android:name=".DesktopGuardService" android:label="One 桌面接管" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true" android:directBootAware="true">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/desktop_guard" />
+        </service>
+        <service android:name=".RemoteHostService" android:exported="false" android:foregroundServiceType="connectedDevice" />
+        <service android:name=".DesktopSyncService" android:exported="true" android:permission="android.permission.BIND_SYNC_ADAPTER">
+            <intent-filter><action android:name="android.content.SyncAdapter" /></intent-filter><meta-data android:name="android.content.SyncAdapter" android:resource="@xml/desktop_sync" />
+        </service>
+        <service android:name=".DesktopAccountService" android:exported="true" android:permission="android.permission.BIND_ACCOUNT_AUTHENTICATOR">
+            <intent-filter><action android:name="android.accounts.AccountAuthenticator" /></intent-filter><meta-data android:name="android.accounts.AccountAuthenticator" android:resource="@xml/desktop_authenticator" />
+        </service>
+        <service android:name=".DesktopRevivalService" android:label="One 桌面恢复" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true" android:directBootAware="true">
+            <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
+        </service>
+        <activity android:name=".BrowserActivity" android:exported="false" android:screenOrientation="landscape" />
+        <activity android:icon="@drawable/one_adaptive" android:banner="@drawable/launcher_display" android:name=".MainActivity" android:exported="true" android:screenOrientation="landscape" android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity-alias android:name=".DesktopActivity" android:targetActivity=".MainActivity" android:exported="true" android:enabled="true" android:label="One" android:icon="@drawable/one_adaptive">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
+    </application>
+</manifest>

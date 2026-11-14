@@ -1,0 +1,87 @@
+plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
+def playerVersion = '1.4.1'
+android {
+    buildFeatures { buildConfig true }
+    namespace 'com.tvbridge.app'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+    defaultConfig {
+        applicationId 'com.tvbridge.app'
+        minSdk 19
+        targetSdk 35
+        versionCode 73
+        versionName '1.0'
+
+
+
+
+        resConfigs "zh", "en"
+
+
+
+
+
+
+
+        multiDexEnabled true
+    }
+
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'armeabi-v7a', 'arm64-v8a'
+            universalApk true
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    kotlinOptions { jvmTarget = '17' }
+    testOptions {
+        unitTests.includeAndroidResources = true
+        unitTests.all {
+
+            systemProperty 'robolectric.conscryptMode', 'OFF'
+            systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
+            if (project.hasProperty('androidTestSdkDir')) systemProperty 'robolectric.dependency.dir', project.property('androidTestSdkDir')
+            if (project.hasProperty('qaScreenshotDir')) systemProperty 'tvbridge.qaDir', project.property('qaScreenshotDir')
+        }
+    }
+    signingConfigs {
+        if (System.getenv('ONE_KEYSTORE_PATH')) {
+            release {
+                storeFile file(System.getenv('ONE_KEYSTORE_PATH'))
+                storePassword System.getenv('ONE_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ONE_KEY_ALIAS')
+                keyPassword System.getenv('ONE_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            signingConfig System.getenv('ONE_KEYSTORE_PATH') ? signingConfigs.release : signingConfigs.debug
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    packagingOptions { jniLibs { excludes += ['**/arm64-v8a/libconscrypt_jni.so', '**/x86/**', '**/x86_64/**'] } }
+}
+dependencies {
+    implementation 'org.conscrypt:conscrypt-android:2.5.3'
+    implementation 'androidx.multidex:multidex:2.0.1'
+    implementation 'androidx.core:core:1.9.0'
+
+
+    implementation 'androidx.exifinterface:exifinterface:1.3.6'
+    implementation files('libs/zxing-core-3.5.3.jar')
+    implementation "androidx.media3:media3-exoplayer:${playerVersion}"
+    implementation "androidx.media3:media3-exoplayer-hls:${playerVersion}"
+    implementation "androidx.media3:media3-exoplayer-dash:${playerVersion}"
+    implementation "androidx.media3:media3-exoplayer-rtsp:${playerVersion}"
+    implementation "androidx.media3:media3-exoplayer-smoothstreaming:${playerVersion}"
+    implementation 'com.github.anilbeesetti.nextlib:nextlib-media3ext:v0.8.2'
+    implementation "androidx.media3:media3-ui:${playerVersion}"
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+}
