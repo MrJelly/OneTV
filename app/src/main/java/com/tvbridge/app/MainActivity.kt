@@ -224,7 +224,11 @@ class MainActivity:Activity() {
         header.getChildAt(0).nextFocusDownId=desktop.id
         desktopButton=desktop;desktopConnectionChanged();desktop.requestFocus()
     }
-    override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);if(intent.getBooleanExtra("from_boot",false))BootReceiver.markArrived(this);if(intent.getBooleanExtra("pointer_setup",false)){requestGlobalPointer();return};if(::home.isInitialized){if(intent.getBooleanExtra("open_live",false))openSelectedLive()else if(intent.getBooleanExtra("show_home",false)||intent.hasCategory(Intent.CATEGORY_HOME))showHome()else scheduleBootApp()}}
+    // Aerial 51f9d84, adapted: some Skyworth/Coocaa firmwares answer Home by
+    // starting the registered home component (the DesktopActivity alias)
+    // themselves, with no action and no category; that start counts as Home
+    // too. Our own starts of MainActivity always carry an action or extras.
+    override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);if(intent.getBooleanExtra("from_boot",false))BootReceiver.markArrived(this);if(intent.getBooleanExtra("pointer_setup",false)){requestGlobalPointer();return};if(::home.isInitialized){if(intent.getBooleanExtra("open_live",false))openSelectedLive()else if(intent.getBooleanExtra("show_home",false)||intent.hasCategory(Intent.CATEGORY_HOME)||(intent.action==null&&intent.component?.className?.endsWith(".DesktopActivity")==true))showHome()else scheduleBootApp()}}
     private fun addresses():List<String> = ConnectionState.addresses(this,Hub.server?.port()?.takeIf{it>0}?:8888)
     private var lastControlQr:android.graphics.Bitmap?=null
     private var lastControlSummary=""

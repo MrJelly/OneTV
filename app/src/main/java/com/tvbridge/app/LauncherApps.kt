@@ -37,10 +37,17 @@ class LauncherApps(private val context:Context){
                 found[app.packageName]=Entry(component,try{pm.getApplicationLabel(app).toString()}catch(_:Exception){app.packageName},Intent.CATEGORY_LAUNCHER,stamp)
             }
         }catch(_:Exception){}
-        val gitv=ComponentName("com.gitv.dvb.live","com.gitv.dvb.live.activity.PlayActivity")
-        if(gitv.packageName !in found){
-            runCatching{pm.getActivityInfo(gitv,0)}.getOrNull()?.takeIf{it.exported&&it.enabled&&it.applicationInfo.enabled}?.let{info->
-                found[gitv.packageName]=Entry(gitv,info.loadLabel(pm).toString(),category="")
+        // Firmware apps that declare MAIN with no launcher category never
+        // match the queries above; add the known ones by component, only
+        // where installed, enabled and exported (Aerial: GITV #1378,
+        // Xiaomi's app store on older firmware #1568).
+        for(component in listOf(
+            ComponentName("com.gitv.dvb.live","com.gitv.dvb.live.activity.PlayActivity"),
+            ComponentName("com.xiaomi.mitv.appstore","com.xiaomi.mitv.appstore.MainActivity")
+        )){
+            if(component.packageName in found)continue
+            runCatching{pm.getActivityInfo(component,0)}.getOrNull()?.takeIf{it.exported&&it.enabled&&it.applicationInfo.enabled}?.let{info->
+                found[component.packageName]=Entry(component,info.loadLabel(pm).toString(),category="")
             }
         }
         found.values.sortedBy{it.label.lowercase()}.also{if(it.isNotEmpty())catalogs[pm]=it}

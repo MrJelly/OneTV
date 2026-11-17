@@ -46,7 +46,7 @@ object NativePlayback {
             .setForceUseRtpTcp(attempt.rtspTcp).setTimeoutMs(8000).setUserAgent("One/0.16 AndroidTV").createMediaSource(item)
         val http=DefaultHttpDataSource.Factory()
             .setUserAgent("One/0.16 AndroidTV").setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(8000).setReadTimeoutMs(10000)
+            .setConnectTimeoutMs(8000).setReadTimeoutMs(30000)
         val data=DefaultDataSource.Factory(context,http)
         return DefaultMediaSourceFactory(data).setLoadErrorHandlingPolicy(policy).createMediaSource(item)
     }

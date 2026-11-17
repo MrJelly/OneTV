@@ -44,6 +44,21 @@ object InputRoutes {
         }
         return generic
     }
+    /**
+     * Aerial 829cb68: LeTV's SignalSourceManager iterates
+     * DesktopManager.getEnabledDesktopTags() and crashes on a null array or a
+     * null element (what the stock desktop leaves behind after a factory
+     * reset). Prime the tags to ["signal"] first, the way Dangbei's own
+     * launcher does, and read them back to confirm. Safe when DesktopManager
+     * is absent: returns false and the caller proceeds anyway.
+     */
+    fun primeLetvDesktopTags():Boolean = runCatching{
+        val managerClass=Class.forName("letv.desktop.DesktopManager")
+        val manager=managerClass.getMethod("get").invoke(null)
+        managerClass.getMethod("setEnabledDesktopTags",Array<String>::class.java).invoke(manager,arrayOf("signal") as Any)
+        val readBack=runCatching{managerClass.getMethod("getEnabledDesktopTags").invoke(manager) as? Array<*>}.getOrNull()
+        readBack!=null&&readBack.size==1&&readBack[0]=="signal"
+    }.getOrDefault(false)
     fun skyworth(context:Context):List<SystemControls.Input> = runCatching{
         val player=ComponentName("com.skyworth.tv","com.skyworth.tv.activity.SkyTVMainActivity")
         if(!allowed(context,Intent().setComponent(player)))return emptyList()

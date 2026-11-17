@@ -102,6 +102,15 @@ class DesktopGuardService:AccessibilityService(){
     private var windowCount=0L
     private var homeWindows=0L
     private var sourceGraceUntil=0L
+    private var chooserBackFor=Long.MIN_VALUE
+    private var chooserHomeAt=Long.MIN_VALUE/2
+    private val chooserFallback=Runnable{
+        if(active()&&DesktopPolicy.isHomeChooser(front))launch(explicit=true)
+    }
+    private fun chooserThenHome(){
+        chooserHomeAt=SystemClock.uptimeMillis()
+        performGlobalAction(GLOBAL_ACTION_HOME)
+    }
     private var unlockPending=false
     private val unlockPoll=object:Runnable{
         override fun run(){
@@ -346,6 +355,13 @@ class DesktopGuardService:AccessibilityService(){
         if(filter&&Build.VERSION.SDK_INT<=23&&DeviceProfile.otherFilter)next=next and AccessibilityServiceInfo.DEFAULT.inv()
         if(next!=info.flags){info.flags=next;serviceInfo=info}
     }
+    override fun onCreate(){
+        super.onCreate()
+        // Aerial c21c8f3: on sets where the guard binds before the unlock the
+        // main activity may never start, so the enabled-list watch is
+        // registered here too, not only from the activity-side recover().
+        DesktopTakeover.watchEnabledList(this)
+    }
     override fun onServiceConnected(){
         instance=this;connected=true
         DeviceProfile.ensure(this)
@@ -353,10 +369,19 @@ class DesktopGuardService:AccessibilityService(){
         val isUnlocked=DesktopTakeover.unlocked(this)
         if(isUnlocked){
             restoreStockVisit()
-            if(InstallHandoff.consumeAfterSelfUpdate(this)){
+            val selfUpdated=InstallHandoff.consumeAfterSelfUpdate(this)
+            if(selfUpdated){
                 ui.postDelayed({if(active()&&Hub.activity?.visible!=true)launch(explicit=true)},1500)
             }
             refresh(force=true)
+            // Aerial f991579: bound in a new process past the boot window with
+            // nothing seen yet (firmware force-stops third-party apps as the
+            // stock launcher comes up): let usage stats name the front and
+            // the settled take-over decide, instead of waiting for a window
+            // change that may never come.
+            if(!selfUpdated&&Build.VERSION.SDK_INT>=24&&SystemClock.elapsedRealtime()>=180000&&SystemClock.elapsedRealtime()-android.os.Process.getStartElapsedRealtime()<60000&&usageAllowed()){
+                readFront(settling=true)
+            }
         }else{
             unlockPending=true
             ui.removeCallbacks(unlockPoll)
@@ -407,6 +432,14 @@ class DesktopGuardService:AccessibilityService(){
             if(runCatching{sendBroadcast(Intent("com.tcl.action.OPEN_GLOBAL_HISTORY").setComponent(tcl).addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES))}.isSuccess)return
         }
         try{startActivity(Intent("com.dangbei.recentstask.action.SHOW_RECENTS_FOR_USER").addCategory(Intent.CATEGORY_DEFAULT).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));return}catch(_:RuntimeException){}
+        // Aerial 4aa07eb: Skyworth's own recent-apps activity, where SystemUI
+        // has none; only where it is enabled, exported and needs no
+        // permission we lack.
+        val skyRecents=ComponentName("com.skyworthdigital.recentsmanager","com.skyworthdigital.recentsmanager.RecentTaskActivity")
+        val skyInfo=runCatching{packageManager.getActivityInfo(skyRecents,0)}.getOrNull()
+        if(skyInfo!=null&&skyInfo.enabled&&skyInfo.applicationInfo.enabled&&skyInfo.exported&&(skyInfo.permission.isNullOrEmpty()||androidx.core.content.ContextCompat.checkSelfPermission(this,skyInfo.permission)==android.content.pm.PackageManager.PERMISSION_GRANTED)){
+            try{startActivity(Intent().setComponent(skyRecents).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));return}catch(_:RuntimeException){}
+        }
         performGlobalAction(GLOBAL_ACTION_RECENTS)
     }
     override fun onAccessibilityEvent(event:AccessibilityEvent?){
@@ -424,6 +457,34 @@ class DesktopGuardService:AccessibilityService(){
         if(Build.VERSION.SDK_INT<=22&&!allowedStock()&&pkg=="com.jamdeo.launcher"&&cls=="android.widget.RelativeLayout"&&homeComponents().any{it.packageName==pkg}){performGlobalAction(GLOBAL_ACTION_BACK);launch();return}
         if(firmwarePushedAtBoot(pkg)&&isActivity(component)){launch();return}
         refresh()
+        // Aerial e688701 + efe171f: the Home chooser right after a Home press.
+        // Skipped when the wide query already answers One (a preferred record
+        // without CATEGORY_DEFAULT): closing that chooser only brings it back
+        // on the next press. Otherwise answer with Back at once instead of
+        // waiting for the after-home check: over One the Back alone restores
+        // One, with a settled fallback at the same 1.5 s deadline; over
+        // another app the Back is followed by a system Home, which bypasses
+        // the app-switch protection. Once per press, and our own follow-up
+        // Home never counts as a new press.
+        if(DesktopTakeover.unlocked(this)&&DesktopPolicy.isHomeChooser(component)&&DesktopTakeover.wideHome(this)?.packageName!=packageName){
+            val pressedAt=maxOf(homeAt,homeInOneAt)
+            val before=front
+            if(before?.packageName==packageName&&SystemClock.uptimeMillis()-pressedAt<=1500&&chooserBackFor!=pressedAt){
+                chooserBackFor=pressedAt
+                ui.removeCallbacks(afterHome)
+                ui.removeCallbacks(chooserFallback)
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                ui.postDelayed(chooserFallback,(1500-(SystemClock.uptimeMillis()-pressedAt)).coerceAtLeast(0L))
+                return
+            }
+            if(before!=null&&before.packageName!=packageName&&SystemClock.uptimeMillis()-pressedAt<=1500&&chooserBackFor!=pressedAt&&SystemClock.uptimeMillis()-chooserHomeAt>400){
+                chooserBackFor=pressedAt
+                ui.removeCallbacks(afterHome)
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                chooserThenHome()
+                return
+            }
+        }
         if(pkg in DesktopPolicy.sourceSwitchers)sourceGraceUntil=SystemClock.uptimeMillis()+3000
         if(allowedStock()&&allowStockFrom!=null&&pkg!=allowStockFrom&&!stock(component)&&isActivity(component)){
             allowStockUntil=0;allowStockFrom=null

@@ -26,6 +26,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     private val ui=Handler(Looper.getMainLooper())
     private val routes=PlaybackRoutes(context)
     private val loadPolicy=object:DefaultLoadErrorHandlingPolicy(){
+        override fun getMinimumLoadableRetryCount(dataType:Int):Int=3
         override fun getRetryDelayMsFor(info:LoadErrorHandlingPolicy.LoadErrorInfo):Long {
             val http=generateSequence<Throwable>(info.exception){it.cause}.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
             return if(info.exception is ParserException||http?.responseCode in listOf(401,403,404,410))C.TIME_UNSET else super.getRetryDelayMsFor(info)
@@ -101,7 +102,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         val column=LinearLayout(context).apply{orientation=LinearLayout.VERTICAL}
         railColumn=column
         sourceButton=action(column,"直播源",true){sources()}
-        (sourceButton.layoutParams as LinearLayout.LayoutParams).apply{width=-1;height=dp(38);marginEnd=0;bottomMargin=dp(6)}
+        (sourceButton.layoutParams as LinearLayout.LayoutParams).apply{width=-1;height=if(touchDevice)dp(42) else dp(36);marginEnd=0;bottomMargin=dp(4)}
         sourceButton.background=GlassUi.surface(sourceButton,GlassUi.CHIP_RADIUS,video=true,dark=true,faint=true)
         val railScroll=ScrollView(context).apply{isVerticalScrollBarEnabled=false;isFocusable=false;overScrollMode=View.OVER_SCROLL_NEVER;isFillViewport=true}
         railScroll.addView(rail,FrameLayout.LayoutParams(-1,-2))
@@ -413,9 +414,8 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         val http=generateSequence<Throwable>(error){it.cause}.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode
         when(error.errorCode){
             PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW->{
-                cancelRecovery();ui.removeCallbacks(timeout);lastFailure="直播进度落后，请切换线路重试"
-                if(retries>=2){failLine();return}
-                retries++;refreshTitle("正在同步直播进度")
+                cancelRecovery();ui.removeCallbacks(timeout)
+                refreshTitle("正在同步直播进度")
                 player.seekToDefaultPosition();player.prepare();player.playWhenReady=true;ui.postDelayed(timeout,20000)
             }
             PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS->{lastFailure=if(http!=null)"源站返回 HTTP $http"else "源站拒绝请求";if(http in listOf(401,403,404,410))failLine()else recover(error.errorCodeName)}
@@ -445,7 +445,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     private fun sources(){
         groupPopup?.dismiss();val entries=repo.sourceList()
         val activeNow=repo.activeSource();val manageable=activeNow!="local";val labels=entries.map{"${it.name} · ${it.channels.size} 台"}+(if(manageable)listOf("更新订阅","删除当前源")else emptyList())
-        val popup=ListPopupWindow(context);groupPopup=popup;popup.anchorView=sourceButton;popup.isModal=true;popup.width=if(drawer.width>0)drawer.width-dp(24) else dp(368)-dp(24);popup.height=dp((labels.size*38+16).coerceAtMost(250));popup.setBackgroundDrawable(GlassUi.surface(sourceButton,24f,video=true,dark=true,faint=true))
+        val popup=ListPopupWindow(context);groupPopup=popup;popup.anchorView=sourceButton;popup.isModal=true;popup.width=if(drawer.width>0)drawer.width-dp(24) else dp(368)-dp(24);popup.height=dp((labels.size*38+16).coerceAtMost(250));popup.verticalOffset=dp(4);popup.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
         popup.setAdapter(object:ArrayAdapter<String>(context,android.R.layout.simple_list_item_1,labels){override fun getView(position:Int,convert:View?,parent:ViewGroup)=TextView(context).apply{text=labels[position];NativeUi.textSize(this,28f);val selPos=(parent as? AbsListView)?.selectedItemPosition;val selected=if(selPos!=null&&selPos>=0)selPos==position else entries.getOrNull(position)?.url==repo.activeSource();setTextColor(if(selected)Color.WHITE else 0xffc8d0d8.toInt());setTypeface(null,if(selected)Typeface.BOLD else Typeface.NORMAL);background=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT);gravity=Gravity.CENTER_VERTICAL;setPadding(dp(12),0,dp(12),0);minHeight=dp(38);maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END
             if(entries.getOrNull(position)?.url==repo.activeSource()){
                 val mark=AppIcons.Vector("check"){currentTextColor}.apply{val size=(22*NativeUi.scale(context)).toInt();setBounds(0,0,size,size)}
@@ -456,7 +456,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             index<entries.size->{repo.selectSource(entries[index].url);favoritesOnly=false;refresh();all.firstOrNull()?.let{play(it,true)}}
             index==entries.size->{val active=repo.activeSource();if(active!="local")AppThreads.onIo{repo.subscribe(active);ui.post{if(!released){refresh();NativeUi.notice(context,repo.lastMessage)}}}}
             else->showLiveDialog(AlertDialog.Builder(context).setMessage("删除当前直播源？").setPositiveButton("删除"){_,_->repo.removeSource(repo.activeSource());refresh();all.firstOrNull()?.let{play(it,true)}}.setNegativeButton("取消",null))
-        }};popup.show();popup.listView?.let{it.background=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT);it.setPadding(dp(8),dp(8),dp(8),dp(8));it.divider=null;it.dividerHeight=0;setupList(it,false);it.selector=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT);it.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{override fun onNothingSelected(parent:AdapterView<*>?){} override fun onItemSelected(parent:AdapterView<*>?,child:View?,position:Int,id:Long){for(i in 0 until it.childCount){val row=it.getChildAt(i) as? TextView ?: continue;val selected=it.firstVisiblePosition+i==position;row.setTypeface(null,if(selected)Typeface.BOLD else Typeface.NORMAL);row.setTextColor(if(selected)Color.WHITE else 0xffc8d0d8.toInt())}}};it.post{it.requestFocusFromTouch();it.setSelection(entries.indexOfFirst{it.url==repo.activeSource()}.coerceAtLeast(0))}}
+        }};popup.show();popup.listView?.let{it.background=GlassUi.surface(it,20f,video=true,dark=true,dense=true,alphaBoost=0x20);it.setPadding(dp(8),dp(8),dp(8),dp(8));it.divider=null;it.dividerHeight=0;setupList(it,false);it.selector=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT);it.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{override fun onNothingSelected(parent:AdapterView<*>?){} override fun onItemSelected(parent:AdapterView<*>?,child:View?,position:Int,id:Long){for(i in 0 until it.childCount){val row=it.getChildAt(i) as? TextView ?: continue;val selected=it.firstVisiblePosition+i==position;row.setTypeface(null,if(selected)Typeface.BOLD else Typeface.NORMAL);row.setTextColor(if(selected)Color.WHITE else 0xffc8d0d8.toInt())}}};it.post{it.requestFocusFromTouch();it.setSelection(entries.indexOfFirst{it.url==repo.activeSource()}.coerceAtLeast(0))}}
     }
     private fun closePanels(){drawer.visibility=View.GONE;hideControls()}
     private fun showControls(focus:Boolean=!touchDevice){fullTitle.visibility=View.VISIBLE;overlay.visibility=View.VISIBLE;ui.removeCallbacks(hide);if(focus){if(!controls.hasFocus())controls.getChildAt(0)?.requestFocus()}else ui.postDelayed(hide,5000)}

@@ -34,6 +34,9 @@ object SystemControls {
     fun networkIntents(context:Context):List<Intent> {
         val wired=network(context)=="有线网络"
         return listOfNotNull(
+            // Aerial 829cb68 (PR #1540): LeTV's own network page; the explicit
+            // component only resolves where LeTV's settings app is installed.
+            Intent("com.letv.setting.NETWORK").setComponent(ComponentName("com.stv.globalsetting","com.stv.globalsetting.activity.NetworkActivity")),
             fengOsSettings(context)?.let{Intent(Settings.ACTION_WIFI_SETTINGS).setPackage(fengOsPanel.packageName)},
             ChanghongSettings.intent(context,ChanghongSettings.NETWORK),
             Intent(if(wired)"com.xiaomi.mitv.settings.ETHERNET_SETTINGS"else "com.xiaomi.mitv.settings.WIFI_SETTINGS").setPackage("com.xiaomi.mitv.settings"),
@@ -143,8 +146,27 @@ object SystemControls {
             val info=runCatching{context.packageManager.resolveService(intent,0)?.serviceInfo}.getOrNull()
             if(info?.exported==true)try{if(Build.VERSION.SDK_INT>=26&&info.packageName=="com.hisense.tv.inputs")context.startForegroundService(intent)else context.startService(intent);return}catch(_:RuntimeException){}
         }
+        // Aerial 5d52b73: MStar tvsetting's input list is the panel the
+        // remote's input key shows; SOURCE_INFO below is only a banner on
+        // some MStar sets. Only an exported one.
+        val mstarList=ComponentName("com.mstar.tvsetting","com.mstar.tvsetting.hotkey.InputSourceListViewActivity")
+        if(runCatching{context.packageManager.getActivityInfo(mstarList,0)}.getOrNull()?.exported==true&&runCatching{context.startActivity(Intent(Intent.ACTION_MAIN).setComponent(mstarList).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))}.isSuccess)return
+        // Aerial 829cb68: LeTV EUI has no tv_input service; its source app is
+        // SignalSourceManager. Prime the desktop tags first so it does not
+        // crash on them, then launch it fresh (no action, NEW_TASK |
+        // CLEAR_TASK), the way Dangbei's launcher does.
+        val letvSources=ComponentName("com.stv.signalsourcemanager","com.stv.signalsourcemanager.MainActivity")
+        if(runCatching{context.packageManager.getActivityInfo(letvSources,0)}.getOrNull()?.exported==true){
+            InputRoutes.primeLetvDesktopTags()
+            if(runCatching{context.startActivity(Intent().setComponent(letvSources).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))}.isSuccess)return
+        }
         val mstar=Intent("com.mstar.tv.tvplayer.ui.intent.action.SOURCE_INFO").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if(runCatching{context.packageManager.resolveActivity(mstar,0)?.activityInfo}.getOrNull()?.exported==true&&runCatching{context.startActivity(mstar)}.isSuccess)return
+        // Aerial 44285e6: YunOS sets (Hisense/Haier HS350) list inputs but no
+        // passthrough intent answers; the system TVSource list is behind
+        // this URI. Only where it resolves to an exported activity.
+        val alliance=Intent(Intent.ACTION_VIEW,android.net.Uri.parse("alliance://start_signal")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if(runCatching{context.packageManager.resolveActivity(alliance,0)?.activityInfo}.getOrNull()?.exported==true&&runCatching{context.startActivity(alliance)}.isSuccess)return
         NativeUi.notice(context,"设备未提供可用的信号源入口")
     }
     private fun changhongInputPanel(context:Context):Intent?{
@@ -189,7 +211,10 @@ object SystemControls {
         row(if(net=="网络已连接")"网络"else net,when(net){"有线网络"->"ethernet";"未连接"->"network_off";"Wi-Fi"->wifiIcon(activity);else->"monitor"}){
             if(!DeviceAdapters.xgimiPage(activity,"Settings://com.xgimi.settings.net/wifi_misckey"))open(activity,networkIntents(activity))
         }
-        row("系统设置","settings"){open(activity,listOfNotNull(fengOsSettings(activity),ChanghongSettings.intent(activity),Intent(Settings.ACTION_SETTINGS),
+        // Aerial #1528: LeTV's own settings lead where installed (the
+        // explicit component resolves nowhere else); EUI has no usable
+        // AOSP settings page.
+        row("系统设置","settings"){open(activity,listOfNotNull(Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.stv.globalsetting","com.stv.globalsetting.activity.SettingActivity")),fengOsSettings(activity),ChanghongSettings.intent(activity),Intent(Settings.ACTION_SETTINGS),
             Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.konka.systemsetting","com.konka.systemsetting.MainActivity")),
             Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.konka.tvsettings","com.konka.settingcenter.settings.view.MainSettingsActivity"))))}
         return body

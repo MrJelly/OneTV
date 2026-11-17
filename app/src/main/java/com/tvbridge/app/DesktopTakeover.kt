@@ -22,10 +22,21 @@ object DesktopTakeover {
             runCatching{Hub.activity?.applicationContext?.contentResolver?.unregisterContentObserver(obs)}
         }
     }
-    private fun watchEnabledList(context:Context){
+    private var watchTries=0
+    fun watchEnabledList(context:Context){
         if(enabledObserver!=null||SystemClock.elapsedRealtime()>=300000)return
         if(androidx.core.content.ContextCompat.checkSelfPermission(context,android.Manifest.permission.WRITE_SECURE_SETTINGS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)return
         val app=context.applicationContext
+        // Aerial c21c8f3: the firmware's rewrite lands once and settles; recheck
+        // 1.5 s after a change instead of racing it, and count only the times
+        // the guard actually had to be put back, at most three per boot.
+        val recheck=object:Runnable{override fun run(){
+            AppThreads.onState{
+                DesktopState.refreshNow(app)
+                DeviceProfile.invalidate(app)
+                if(!rebinding&&!standbyOut&&wanted(app)&&!DesktopState.guardListed&&watchTries<3&&ensureGuard(app))watchTries++
+            }
+        }}
         val obs=object:ContentObserver(recovery){
             override fun onChange(selfChange:Boolean){
                 if(SystemClock.elapsedRealtime()>=300000){
@@ -33,11 +44,8 @@ object DesktopTakeover {
                     runCatching{app.contentResolver.unregisterContentObserver(this)}
                     return
                 }
-                AppThreads.onState{
-                    DesktopState.refreshNow(app)
-                    DeviceProfile.invalidate(app)
-                    if(!rebinding&&!standbyOut&&wanted(app)&&!DesktopState.guardListed)ensureGuard(app)
-                }
+                recovery.removeCallbacks(recheck)
+                recovery.postDelayed(recheck,1500)
             }
         }
         runCatching{app.contentResolver.registerContentObserver(Settings.Secure.getUriFor("enabled_notification_listeners"),false,obs)}
@@ -68,6 +76,27 @@ object DesktopTakeover {
     private var revivalNoted=false
     private var standbyWatch:BroadcastReceiver?=null
     private var standbyOut=false
+    private var shutdownRecheck=false
+    private val bootId:String? by lazy{runCatching{java.io.File("/proc/sys/kernel/random/boot_id").readText().trim().takeIf{it.isNotEmpty()}}.getOrNull()}
+    // Aerial de1c002: Dangbei's shutdown is a suspend and the firmware starts
+    // the app straight again as Home; the announcement is kept on disk so the
+    // new process also stays out until the screen lights or the hold expires.
+    private fun noteShutdown(context:Context){
+        if(!unlocked(context))return
+        runCatching{prefs(context).edit().putLong("shutdown_announced_at",SystemClock.elapsedRealtime()).putString("shutdown_announced_boot_id",bootId).commit()}
+    }
+    private fun clearShutdown(context:Context){
+        if(!unlocked(context))return
+        if(prefs(context).contains("shutdown_announced_at"))prefs(context).edit().remove("shutdown_announced_at").remove("shutdown_announced_boot_id").apply()
+    }
+    private fun shuttingDown(context:Context):Boolean{
+        if(!unlocked(context))return false
+        val p=prefs(context)
+        val at=p.getLong("shutdown_announced_at",0L)
+        if(at==0L)return false
+        if(p.getString("shutdown_announced_boot_id",null)!=bootId)return false
+        return SystemClock.elapsedRealtime()-at in 0 until 120000L
+    }
     fun noteRevival(context:Context){
         if(!wanted(context)||revivalNoted||SystemClock.elapsedRealtime()<120000)return
         val power=context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -89,6 +118,7 @@ object DesktopTakeover {
     }
     fun stepOutForShutdown(service:AccessibilityService){
         if(!wanted(service)||!DesktopPolicy.dangbeiStandbyDisable())return
+        noteShutdown(service)
         if(androidx.core.content.ContextCompat.checkSelfPermission(service,android.Manifest.permission.WRITE_SECURE_SETTINGS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)return
         waitForStandbyWake(service)
         if(Build.VERSION.SDK_INT>=24&&runCatching{service.disableSelf()}.isSuccess)return
@@ -112,6 +142,7 @@ object DesktopTakeover {
         }
     }
     fun resumeAfterStandby(context:Context){
+        clearShutdown(context)
         val watch=standbyWatch
         standbyWatch=null
         standbyOut=false
@@ -205,6 +236,10 @@ object DesktopTakeover {
         (wanted(context)&&enabled(context))
     fun label(context:Context)=when{!wanted(context)->"标准启动";!enabled(context)->"待授权";DesktopGuardService.connected->"兼容接管已连接";else->"兼容接管待连接"}
     private fun defaultHome(context:Context)=if(DesktopState.hasDataFor(context))DesktopState.defaultHome else context.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.let{ComponentName(it.packageName,it.name)}
+    // Aerial efe171f: the wide query (MAIN + HOME, no DEFAULT flag) next to
+    // defaultHome's strict one; a preferred record written without
+    // CATEGORY_DEFAULT answers this while the strict query falls to the chooser.
+    fun wideHome(context:Context):ComponentName? = runCatching{context.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),0)?.activityInfo?.let{ComponentName(it.packageName,it.name)}}.getOrNull()
     private fun restoreHomeEntry(context:Context){
         restoreDisabledComponent(context,ComponentName(context,"com.tvbridge.app.DesktopActivity"))
     }
@@ -449,6 +484,15 @@ object DesktopTakeover {
     }
     fun ensureGuard(context:Context):Boolean {
         if(standbyOut)return false
+        if(shuttingDown(context)){
+            waitForStandbyWake(context)
+            if(!shutdownRecheck){
+                shutdownRecheck=true
+                val app=context.applicationContext
+                recovery.postDelayed({shutdownRecheck=false;ensureGuard(app)},121000)
+            }
+            return false
+        }
         if(wanted(context)&&DesktopPolicy.standbyNeedsUnbind()){
             val power=context.getSystemService(Context.POWER_SERVICE) as PowerManager
             if(!(if(Build.VERSION.SDK_INT>=21)power.isInteractive else power.isScreenOn)){suspendForStandby(context);return false}
