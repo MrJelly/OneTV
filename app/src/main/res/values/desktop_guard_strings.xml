@@ -1,0 +1,1 @@
+<resources><string name="desktop_guard_description">仅识别原桌面窗口并返回 One，不读取屏幕内容。关闭 One 的开机接管后停止接管。</string></resources>

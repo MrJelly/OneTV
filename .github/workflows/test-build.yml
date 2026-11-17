@@ -1,0 +1,76 @@
+name: Test build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: test-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" >/dev/null'
+      - name: Build signed APKs
+        env:
+          KEY_DATA: ${{ secrets.ONE_KEYSTORE_BASE64 }}
+          ONE_KEYSTORE_PASSWORD: ${{ secrets.ONE_KEYSTORE_PASSWORD }}
+          ONE_KEY_ALIAS: ${{ secrets.ONE_KEY_ALIAS }}
+          ONE_KEY_PASSWORD: ${{ secrets.ONE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEY_DATA"
+          umask 077
+          export ONE_KEYSTORE_PATH="$RUNNER_TEMP/one.keystore"
+          trap 'rm -f "$ONE_KEYSTORE_PATH"' EXIT
+          printf '%s' "$KEY_DATA" | base64 --decode > "$ONE_KEYSTORE_PATH"
+          ./gradlew :app:assembleRelease
+      - name: Verify packages and prepare assets
+        run: |
+          set -euo pipefail
+          dir=app/build/outputs/apk/release
+          python3 scripts/verify-apks.py "$dir"/*release.apk
+          version="$(sed -n "s/^ *versionName '\([^']*\)'$/\1/p" app/build.gradle)"
+          code="$(sed -n 's/^ *versionCode \([0-9]*\)$/\1/p' app/build.gradle)"
+          echo "versionName=$version versionCode=$code"
+          test -n "$version" && test -n "$code"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          expected=2157f906b100ae2b111f582978bc31cd56df6c40154741900cd336d391bc84ab
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          mkdir dist
+          for abi in universal arm64-v8a armeabi-v7a; do
+            name="One-$version"
+            if [[ "$abi" != universal ]]; then name="$name-$abi"; fi
+            apk="$dir/app-$abi-release.apk"
+            cert="$("$tools/apksigner" verify --print-certs "$apk")"
+            grep -F "certificate SHA-256 digest:" <<< "$cert" || true
+            if ! grep -Fx "Signer #1 certificate SHA-256 digest: $expected" <<< "$cert"; then
+              echo "SIGNER_MISMATCH actual digest printed above, expected $expected"
+              exit 1
+            fi
+            badging="$("$tools/aapt" dump badging "$apk")"
+            grep -F "package:" <<< "$badging" | head -1 || true
+            if ! grep -F "versionCode='$code' versionName='$version'" <<< "$badging"; then
+              echo "VERSION_MISMATCH actual package line printed above, expected versionCode=$code versionName=$version"
+              exit 1
+            fi
+            cp "$apk" "dist/$name.apk"
+          done
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+      - name: Upload to prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="test-$VERSION-${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" --prerelease --title "OneTV $VERSION · Test ${GITHUB_RUN_NUMBER}" --notes "开发测试包（私有仓预发布，仅自己可见）。验证完成后可删除；正式发布仍走 v 标签流程。" dist/*

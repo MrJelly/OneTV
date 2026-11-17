@@ -1,0 +1,7 @@
+NextLib v0.8.2 (GPL-3.0)
+Source commit: 50eedfd724336ad7c8cd78c2791080c8307f0760
+Source and native FFmpeg build configuration: https://github.com/anilbeesetti/nextlib/tree/v0.8.2
+Artifact: com.github.anilbeesetti.nextlib:nextlib-media3ext:v0.8.2
+The original AAR is used without modifications.
+Full license: GPL-3.0.txt
+One integration source: https://github.com/MrJelly/OneTV

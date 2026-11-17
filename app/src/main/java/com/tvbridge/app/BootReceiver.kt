@@ -1,0 +1,91 @@
+package com.tvbridge.app
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.os.SystemClock
+import android.provider.Settings
+
+open class BootReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if(intent.action !in setOf(Intent.ACTION_BOOT_COMPLETED,Intent.ACTION_LOCKED_BOOT_COMPLETED,Intent.ACTION_USER_UNLOCKED,Intent.ACTION_MY_PACKAGE_REPLACED,"com.dangbei.action.BOOT_COMPLETED","com.dangbei.action.STR_BOOT_COMPLETED"))return
+        val pending=goAsync()
+        AppThreads.onBoot{
+            try{onBoot(context,intent)}finally{pending.finish()}
+        }
+    }
+    private fun onBoot(context: Context, intent: Intent) {
+        val app=context.applicationContext
+        DesktopState.refresh(app)
+        DeviceProfile.warm(app)
+        if(!DesktopTakeover.unlocked(app)){DesktopTakeover.afterUnlock(app);return}
+        val prefs=app.getSharedPreferences("startup",Context.MODE_PRIVATE)
+        val wake = intent.action == "com.dangbei.action.STR_BOOT_COMPLETED"
+        if(wake){
+            DesktopTakeover.resumeAfterStandby(app)
+            if(!DesktopTakeover.returnsAfterStandby(app)){
+                DesktopTakeover.recover(app)
+                return
+            }
+        }
+        if(intent.action==Intent.ACTION_MY_PACKAGE_REPLACED){
+            val updatedSelf=InstallHandoff.consumeAfterSelfUpdate(app)
+            DesktopTakeover.recover(app)
+            if(updatedSelf&&DesktopTakeover.wanted(app)&&Hub.activity?.visible!=true){
+                runCatching{app.startActivity(Intent(app,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra("show_home",true))}
+            }
+            return
+        }
+        if(DesktopTakeover.wanted(app)){
+            DesktopTakeover.recover(app)
+            if(DesktopGuardService.connected){
+                DesktopGuardService.onBootCompleted(wake)
+                return
+            }
+        }
+        if(!prefs.getBoolean("boot",false)||DesktopPolicy.startsOnSignalSource(app)||DesktopRecovery.leftForAnApp)return
+        if(wake){
+            val elapsed=SystemClock.elapsedRealtime();val previous=prefs.getLong("boot_last_wake_elapsed",-60000)
+            if(elapsed-previous in 0L..15000L)return
+            prefs.edit().putLong("boot_last_wake_elapsed",elapsed).apply()
+        }
+        prefs.edit().putString("boot_action",intent.action).putLong("boot_received_at",System.currentTimeMillis()).putString("boot_status","received").apply()
+        if(!wake&&arrivedThisBoot(app)&&(Hub.activity?.visible==true||BrowserActivity.active!=null)){prefs.edit().putString("boot_status","already_arrived").apply();return}
+        if(!InstallHandoff.active(app)&&Hub.activity?.visible!=true&&BrowserActivity.active==null){
+            DesktopTakeover.schedule(app)
+            try{
+                prefs.edit().putString("boot_status","launch_requested").apply()
+                app.startActivity(Intent(app,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra("from_boot",true))
+            }catch(e:RuntimeException){
+                prefs.edit().putString("boot_status","launch_rejected").putString("boot_error",e.javaClass.simpleName).apply()
+            }
+        }
+        DesktopTakeover.recover(app)
+    }
+    companion object {
+        private fun bootCount(context:Context)=if(Build.VERSION.SDK_INT>=24)Settings.Global.getInt(context.contentResolver,Settings.Global.BOOT_COUNT,-1)else -1
+        fun arrivedThisBoot(context:Context):Boolean {
+            if(!DesktopTakeover.unlocked(context))return false
+            val prefs=context.getSharedPreferences("startup",Context.MODE_PRIVATE)
+            val bootId=DesktopRecovery.BOOT_ID
+            val savedId=prefs.getString("boot_arrived_id",null)
+            if(bootId!=null&&savedId!=null)return savedId==bootId
+            val count=bootCount(context)
+            if(count>=0)return prefs.getInt("boot_arrived_count",-2)==count
+            val arrived=prefs.getLong("boot_arrived_at",0);val now=System.currentTimeMillis()
+            return arrived>0&&arrived in (now-SystemClock.elapsedRealtime())..now
+        }
+        fun markArrived(context:Context){DesktopTakeover.cancel(context);context.getSharedPreferences("startup",Context.MODE_PRIVATE).edit().putString("boot_status","activity_arrived").putLong("boot_arrived_at",System.currentTimeMillis()).putInt("boot_arrived_count",bootCount(context)).putString("boot_arrived_id",DesktopRecovery.BOOT_ID).apply()}
+    }
+}
+
+class DangbeiBootReceiver : BootReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (!DesktopPolicy.dangbeiStandbyDisable()) return
+        if (intent.action == "com.dangbei.action.BOOT_COMPLETED" ||
+            intent.action == "com.dangbei.action.STR_BOOT_COMPLETED") {
+            super.onReceive(context, intent)
+        }
+    }
+}

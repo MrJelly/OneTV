@@ -1,0 +1,9 @@
+<resources>
+    <style name="LiveTheme" parent="LiveThemeBase">
+        <item name="android:windowSplashScreenBackground">#121820</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:statusBarColor">#121820</item>
+        <item name="android:navigationBarColor">#121820</item>
+    </style>
+</resources>

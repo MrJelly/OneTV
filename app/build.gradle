@@ -1,0 +1,91 @@
+plugins { id 'com.android.application'; id 'org.jetbrains.kotlin.android' }
+def playerVersion = '1.4.1'
+def signingVariables = ['ONE_KEYSTORE_PATH', 'ONE_KEYSTORE_PASSWORD', 'ONE_KEY_ALIAS', 'ONE_KEY_PASSWORD']
+def releaseSigning = signingVariables.collectEntries { [(it): System.getenv(it)] }
+def signRelease = releaseSigning.values().any { it }
+if (signRelease) {
+    def missing = signingVariables.findAll { !releaseSigning[it] }
+    if (missing) throw new GradleException("Incomplete release signing configuration: ${missing.join(', ')}")
+
+    def store = java.security.KeyStore.getInstance(file(releaseSigning.ONE_KEYSTORE_PATH),
+            releaseSigning.ONE_KEYSTORE_PASSWORD.toCharArray())
+    def certificate = store.getCertificate(releaseSigning.ONE_KEY_ALIAS)
+    def expected = '2157f906b100ae2b111f582978bc31cd56df6c40154741900cd336d391bc84ab'
+    def fingerprint = certificate == null ? null :
+            java.security.MessageDigest.getInstance('SHA-256').digest(certificate.encoded).encodeHex().toString()
+    if (fingerprint != expected || !store.isKeyEntry(releaseSigning.ONE_KEY_ALIAS)) {
+        throw new GradleException('Release signing requires the original OneTV signing key.')
+    }
+}
+android {
+    buildFeatures { buildConfig true }
+    namespace 'com.tvbridge.app'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+    defaultConfig {
+        applicationId 'com.tvbridge.app'
+        minSdk 19
+        targetSdk 35
+        versionCode 76
+        versionName '1.3'
+
+
+
+
+        resConfigs "zh", "en"
+
+
+
+
+
+
+
+        multiDexEnabled true
+    }
+
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'armeabi-v7a', 'arm64-v8a'
+            universalApk true
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    kotlinOptions { jvmTarget = '17' }
+    signingConfigs {
+        if (signRelease) {
+            release {
+                storeFile file(releaseSigning.ONE_KEYSTORE_PATH)
+                storePassword releaseSigning.ONE_KEYSTORE_PASSWORD
+                keyAlias releaseSigning.ONE_KEY_ALIAS
+                keyPassword releaseSigning.ONE_KEY_PASSWORD
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            if (signRelease) signingConfig signingConfigs.release
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    packagingOptions { jniLibs { excludes += ['**/arm64-v8a/libconscrypt_jni.so', '**/x86/**', '**/x86_64/**'] } }
+}
+dependencies {
+    implementation 'org.conscrypt:conscrypt-android:2.5.3'
+    implementation 'androidx.multidex:multidex:2.0.1'
+    implementation 'androidx.core:core:1.9.0'
+
+
+    implementation 'androidx.exifinterface:exifinterface:1.3.6'
+    implementation files('libs/zxing-core-3.5.3.jar')
+    implementation "androidx.media3:media3-exoplayer:${playerVersion}"
+    implementation "androidx.media3:media3-exoplayer-hls:${playerVersion}"
+    implementation "androidx.media3:media3-exoplayer-dash:${playerVersion}"
+    implementation "androidx.media3:media3-exoplayer-rtsp:${playerVersion}"
+    implementation "androidx.media3:media3-exoplayer-smoothstreaming:${playerVersion}"
+    implementation 'com.github.anilbeesetti.nextlib:nextlib-media3ext:v0.8.2'
+    implementation "androidx.media3:media3-ui:${playerVersion}"
+}

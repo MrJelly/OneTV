@@ -1,0 +1,10 @@
+* text=auto
+*.sh text eol=lf
+gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.png binary
+app/src/main/assets/legacy-ca.pem text eol=lf
+# Vendored native runtime (incl. generated WASM-to-C sources): keep it out of
+# GitHub's language statistics so the repo reports the app's real language.
+native/** linguist-vendored=true
