@@ -103,6 +103,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         railColumn=column
         sourceButton=action(column,"直播源",true){sources()}
         (sourceButton.layoutParams as LinearLayout.LayoutParams).apply{width=-1;height=if(touchDevice)dp(42) else dp(36);marginEnd=0;bottomMargin=dp(4)}
+        sourceButton.compoundDrawablesRelative[0]?.let{val n=(30*NativeUi.scale(context)).toInt();it.setBounds(0,0,n,n);sourceButton.compoundDrawablePadding=dp(5)}
         sourceButton.background=GlassUi.surface(sourceButton,GlassUi.CHIP_RADIUS,video=true,dark=true,faint=true)
         val railScroll=ScrollView(context).apply{isVerticalScrollBarEnabled=false;isFocusable=false;overScrollMode=View.OVER_SCROLL_NEVER;isFillViewport=true}
         railScroll.addView(rail,FrameLayout.LayoutParams(-1,-2))
@@ -333,7 +334,8 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
                 orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
                 val badge=TextView(context);badge.tag="badge";badge.gravity=Gravity.CENTER;badge.includeFontPadding=false
                 badge.background=GradientDrawable().apply{setColor(0x2effffff);cornerRadius=dp(4).toFloat();setStroke((NativeUi.scale(context)).toInt().coerceAtLeast(1),0x59ffffff)}
-                addView(badge,LinearLayout.LayoutParams(dp(22),dp(22)))
+                badge.minWidth=dp(22);badge.maxLines=1;badge.setPadding(dp(3),0,dp(3),0)
+                addView(badge,LinearLayout.LayoutParams(-2,dp(22)))
                 val name=TextView(context);name.tag="name";name.maxLines=1;name.ellipsize=android.text.TextUtils.TruncateAt.END
                 addView(name,LinearLayout.LayoutParams(0,-2,1f).apply{marginStart=dp(8)})
                 val starHit=FrameLayout(context);starHit.tag="starHit"
@@ -342,11 +344,14 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             }
             val badge=row.findViewWithTag<TextView>("badge");val name=row.findViewWithTag<TextView>("name");val star=row.findViewWithTag<View>("star")
             val favorite=repo.favorite(item.id)
-            row.isSelected=(parent as? AbsListView)?.selectedItemPosition==position||item.id==current?.id
-            row.background=GlassUi.surface(row,GlassUi.CHIP_RADIUS,video=true,dark=true,faint=true,plain=true)
+            val playing=item.id==current?.id
+            row.isSelected=(parent as? AbsListView)?.selectedItemPosition==position||playing
+            row.background=GlassUi.surface(row,GlassUi.CHIP_RADIUS,video=true,dark=true,faint=true,plain=true,marked=playing)
             row.setPadding(dp(8),0,dp(6),0);row.minimumHeight=dp(if(touchDevice)42 else 36)
-            badge.text=(position+1).toString();NativeUi.textSize(badge,20f);badge.setTextColor(0xffc8d0d8.toInt())
-            name.text=item.name;NativeUi.textSize(name,28f);name.setTextColor(liveFocusColors())
+            badge.text=(position+1).toString();NativeUi.textSize(badge,20f)
+            (badge.background as? GradientDrawable)?.setColor(if(playing)0xd9ffffff.toInt() else 0x2effffff)
+            badge.setTextColor(if(playing)0xff292f32.toInt() else 0xffc8d0d8.toInt())
+            name.text=item.name;NativeUi.textSize(name,28f);name.setTextColor(liveFocusColors());name.setTypeface(null,if(playing)Typeface.BOLD else Typeface.NORMAL)
             star.background=AppIcons.Vector("star"){if(favorite)0xffffc233.toInt() else 0x59ffffff}
             val starHit=row.findViewWithTag<View>("starHit");starHit.contentDescription="收藏";starHit.setOnClickListener{val pos=drawerList.firstVisiblePosition;val top=drawerList.getChildAt(0)?.top?:0;repo.toggleFavorite(item.id);refresh();drawerList.setSelectionFromTop(pos,top)}
             return row
@@ -448,7 +453,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         groupPopup?.dismiss();val entries=repo.sourceList()
         val activeNow=repo.activeSource();val manageable=activeNow!="local";val labels=entries.map{"${it.name} · ${it.channels.size} 台"}+(if(manageable)listOf("更新订阅","删除当前源")else emptyList())
         val popup=ListPopupWindow(context);groupPopup=popup;popup.anchorView=sourceButton;popup.isModal=true;popup.width=if(drawer.width>0)drawer.width-dp(24) else dp(368)-dp(24);popup.height=dp((labels.size*38+16).coerceAtMost(250));popup.verticalOffset=dp(4);popup.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-        popup.setAdapter(object:ArrayAdapter<String>(context,android.R.layout.simple_list_item_1,labels){override fun getView(position:Int,convert:View?,parent:ViewGroup)=TextView(context).apply{text=labels[position];NativeUi.textSize(this,28f);val selPos=(parent as? AbsListView)?.selectedItemPosition;val selected=if(selPos!=null&&selPos>=0)selPos==position else entries.getOrNull(position)?.url==repo.activeSource();setTextColor(if(selected)Color.WHITE else 0xffc8d0d8.toInt());setTypeface(null,if(selected)Typeface.BOLD else Typeface.NORMAL);background=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT);gravity=Gravity.CENTER_VERTICAL;setPadding(dp(12),0,dp(12),0);minHeight=dp(38);maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END
+        popup.setAdapter(object:ArrayAdapter<String>(context,android.R.layout.simple_list_item_1,labels){override fun getView(position:Int,convert:View?,parent:ViewGroup)=TextView(context).apply{text=labels[position];NativeUi.textSize(this,28f);val selPos=(parent as? AbsListView)?.selectedItemPosition;val selected=if(selPos!=null&&selPos>=0)selPos==position else entries.getOrNull(position)?.url==repo.activeSource();setTextColor(Color.WHITE);setTypeface(null,if(selected)Typeface.BOLD else Typeface.NORMAL);background=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT);gravity=Gravity.CENTER_VERTICAL;setPadding(dp(12),0,dp(12),0);minHeight=dp(38);maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END
             if(entries.getOrNull(position)?.url==repo.activeSource()){
                 val mark=AppIcons.Vector("check"){currentTextColor}.apply{val size=(22*NativeUi.scale(context)).toInt();setBounds(0,0,size,size)}
                 setCompoundDrawablesRelative(null,null,mark,null);compoundDrawablePadding=dp(8);contentDescription=labels[position]+"，已选择"
@@ -458,7 +463,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             index<entries.size->{repo.selectSource(entries[index].url);favoritesOnly=false;refresh();all.firstOrNull()?.let{play(it,true)}}
             index==entries.size->{val active=repo.activeSource();if(active!="local")AppThreads.onIo{repo.subscribe(active);ui.post{if(!released){refresh();NativeUi.notice(context,repo.lastMessage)}}}}
             else->showLiveDialog(AlertDialog.Builder(context).setMessage("删除当前直播源？").setPositiveButton("删除"){_,_->repo.removeSource(repo.activeSource());refresh();all.firstOrNull()?.let{play(it,true)}}.setNegativeButton("取消",null))
-        }};popup.show();popup.listView?.let{it.background=GlassUi.surface(it,20f,video=true,dark=true,dense=true,alphaBoost=0x20);it.setPadding(dp(8),dp(8),dp(8),dp(8));it.divider=null;it.dividerHeight=0;setupList(it,false);it.selector=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT);it.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{override fun onNothingSelected(parent:AdapterView<*>?){} override fun onItemSelected(parent:AdapterView<*>?,child:View?,position:Int,id:Long){for(i in 0 until it.childCount){val row=it.getChildAt(i) as? TextView ?: continue;val selected=it.firstVisiblePosition+i==position;row.setTypeface(null,if(selected)Typeface.BOLD else Typeface.NORMAL);row.setTextColor(if(selected)Color.WHITE else 0xffc8d0d8.toInt())}}};it.post{it.requestFocusFromTouch();it.setSelection(entries.indexOfFirst{it.url==repo.activeSource()}.coerceAtLeast(0))}}
+        }};popup.show();popup.listView?.let{it.background=GlassUi.surface(it,20f,video=true,dark=true,dense=true,alphaBoost=0x20);it.setPadding(dp(8),dp(8),dp(8),dp(8));it.divider=null;it.dividerHeight=0;setupList(it,false);it.selector=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT);it.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{override fun onNothingSelected(parent:AdapterView<*>?){} override fun onItemSelected(parent:AdapterView<*>?,child:View?,position:Int,id:Long){for(i in 0 until it.childCount){val row=it.getChildAt(i) as? TextView ?: continue;val selected=it.firstVisiblePosition+i==position;row.setTypeface(null,if(selected)Typeface.BOLD else Typeface.NORMAL);row.setTextColor(Color.WHITE)}}};it.post{it.requestFocusFromTouch();it.setSelection(entries.indexOfFirst{it.url==repo.activeSource()}.coerceAtLeast(0))}}
     }
     private fun closePanels(){drawer.visibility=View.GONE;hideControls()}
     private fun showControls(focus:Boolean=!touchDevice){fullTitle.visibility=View.VISIBLE;overlay.visibility=View.VISIBLE;ui.removeCallbacks(hide);if(focus){if(!controls.hasFocus())controls.getChildAt(0)?.requestFocus()}else ui.postDelayed(hide,5000)}

@@ -137,6 +137,18 @@ class DesktopGuardService:AccessibilityService(){
     private val bootChecks=listOf(1500L,4000L,12000L,25000L,45000L).associateWith{Runnable{inspectFront(woke=true)}}
     private var screenOff=false
     private fun active()=!screenOff&&!InstallHandoff.active(this)&&DesktopTakeover.wanted(this)&&DesktopTakeover.screenReady(this)
+    /** The guard's state, named in one place. GUARDING is exactly the
+     *  condition the key gate and the key configuration have always used —
+     *  active and outside the automatic-pause window — so both read the
+     *  state from here instead of restating the conditions. OFF covers
+     *  screen-off, install handover and takeover-not-wanted alike; the
+     *  standby decision itself stays in DesktopTakeover. */
+    enum class Mode { OFF, PAUSED, GUARDING }
+    private fun mode():Mode = when {
+        !active() -> Mode.OFF
+        SystemClock.uptimeMillis() < automaticPausedUntil -> Mode.PAUSED
+        else -> Mode.GUARDING
+    }
     private fun stock(component:ComponentName?)=component!=null&&(component in homeComponents()||DesktopPolicy.bootCover(component))
     private fun firmwarePushedAtBoot(pkg:String)=pkg in DesktopPolicy.FIRMWARE_BOOT_APPS&&SystemClock.elapsedRealtime()<180000&&!keySeen
     private fun allowedStock()=SystemClock.uptimeMillis()<allowStockUntil
@@ -257,7 +269,7 @@ class DesktopGuardService:AccessibilityService(){
         val wakeWindow = lastScreenOn != Long.MIN_VALUE && elapsed - lastScreenOn < 15_000L
         val settling = if (wakeWindow) DesktopTakeover.returnsAfterStandby(this@DesktopGuardService)
             else elapsed < 60_000L
-        val watchForeground = DeviceProfile.watchForeground || deaf
+        val watchForeground = TakeoverPolicy.resolve(this@DesktopGuardService).watchForeground || deaf
         if(active()&&!allowedStock()&&Hub.activity?.visible!=true){
             if(settling)inspectFront(woke=true)
             else if(watchForeground){
@@ -340,19 +352,20 @@ class DesktopGuardService:AccessibilityService(){
         mouse=pointer
         configureKeys()
     }
-    // The vendor answers come from DeviceProfile: probed once per package
-    // set on the state thread, never on this thread. Only the dynamic inputs
-    // (active, gamepad, mouse, the automatic-pause window) are read per call.
+    // The vendor answers come from TakeoverPolicy: probed facts and model
+    // rules resolved once, never recomputed on this thread. Only the dynamic
+    // inputs (the guard's mode, gamepad, mouse, the front app) are read per call.
     private fun configureKeys(){
         val info=serviceInfo?:return
-        DeviceProfile.ensure(this)
+        val policy=TakeoverPolicy.resolve(this)
         val padGame=gamepad&&Hub.activity?.visible!=true&&front?.packageName?.let{it!=packageName&&!stock(front)}==true
-        val mouseUnsafe=mouse&&DeviceProfile.xiaomiInput
-        val filter=active()&&SystemClock.uptimeMillis()>=automaticPausedUntil&&!padGame&&!mouseUnsafe&&!DeviceProfile.passKeys&&!DeviceProfile.volumeFilterUnsafe&&(Build.VERSION.SDK_INT<=30||!DeviceProfile.backOnPause||Hub.activity?.visible==true)
+        val mouseUnsafe=mouse&&policy.xiaomiInput
+        val homeFilter=policy.filterHomeWhenDefault||DesktopState.defaultHome?.packageName!=packageName
+        val filter=mode()==Mode.GUARDING&&homeFilter&&!padGame&&!mouseUnsafe&&!policy.passKeys&&!policy.volumeFilterUnsafe&&(Build.VERSION.SDK_INT<=30||!policy.backOnPause||Hub.activity?.visible==true)
         val flag=AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
         var next=if(filter||homeDown)info.flags or flag else info.flags and flag.inv()
-        if(DesktopTakeover.unlocked(this)&&DeviceAdapters.profile(this).neverFilterKeys)next=next and flag.inv()
-        if(filter&&Build.VERSION.SDK_INT<=23&&DeviceProfile.otherFilter)next=next and AccessibilityServiceInfo.DEFAULT.inv()
+        if(DesktopTakeover.unlocked(this)&&policy.neverFilterKeys)next=next and flag.inv()
+        if(filter&&Build.VERSION.SDK_INT<=23&&policy.otherFilter)next=next and AccessibilityServiceInfo.DEFAULT.inv()
         if(next!=info.flags){info.flags=next;serviceInfo=info}
     }
     override fun onCreate(){
@@ -400,7 +413,7 @@ class DesktopGuardService:AccessibilityService(){
         if(!isUnlocked)DesktopTakeover.afterUnlock(this)
         else if(DesktopTakeover.wanted(this)&&(SystemClock.elapsedRealtime()<180000||DesktopTakeover.returnsAfterStandby(this)))settle(boot=SystemClock.elapsedRealtime()<180000)
         if(isUnlocked&&SystemClock.elapsedRealtime()<180000){
-            val bootMs=DeviceAdapters.profile(this).bootStockMs
+            val bootMs=TakeoverPolicy.resolve(this).bootStockMs
             if(bootMs>0){
                 bootStockHolding=true;bootStockShown=false;bootStockMs=bootMs
                 val hold=maxOf(20000L,bootMs.toLong())
@@ -415,7 +428,8 @@ class DesktopGuardService:AccessibilityService(){
     }
     override fun onKeyEvent(event:KeyEvent):Boolean{
         keySeen=true
-        if(event.keyCode!=KeyEvent.KEYCODE_HOME||(!homeDown&&(!active()||SystemClock.uptimeMillis()<automaticPausedUntil)))return false
+        if(event.keyCode!=KeyEvent.KEYCODE_HOME||(!homeDown&&mode()!=Mode.GUARDING))return false
+        if(!homeDown&&!TakeoverPolicy.resolve(this).filterHomeWhenDefault&&DesktopState.defaultHome?.packageName==packageName)return false
         if(event.action==KeyEvent.ACTION_DOWN){if(event.repeatCount==0){
             homeDown=true;homeHeld=false;ui.removeCallbacks(hold)
             if(event.eventTime-lastHomeUp in 0..400){homeHeld=true;lastHomeUp=-3000;if(Hub.activity?.visible==true){ui.post{Hub.activity?.showHome()}}else launch(explicit=true)}

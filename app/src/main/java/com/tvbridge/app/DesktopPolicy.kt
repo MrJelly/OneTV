@@ -56,6 +56,34 @@ internal object DesktopPolicy {
     }.getOrDefault(false)
 
     fun bootCover(component:ComponentName)=android.os.SystemClock.elapsedRealtime()<180000&&component==ComponentName("com.mitv.tvhome","com.mitv.tvhome.BootActivity")
+    /**
+     * Skyworth/Coocaa firmwares boot their homepage by component, not by
+     * HOME resolution, so a stock launcher that declares no HOME category
+     * is invisible to the usual queries. The component is recorded in the
+     * persist properties and in the firmware's general_config.xml
+     * (DEFAULT_HOMEPAGE); Aerial's CoocaaHome reads the same two sources.
+     * Read-only: this identifies the stock home for the guard's stock set
+     * and for restore; it never writes either source. The component is
+     * returned only when it names a real, enabled activity of another app.
+     */
+    fun coocaaHome(context:Context):ComponentName? {
+        if(!volumeFilterUnsafe(context))return null
+        val fromProps=runCatching{
+            val getter=Class.forName("android.os.SystemProperties").getMethod("get",String::class.java)
+            val pkg=(getter.invoke(null,"persist.service.homepage.pkg") as? String)?.trim().orEmpty()
+            val cls=(getter.invoke(null,"persist.service.homepage.cls") as? String)?.trim().orEmpty()
+            if(pkg.isNotEmpty()&&cls.isNotEmpty())ComponentName(pkg,cls)else null
+        }.getOrNull()
+        val found=fromProps?:runCatching{
+            val file=java.io.File("/system/pcfg/${Build.MODEL}/config/general_config.xml")
+            if(!file.isFile)null else {
+                val tag=file.readText().split('<').firstOrNull{it.contains("DEFAULT_HOMEPAGE")}
+                tag?.let{Regex("[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+").find(it)?.value}?.let{ComponentName.unflattenFromString(it)}
+            }
+        }.getOrNull()
+        return found?.takeIf{component->component.packageName!=context.packageName&&
+            runCatching{context.packageManager.getActivityInfo(component,0).enabled}.getOrDefault(false)}
+    }
     fun extras(context:Context,known:Set<ComponentName>):Set<ComponentName> {
         val packages=known.map{it.packageName}.toSet()
         return (unfiltered+trampolines.filterKeys{it in packages}).map{ComponentName(it.key,it.value)}

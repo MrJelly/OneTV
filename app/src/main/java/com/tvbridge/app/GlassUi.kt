@@ -183,8 +183,8 @@ object GlassUi {
      * io lane over reused pixel buffers, so a low-end box neither stalls its UI
      * thread nor churns the GC. When the frost lands, every live scene material
      * repaints itself with it; until then it shows the wallpaper frost. SurfaceView
-     * content (live video) cannot be captured this way — surfaces over video keep
-     * the smoke fallback via the existing video branch.
+     * content (live video) cannot be captured this way, so surfaces over video
+     * sample a plain deep-grey backdrop through the same path instead.
      */
     fun prepareScene(context: Context) {
         val root = activity(context)?.window?.decorView ?: return
@@ -308,8 +308,9 @@ object GlassUi {
         alphaBoost: Int = 0,
         bottomCorners: Boolean = true,
         scene: Boolean = false,
-        plain: Boolean = false
-    ): Drawable = Material(view, radius, frost, video, dark, dense, border, faint, alphaBoost, bottomCorners, false, null, null, scene, plain)
+        plain: Boolean = false,
+        marked: Boolean = false
+    ): Drawable = Material(view, radius, frost, video, dark, dense, border, faint, alphaBoost, bottomCorners, false, null, null, scene, plain, marked)
 
     fun homeGlass(view:View,radius:Float,screenLeft:Int?=null,screenTop:Int?=null):Drawable =
         Material(view,radius,null,false,true,false,true,false,0,true,true,screenLeft,screenTop)
@@ -418,7 +419,11 @@ object GlassUi {
         private val screenLeft: Int? = null,
         private val screenTop: Int? = null,
         private val scene: Boolean = false,
-        private val plain: Boolean = false
+        private val plain: Boolean = false,
+        /** Draw the selected treatment unconditionally: for rows whose
+         *  "current" fact lives in the data, not in the view state the
+         *  list keeps overwriting (the playing channel's row). */
+        private val marked: Boolean = false
     ) : Drawable() {
         private var sampled: Bitmap? = null
         private var sampledShader: BitmapShader? = null
@@ -428,6 +433,7 @@ object GlassUi {
         private val rect = RectF()
         private val point = IntArray(2)
         private var isSelected = false
+        private fun selected() = marked || isSelected
         private val path = Path()
         private val edgePath = Path()
         private val edgeRect = RectF()
@@ -436,8 +442,6 @@ object GlassUi {
         private var geometryScale = -1f
         private var topHighlight: Shader? = null
         private var bottomHighlight: Shader? = null
-        private var smokeShader: Shader? = null
-        private var smokeKey: String? = null
 
         init { if (scene) registerSceneMaterial(this) }
 
@@ -449,13 +453,13 @@ object GlassUi {
             rect.set(bounds)
             val corner = radius * scale
             path.set(SmoothCorners.smoothRect(rect, corner, if (bottomCorners) corner else 0f))
-            val rimWidth = (if(homeGlass) 2.4f else if (scene) 2.0f else if (isSelected && !plain) 2.2f else if (isSelected) 1.8f else 1.2f) * scale
+            val rimWidth = (if(homeGlass) 2.4f else if (scene) 2.0f else if (selected() && !plain) 2.2f else if (selected()) 1.8f else 1.2f) * scale
             rimPaint.strokeWidth = rimWidth
             if (plain) {
                 // List items keep the original border: a flat hairline rim, no lit
                 // edge and no sheen — the glass light is for windows and buttons.
                 rimPaint.shader = null
-                rimPaint.color = Color.argb(if (isSelected) 178 else 56, 255, 255, 255)
+                rimPaint.color = Color.argb(if (selected()) 178 else 56, 255, 255, 255)
                 topHighlight = null
                 bottomHighlight = null
             } else {
@@ -463,16 +467,8 @@ object GlassUi {
                 // One lit edge, the folder's recipe: iOS glass catches its light on
                 // the horizontal edges — bright along the top, faint down the sides,
                 // lit again (a little less) along the bottom. Selected, the whole
-                // perimeter lights up instead. Over video the same light runs at
-                // a lower strength on the smoked glass.
-                rimPaint.shader = if (video) {
-                    if (isSelected) LinearGradient(rect.left,rect.top,rect.left,rect.bottom,
-                        intArrayOf(0xb3ffffff.toInt(),0x59ffffff,0x59ffffff,0xb3ffffff.toInt()),
-                        floatArrayOf(0f,.4f,.6f,1f),Shader.TileMode.CLAMP)
-                    else LinearGradient(rect.left,rect.top,rect.left,rect.bottom,
-                        intArrayOf(0x59ffffff,0x10ffffff,0x10ffffff,0x38ffffff),
-                        floatArrayOf(0f,.4f,.6f,1f),Shader.TileMode.CLAMP)
-                } else if (isSelected) LinearGradient(rect.left,rect.top,rect.left,rect.bottom,
+                // perimeter lights up instead.
+                rimPaint.shader = if (selected()) LinearGradient(rect.left,rect.top,rect.left,rect.bottom,
                     intArrayOf(0xf2ffffff.toInt(),0x99ffffff.toInt(),0x99ffffff.toInt(),0xf2ffffff.toInt()),
                     floatArrayOf(0f,.4f,.6f,1f),Shader.TileMode.CLAMP)
                 else LinearGradient(rect.left,rect.top,rect.left,rect.bottom,
@@ -538,47 +534,18 @@ object GlassUi {
             canvas.clipPath(path)
 
             if (video) {
+                // Baked, never sampled: over moving content the glass is a
+                // fixed translucent black-grey, measured once against the
+                // desktop glass and written down as a colour. Nothing is
+                // captured, shaded or tinted at runtime; density folds
+                // into the fill's alpha, and the sheen and rim below are
+                // the same ones the desktop glass draws.
+                paint.style = Paint.Style.FILL
                 paint.shader = null
                 paint.colorFilter = null
-                paint.style = Paint.Style.FILL
-                val smokeAlpha = if (dense) 0xe8 else if (faint) 0xa6 else 0xdc
-                val a = (smokeAlpha + alphaBoost).coerceIn(0, 255)
-                paint.color = if (dark) {
-                    Color.argb(
-                        a,
-                        if (dense) 32 else 20,
-                        if (dense) 36 else 24,
-                        if (dense) 40 else 28
-                    )
-                } else {
-                    Color.argb(a, 235, 240, 245)
-                }
-                if (!plain) {
-                    // Smoked glass instead of a flat slab: the fixed panels over
-                    // video get a vertical fall-off (lit at the top, deep at the
-                    // bottom) plus the same sheen the frosted glass wears.
-                    val key = "${rect.width()}x${rect.height()}|$dark|$a"
-                    if (key != smokeKey) {
-                        smokeKey = key
-                        smokeShader = if (dark) LinearGradient(rect.left, rect.top, rect.left, rect.bottom,
-                            intArrayOf(Color.argb(a, 58, 63, 68), Color.argb(a, 32, 36, 40), Color.argb(a, 17, 19, 22)),
-                            floatArrayOf(0f, .55f, 1f), Shader.TileMode.CLAMP)
-                        else LinearGradient(rect.left, rect.top, rect.left, rect.bottom,
-                            intArrayOf(Color.argb(a, 248, 250, 252), Color.argb(a, 235, 240, 245), Color.argb(a, 208, 215, 222)),
-                            floatArrayOf(0f, .55f, 1f), Shader.TileMode.CLAMP)
-                    }
-                    paint.shader = smokeShader
-                }
+                val alpha = ((if (dark) 178 else 205) + (if (dense) 22 else 0) + alphaBoost).coerceIn(0, 242)
+                paint.color = if (dark) Color.argb(alpha, 18, 20, 24) else Color.argb(alpha, 233, 237, 240)
                 canvas.drawRect(rect, paint)
-                paint.shader = null
-                if (!plain) {
-                    paint.shader = topHighlight
-                    canvas.drawRect(rect, paint)
-                    paint.shader = bottomHighlight
-                    canvas.drawRect(rect, paint)
-                    paint.shader = null
-                }
-
             } else {
                 val source = captured ?: if (scene) sceneFrost(view.context) else try { wallpaper(view.context) } catch (_: Exception) { staticFrost(view.context) }
                 view.getLocationOnScreen(point)
@@ -605,20 +572,20 @@ object GlassUi {
                     paint.color = Color.argb(((if (dense) 18 else 0) + alphaBoost).coerceIn(0, 100), if (dark) 0 else 255, if (dark) 0 else 255, if (dark) 0 else 255)
                     canvas.drawRect(rect, paint)
                 }
-
-                if (!plain) {
-                    // The glass edge's sheen: light pooled inside the top of the
-                    // pane, and a fainter pool along the bottom.
-                    paint.style = Paint.Style.FILL
-                    paint.shader = topHighlight
-                    canvas.drawRect(rect, paint)
-                    paint.shader = bottomHighlight
-                    canvas.drawRect(rect, paint)
-                    paint.shader = null
-                }
             }
 
-            if (isSelected) {
+            if (!plain) {
+                // The glass edge's sheen: light pooled inside the top of the
+                // pane, and a fainter pool along the bottom.
+                paint.style = Paint.Style.FILL
+                paint.shader = topHighlight
+                canvas.drawRect(rect, paint)
+                paint.shader = bottomHighlight
+                canvas.drawRect(rect, paint)
+                paint.shader = null
+            }
+
+            if (selected()) {
                 paint.style = Paint.Style.FILL
                 paint.color = if (dark) 0x36ffffff else 0x42ffffff
                 canvas.drawRect(rect, paint)
@@ -630,7 +597,6 @@ object GlassUi {
 
             canvas.drawPath(edgePath, rimPaint)
         }
-
         override fun setAlpha(alpha: Int) {}
         override fun setColorFilter(filter: ColorFilter?) {}
         @Deprecated("Legacy Drawable") override fun getOpacity() = PixelFormat.TRANSLUCENT

@@ -102,7 +102,8 @@ object NativeUi {
         val video=GlassUi.video(builder.context)
         // Capture the scene behind this dialog BEFORE the dialog exists, blur it on
         // a background thread, and let the panel's scene glass swap it in when it
-        // lands (wallpaper frost until then). Over video: smoke fallback, as before.
+        // lands (wallpaper frost until then). Over video the panel takes the
+        // wallpaper frost too — the same glass as the desktop.
         // The connection QR box is hidden just for the capture and restored right
         // after (the draw is synchronous, so no frame ever shows it gone): it
         // occupies the detail area the popup replaces, and capturing it would

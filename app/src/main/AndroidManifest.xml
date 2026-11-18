@@ -91,7 +91,10 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity-alias android:name=".DesktopActivity" android:targetActivity=".MainActivity" android:exported="true" android:enabled="true" android:label="One" android:icon="@drawable/one_adaptive">
+        <!-- The home entry ships disabled: One is only a home candidate after the user runs the one-time
+             desktop setup (DesktopTakeover enables it), so firmware that refuses "launcher-type" apps
+             at install time is less likely to object. -->
+        <activity-alias android:name=".DesktopActivity" android:targetActivity=".MainActivity" android:exported="true" android:enabled="false" android:label="One" android:icon="@drawable/one_adaptive">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />

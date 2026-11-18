@@ -172,11 +172,36 @@ object DesktopTakeover {
         unlockPoll=poll
         recovery.postDelayed(poll,2000)
     }
+    // Some firmwares (Xiaomi after standby) switch ADB debugging off. While takeover is
+    // wanted, One switches it back on whenever it is needed (recovery checkpoints, the
+    // restore flow) with the WRITE_SECURE_SETTINGS grant from the one-time setup, and
+    // leaves it on — there is no separate switch. Restoring the stock desktop stops it.
+    fun reopenAdb(context:Context){
+        if(!wanted(context))return
+        if(androidx.core.content.ContextCompat.checkSelfPermission(context,android.Manifest.permission.WRITE_SECURE_SETTINGS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)return
+        runCatching{
+            val resolver=context.contentResolver
+            if(Settings.Global.getInt(resolver,Settings.Global.ADB_ENABLED,0)!=1)Settings.Global.putInt(resolver,Settings.Global.ADB_ENABLED,1)
+        }
+    }
+    private var adbObserver:ContentObserver?=null
+    private fun watchAdb(context:Context){
+        val app=context.applicationContext
+        if(!wanted(app)){
+            adbObserver?.let{runCatching{app.contentResolver.unregisterContentObserver(it)}};adbObserver=null
+            return
+        }
+        if(adbObserver!=null)return
+        val reopen=Runnable{reopenAdb(app)}
+        val obs=object:ContentObserver(recovery){override fun onChange(selfChange:Boolean){recovery.removeCallbacks(reopen);recovery.postDelayed(reopen,1500)}}
+        if(runCatching{app.contentResolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ADB_ENABLED),false,obs)}.isSuccess)adbObserver=obs
+    }
     fun recover(context:Context){
         val app=context.applicationContext
         DesktopState.refresh(app)
         DeviceProfile.warm(app)
         if(!unlocked(app)){afterUnlock(app);return}
+        reopenAdb(app);watchAdb(app)
         if(!wanted(app))return
         if(standbyOut)return
         restoreHomeEntry(app)
@@ -222,6 +247,7 @@ object DesktopTakeover {
             },1500)
         }.onFailure{rebinding=false}
     }
+    private const val BOOT_APP_NOT_RESTORED="开机启动项仍指向 One：请连接 ADB 后再点一次「还原原桌面」，卸载前请先完成还原"
     const val ATTEMPT="com.tvbridge.app.BOOT_ATTEMPT"
     private const val REQUEST=7130
     private val delays=longArrayOf(4000,12000,25000)
@@ -240,8 +266,16 @@ object DesktopTakeover {
     // defaultHome's strict one; a preferred record written without
     // CATEGORY_DEFAULT answers this while the strict query falls to the chooser.
     fun wideHome(context:Context):ComponentName? = runCatching{context.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),0)?.activityInfo?.let{ComponentName(it.packageName,it.name)}}.getOrNull()
+    /** The home entry ships disabled; while takeover is wanted it must be explicitly ENABLED (this also migrates installs from before). */
     private fun restoreHomeEntry(context:Context){
-        restoreDisabledComponent(context,ComponentName(context,"com.tvbridge.app.DesktopActivity"))
+        if(DesktopState.hasDataFor(context)&&DesktopState.homeEntryEnabled)return
+        val pm=context.packageManager;val entry=ComponentName(context,"com.tvbridge.app.DesktopActivity")
+        runCatching{
+            if(pm.getComponentEnabledSetting(entry)!=android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED){
+                pm.setComponentEnabledSetting(entry,android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,android.content.pm.PackageManager.DONT_KILL_APP)
+                DesktopState.refresh(context)
+            }
+        }
     }
     private fun restoreDisabledComponent(context:Context,component:ComponentName){
         if(DesktopState.hasDataFor(context)){
@@ -268,10 +302,13 @@ object DesktopTakeover {
     private fun originalHome(context:Context):ComponentName? {
         val saved=prefs(context).getString("previous_home",null)?.let{ComponentName.unflattenFromString(it)}?.takeUnless{it.packageName=="android"||it.className.endsWith("FallbackHome")||it.className.endsWith("ResolverActivity")}
         if(saved!=null&&saved.packageName!=context.packageName&&runCatching{context.packageManager.getActivityInfo(saved,0).enabled}.getOrDefault(false))return saved
-        return context.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),0)
+        val found=context.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),0)
             .filter{it.activityInfo.packageName!=context.packageName&&it.activityInfo.enabled&&it.activityInfo.exported}
             .sortedByDescending{runCatching{context.packageManager.getApplicationInfo(it.activityInfo.packageName,0).flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM!=0}.getOrDefault(false)}
             .firstOrNull()?.activityInfo?.let{ComponentName(it.packageName,it.name)}
+        // Coocaa-style firmwares boot a homepage component that declares no
+        // HOME category; the query above cannot see it, the firmware config can.
+        return found?:DesktopPolicy.coocaaHome(context)
     }
     private fun homeEntry(context:Context,enable:Boolean){
         context.packageManager.setComponentEnabledSetting(ComponentName(context,"com.tvbridge.app.DesktopActivity"),if(enable)android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED else android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,android.content.pm.PackageManager.DONT_KILL_APP)
@@ -406,27 +443,36 @@ object DesktopTakeover {
         }
     }
     private fun restore(activity:Activity,changed:()->Unit){
+        reopenAdb(activity)
         val target=originalHome(activity)
         if(prefs(activity).contains("desktop_vt_previous")){
             NativeUi.notice(activity,"正在还原系统桌面配置")
             AppThreads.onIo{
                 val ready=runCatching{Hub.adb.ready||(Hub.adb.enabled()&&Hub.adb.restore())}.getOrDefault(false)
-                if(ready)runCatching{Hub.adb.restoreBootApp()}
+                val bootRestored=!ready||runCatching{Hub.adb.restoreBootApp()}.getOrDefault(false)
                 if(ready&&target!=null)Hub.adb.setDefaultHome(target)
                 activity.runOnUiThread{if(!activity.isFinishing&&!activity.isDestroyed){
+                    if(!bootRestored)NativeUi.notice(activity,BOOT_APP_NOT_RESTORED)
                     if(!prefs(activity).contains("desktop_vt_previous"))restore(activity,changed)
                     else NativeUi.notice(activity,if(ready)"固件尚未完成还原，请重试"else "请恢复设备调试连接后再还原桌面")
                 }}
             };return
         }
         prefs(activity).edit().putBoolean("boot",false).putBoolean("desktop_guard",false).remove("desktop_setup_pending").apply()
+        watchAdb(activity)
         cancel(activity);DesktopGuardService.allowStockLauncher()
         activity.packageManager.clearPackagePreferredActivities(activity.packageName)
         homeEntry(activity,false)
+        DesktopState.refresh(activity)
         AppThreads.onIo{
-            if(target!=null&&runCatching{Hub.adb.ready}.getOrDefault(false))Hub.adb.setDefaultHome(target)
+            val adbUp=runCatching{Hub.adb.ready||(Hub.adb.enabled()&&Hub.adb.restore())}.getOrDefault(false)
+            // The TCL/FFALCON boot entry was pointed at One by the setup; put the original back and
+            // say so when that could not be done, instead of leaving the TV booting into a missing/removed One.
+            val bootRestored=!Hub.adb.bootAppPending()||(adbUp&&runCatching{Hub.adb.restoreBootApp()}.getOrDefault(false))
+            if(target!=null&&adbUp)Hub.adb.setDefaultHome(target)
             activity.runOnUiThread{if(!activity.isFinishing&&!activity.isDestroyed){
                 changed()
+                if(!bootRestored)NativeUi.notice(activity,BOOT_APP_NOT_RESTORED)
                 if(defaultHome(activity)?.packageName==activity.packageName){
                     try{activity.startActivity(Intent(Settings.ACTION_HOME_SETTINGS));NativeUi.notice(activity,"请选择原来的桌面")}catch(_:RuntimeException){NativeUi.notice(activity,"已停止接管，请在系统设置选择原桌面")}
                 }else try{
@@ -493,7 +539,7 @@ object DesktopTakeover {
                 (a.packageName in DesktopPolicy.inputPlayers&&a.packageName!=resolved)||!DesktopPolicy.acceptsPriority(component,info.priority))emptyList()
             else listOfNotNull(component,a.targetActivity?.let{ComponentName(a.packageName,it)})
         }.toSet()
-        return homes+DesktopPolicy.extras(context,homes)
+        return homes+DesktopPolicy.extras(context,homes)+listOfNotNull(DesktopPolicy.coocaaHome(context))
     }
     fun ensureGuard(context:Context):Boolean {
         if(standbyOut)return false

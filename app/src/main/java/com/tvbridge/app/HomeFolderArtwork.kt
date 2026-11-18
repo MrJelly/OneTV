@@ -14,13 +14,12 @@ internal class HomeFolderArtwork(private val previews:List<Pair<Drawable,Boolean
     // set by the home view); this artwork only draws the mini icons on top of it.
     private val sheen=LinearGradient(0f,0f,0f,180f*0.55f,0x59ffffff,0x00ffffff,Shader.TileMode.CLAMP)
     private val rimGrad=LinearGradient(0f,0f,0f,180f,intArrayOf(0xe6ffffff.toInt(),0x40ffffff,0x2effffff,0x8cffffff.toInt()),floatArrayOf(0f,0.4f,0.6f,1f),Shader.TileMode.CLAMP)
-    // Each row of minis is centred horizontally on its own: a folder holding
-    // three icons shows one centred row, not a row hugging the left edge.
+    // Minis flow left-to-right, top-to-bottom on a fixed 3x3 lattice (the
+    // caller caps the preview at nine; the rest appear when the folder is
+    // opened). Margins are 13 on all four sides and the gaps 8, so every
+    // mini sits on the same grid however many the folder holds.
     private val spots=previews.indices.map{index->
-        val row=index/3
-        val inRow=minOf(3,previews.size-row*3)
-        val startX=(180f-(inRow*46f+(inRow-1)*8f))/2f
-        (startX+(index%3)*54f) to (17f+row*54f)
+        (13f+(index%3)*54f) to (13f+(index/3)*54f)
     }
     private val outlines=spots.map{(x,y)->roundedRectPath(x,y,x+46f,y+46f,10f)}
 

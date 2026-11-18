@@ -6,7 +6,7 @@ import org.json.JSONObject
 
 /** Small declarative corrections, adapted from Aerial's device data (MIT notice in assets). */
 object DeviceAdapters {
-    data class Profile(val hidden:Set<Int> = emptySet(),val labels:Map<Int,String> = emptyMap(),val sources:Map<Int,Int> = emptyMap(),val fallback:Map<Int,Int> = emptyMap(),val bootStockMs:Int = 0,val neverFilterKeys:Boolean = false)
+    data class Profile(val hidden:Set<Int> = emptySet(),val labels:Map<Int,String> = emptyMap(),val sources:Map<Int,Int> = emptyMap(),val fallback:Map<Int,Int> = emptyMap(),val bootStockMs:Int = 0,val neverFilterKeys:Boolean = false,val filterHomeWhenDefault:Boolean = true)
     private var data:JSONObject?=null
     private var lastKey=""
     private var lastProfile=Profile()
@@ -34,7 +34,7 @@ object DeviceAdapters {
             if(row.has("buildAtLeast")&&!atLeast(row.getString("buildAtLeast")))continue
             if(row.has("buildMajorBelow")&&(version.isEmpty()||version.first()>=row.getInt("buildMajorBelow")))continue
             val hidden=row.optJSONArray("hidden")
-            return Profile(if(hidden==null)emptySet()else (0 until hidden.length()).map{hidden.getInt(it)}.toSet(),map(row,"labels"){o,k->o.getString(k)},map(row,"xiaomiSources"){o,k->o.getInt(k)},map(row,"xiaomiFallbackSources"){o,k->o.getInt(k)},row.optInt("bootStockMs",0).coerceIn(0,45000),row.optBoolean("neverFilterKeys",false))
+            return Profile(if(hidden==null)emptySet()else (0 until hidden.length()).map{hidden.getInt(it)}.toSet(),map(row,"labels"){o,k->o.getString(k)},map(row,"xiaomiSources"){o,k->o.getInt(k)},map(row,"xiaomiFallbackSources"){o,k->o.getInt(k)},row.optInt("bootStockMs",0).coerceIn(0,45000),row.optBoolean("neverFilterKeys",false),row.optBoolean("filterHomeWhenDefault",true))
         }
         return Profile()
     }

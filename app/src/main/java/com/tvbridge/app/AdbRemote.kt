@@ -44,19 +44,51 @@ class AdbRemote(context:Context){
         if(port !in 1024..65535){message="端口应为 1024–65535";return false}
         return try{val result=shell("echo tvbridge-adb-ready",port,true);check(result.contains("tvbridge-adb-ready")){"ADB 测试未通过"};prefs.edit().putInt("port",port).putBoolean("enabled",true).apply();ready=true;message="ADB 已授权，可跨应用遥控";true}catch(e:Exception){ready=false;message="连接未完成：${e.message?:"请检查调试端口和屏幕授权"}";false}
     }
+    /** Per-item outcome of the last [authorizeDesktop], in run order. */
+    @Volatile var authReport:List<Pair<String,Boolean>> = emptyList()
+        private set
+    private fun appOpsAllowed(op:String):Boolean {
+        if(android.os.Build.VERSION.SDK_INT<21)return false
+        return runCatching{(appContext.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager)
+            .checkOpNoThrow(op,android.os.Process.myUid(),appContext.packageName)==android.app.AppOpsManager.MODE_ALLOWED}.getOrDefault(false)
+    }
+    private fun bootAppApplicable():Boolean {
+        if(cleanSetting(shell("settings get system boot_app_componentname",port(),false))!="none")return true
+        return shell("pm path com.tcl.ttvs",port(),false).contains("package:")
+    }
+    /**
+     * Runs each desktop grant, then reads the resulting state back from the
+     * system itself — permission state, app-ops, the secure listener list,
+     * the boot-app setting — so a command the firmware accepted but did not
+     * apply is reported as failed instead of assumed done. Only the items
+     * this device actually has are attempted and reported.
+     */
     fun authorizeDesktop():Boolean {
         if(!enabled()||!ready)return false
         return try{
             val pkg=appContext.packageName;check(pkg=="com.tvbridge.app")
-            val granted=shell("pm grant $pkg android.permission.WRITE_SECURE_SETTINGS",port(),false)
-            check(!Regex("error|exception|denied|not allowed",RegexOption.IGNORE_CASE).containsMatchIn(granted))
-            if(android.os.Build.VERSION.SDK_INT>=21)shell("appops set $pkg GET_USAGE_STATS allow",port(),false)
-            if(android.os.Build.VERSION.SDK_INT>=29)runCatching{shell("appops set $pkg SYSTEM_ALERT_WINDOW allow",port(),false)}
-            if(android.os.Build.VERSION.SDK_INT>=24)runCatching{
-                shell("cmd notification allow_listener $pkg/.DesktopRevivalService",port(),false)
+            val report=linkedMapOf<String,Boolean>()
+            shell("pm grant $pkg android.permission.WRITE_SECURE_SETTINGS",port(),false)
+            report["系统设置写入"]=androidx.core.content.ContextCompat.checkSelfPermission(appContext,android.Manifest.permission.WRITE_SECURE_SETTINGS)==android.content.pm.PackageManager.PERMISSION_GRANTED
+            if(android.os.Build.VERSION.SDK_INT>=21){
+                shell("appops set $pkg GET_USAGE_STATS allow",port(),false)
+                report["使用情况访问"]=DesktopPolicy.usageAllowed(appContext)
             }
-            runCatching{applyBootApp()}
-            message="桌面授权已配置";true
+            if(android.os.Build.VERSION.SDK_INT>=29){
+                runCatching{shell("appops set $pkg SYSTEM_ALERT_WINDOW allow",port(),false)}
+                report["悬浮窗"]=appOpsAllowed(android.app.AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW)
+            }
+            if(android.os.Build.VERSION.SDK_INT>=24){
+                runCatching{shell("cmd notification allow_listener $pkg/.DesktopRevivalService",port(),false)}
+                val listener=ComponentName(appContext,DesktopRevivalService::class.java)
+                report["通知监听"]=android.provider.Settings.Secure.getString(appContext.contentResolver,"enabled_notification_listeners").orEmpty()
+                    .split(':').any{ComponentName.unflattenFromString(it)==listener}
+            }
+            if(bootAppApplicable())report["开机启动项"]=applyBootApp()
+            authReport=report.toList()
+            val failed=report.filterValues{!it}.keys
+            message=if(failed.isEmpty())"桌面授权已配置" else "授权未全部完成：${failed.joinToString("、")}未生效"
+            failed.isEmpty()
         }catch(_:Exception){message="授权未完成，请检查系统遥控连接";false}
     }
     private fun cleanSetting(value:String)=value.trim().let{if(it.isEmpty()||it=="null")"none" else it}
@@ -78,19 +110,25 @@ class AdbRemote(context:Context){
         if(!prefs.contains("boot_app_previous"))prefs.edit().putString("boot_app_previous",current).putString("boot_mode_previous",mode).commit()
         if(mode=="none")shell("settings put system boot_app_mode boot_launcher",port(),false)
         shell("settings put system boot_app_componentname $own",port(),false)
-        return true
+        return cleanSetting(shell("settings get system boot_app_componentname",port(),false))==own
     }
+    /** True when there is nothing to restore or the original values are back (verified by reading them again). */
+    fun bootAppPending():Boolean=appContext.getSharedPreferences("startup",Context.MODE_PRIVATE).contains("boot_app_previous")
     fun restoreBootApp():Boolean {
         val prefs=appContext.getSharedPreferences("startup",Context.MODE_PRIVATE)
         val app=prefs.getString("boot_app_previous",null)?:return true
         if(!ready)return false
         val mode=prefs.getString("boot_mode_previous","none").orEmpty()
         val safe=Regex("^[A-Za-z0-9_./$]+$")
+        if((app!="none"&&!safe.matches(app))||(mode!="none"&&!safe.matches(mode)))return false
         return try{
             if(app=="none")shell("settings delete system boot_app_componentname",port(),false)
-            else if(safe.matches(app))shell("settings put system boot_app_componentname $app",port(),false)
+            else shell("settings put system boot_app_componentname $app",port(),false)
             if(mode=="none")shell("settings delete system boot_app_mode",port(),false)
-            else if(safe.matches(mode))shell("settings put system boot_app_mode $mode",port(),false)
+            else shell("settings put system boot_app_mode $mode",port(),false)
+            val nowApp=cleanSetting(shell("settings get system boot_app_componentname",port(),false))
+            val nowMode=cleanSetting(shell("settings get system boot_app_mode",port(),false))
+            if(nowApp!=app||nowMode!=mode)return false
             prefs.edit().remove("boot_app_previous").remove("boot_mode_previous").apply();true
         }catch(_:Exception){false}
     }
