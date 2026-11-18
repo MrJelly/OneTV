@@ -44,7 +44,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         }
     }
     private val launcherApps=LauncherApps(context)
-    private val appRow=android.widget.GridLayout(context).apply{columnCount=5;clipChildren=false;clipToPadding=false}
+    private var appRow=android.widget.GridLayout(context).apply{columnCount=6;clipChildren=false;clipToPadding=false}
     private val appRail=android.widget.FrameLayout(context).apply{clipChildren=false;addView(appRow)}
     private var scale=1f;private var gridMargin=0;private var tileGap=0;private var tileWidth=0;private var tileHeight=0;private var oy=0f
     private var styledScale=-1f
@@ -55,6 +55,10 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private var appearanceKey=HomeAppearance.key(context)
     private val ink get()=GlassUi.ink(context,darkHome)
     private var appSignature:String?=null
+    private var initialRefreshPending=true
+    private var warmingSquares=false
+    private val mainHandler=android.os.Handler(android.os.Looper.getMainLooper())
+    private val labelCache=java.util.WeakHashMap<AppTileView,Array<Any?>>()
     private var rememberedFocus=""
     private var lastGridFocus=""
     private var focusedTile:AppTileView?=null
@@ -63,17 +67,17 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private var connectionLabel=java.lang.ref.WeakReference<android.widget.TextView>(null)
     private var connectionImage=java.lang.ref.WeakReference<android.widget.ImageView>(null)
     private var connectionDot=java.lang.ref.WeakReference<View>(null)
-    private val rows get()=maxOf(1,(tiles.size+4)/5)
+    private val rows get()=maxOf(1,(tiles.size+cols-1)/cols)
     // Aerial home geometry on the 1920x1080 design canvas (its 960x540dp values doubled):
-    // 5 columns, 56dp side margins, 28dp column gaps, row pitch = tile height + 50dp name room.
+    // Square iOS-style tiles whose side equals the old 16:9 tile height: 6 columns, 56dp side margins, 20dp column gaps, row pitch = tile side + 50dp name room.
     // The shelf row rests at topRowY with the next row peeking; a focused row deeper in the
     // grid rests with its top at restY; collapseDip is the shelf-to-grid scroll distance over
     // which the clock and the plate fade out.
-    private val cols=5
-    private val topRowY get()=956f-tileHeight/scale
+    private var cols=6
+    private val topRowY get()=992f-tileHeight/scale
     private val restY=409f
     private val collapseDip=382f
-    private val pitchY get()=tileHeight/scale+100f
+    private val pitchY get()=tileHeight/scale+108f
     private val plateView=View(context)
     private var scrollY=0f
     private var scrollTarget=0f
@@ -97,7 +101,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private fun applyScroll(){applyRowAlphas();requestLayout();invalidate()}
     /** Aerial's hiddenFrom rule: rows below the shelf are out of sight at rest and fade in
      *  as Home lifts into the grid. */
-    private fun applyRowAlphas(){val a=gridAlpha();tiles.forEachIndexed{i,tile->tile.alpha=if(i<cols)1f else a}}
+    private fun applyRowAlphas(){val a=gridAlpha();tiles.forEachIndexed{i,tile->tile.alpha=if(i<cols)1f else a;tile.plateFrac=1f-liftFrac}}
     private fun animateScrollTo(target:Float){
         scrollTarget=target.coerceAtLeast(0f)
         if(!springPosted&&scrollY!=scrollTarget){springPosted=true;lastFrameNanos=0L;choreographer.postFrameCallback(springFrame)}
@@ -130,18 +134,54 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         addView(plateView)
         addView(appRail)
         addView(controlButton)
-        refreshApps()
+        // The first frame paints only the backdrop, plate and clock; the app
+        // catalog (a full PackageManager parse) loads right after it, so a
+        // cold start never sits on a black window while the catalog builds.
+        viewTreeObserver.addOnPreDrawListener(object:android.view.ViewTreeObserver.OnPreDrawListener{
+            override fun onPreDraw():Boolean{
+                viewTreeObserver.removeOnPreDrawListener(this)
+                if(initialRefreshPending)post{refreshApps();if(findFocus()==null)focusFirst()}
+                return true
+            }
+        })
     }
 
     fun refreshApps(){
+        initialRefreshPending=false
+        // The column count syncs here, before any early return: focus math, row
+        // alphas and grid specs all read it, and a stale count left the shelf's
+        // extra tiles invisible (alpha 0 until the first scroll) and the grid in
+        // a mixed state when switching back down. A change forces a full rebuild.
+        val newCols=HomeAppearance.homeColumns(context)
+        var focusBeforeSwap:String?=null
+        if(newCols!=cols){
+            focusBeforeSwap=(findFocus() as? AppTileView)?.let(::tileKey)
+            cols=newCols;appSignature=null
+            val fresh=android.widget.GridLayout(context).apply{columnCount=newCols;clipChildren=false;clipToPadding=false}
+            appRail.removeView(appRow);appRow=fresh;appRail.addView(fresh)
+        }
         val all=launcherApps.orderedIds()
         val hidden=launcherApps.hiddenIds().toSet()
         val folders=launcherApps.folderLayout(all).mapKeys{"folder:"+it.key}.mapValues{(_,members)->members.filterNot{it in hidden}}.filterValues{it.isNotEmpty()}
         val grouped=folders.entries.flatMap{(folder,members)->members.map{it to folder}}.toMap()
         val order=all.filterNot{it in hidden}.map{grouped[it]?:it}.distinct()
         val entries=launcherApps.installed().associateBy{it.component.flattenToString()}
+        // Square icons render on the IO thread, never in this main-thread pass: cold
+        // entries build with the plain icon as a placeholder below and are swapped
+        // for the real squares by a forced rebuild once the warm-up lands.
+        val cold=entries.values.filterNot{launcherApps.squareCached(it)}
+        if(cold.isNotEmpty()&&!warmingSquares){
+            warmingSquares=true
+            AppThreads.onIo{
+                cold.forEach{runCatching{launcherApps.squareIcon(it)}}
+                mainHandler.post{
+                    warmingSquares=false
+                    if(appSignature!=null){appSignature=null;refreshApps()}
+                }
+            }
+        }
         val builtIns=modules.associateBy{it.id}
-        val signature="B2:${AppArtwork.version()}:"+order.sorted().joinToString{id->val entry=entries[id];"$id:${launcherApps.appTitle(id)}:${entry?.updated}"}+":"+folders.toSortedMap()+":"+darkHome
+        val signature="B3:"+order.sorted().joinToString{id->val entry=entries[id];"$id:${launcherApps.appTitle(id)}:${entry?.updated}"}+":"+folders.toSortedMap()+":"+darkHome
         if(appSignature==signature){
             if (tiles.map(::tileKey) != order) {
                 val byId = tiles.associateBy(::tileKey)
@@ -156,13 +196,14 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
                 return
             }
         }
-        val focused=(findFocus() as? AppTileView)?.let(::tileKey)
+        val focused=focusBeforeSwap?:(findFocus() as? AppTileView)?.let(::tileKey)
         appSignature=signature
         appRow.removeAllViews();tiles.clear()
         fun baseTile(title:String):AppTileView{
             val tile=AppTileView(context)
             tile.title=title;tile.contentDescription=title;tile.id=generateViewId()
             tile.focusHook={focus->if(focus){val key=tileKey(tile);rememberedFocus=key;lastGridFocus=key;controlButton.nextFocusDownId=tile.id;focusedTile=tile;onTileFocused(tile)}else if(focusedTile==tile)focusedTile=null;invalidate()}
+            tile.focusAnimHook={invalidate()}
             tiles.add(tile);appRow.addView(tile)
             return tile
         }
@@ -174,10 +215,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
                 tile.role="module"
                 val previews=folders.getValue(id).take(9).mapNotNull{key->
                     val entry=entries[key]
-                    if(entry!=null)runCatching{
-                        val banner=AppArtwork.tile(context,entry.component.packageName)?:launcherApps.banner(entry)
-                        (banner?:launcherApps.icon(entry))?.let{it to (banner!=null)}
-                    }.getOrNull()
+                    if(entry!=null)runCatching{(if(launcherApps.squareCached(entry))launcherApps.squareIcon(entry) else launcherApps.icon(entry)).let{it to true}}.getOrNull()
                     else moduleArtwork(key)?.let{it to true}
                 }
                 tile.banner=HomeFolderArtwork(previews)
@@ -200,10 +238,8 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             val entry=entries[id]?:return@forEach
             val tile=baseTile(launcherApps.displayTitle(id,entry.label))
             tile.role="app";tile.tag=entry
-            tile.banner=try{AppArtwork.tile(context,entry.component.packageName)?:launcherApps.banner(entry)}catch(_:Exception){null}
+            tile.banner=if(launcherApps.squareCached(entry))try{launcherApps.squareIcon(entry)}catch(_:Exception){null} else null
             if(tile.banner==null)tile.icon=try{launcherApps.icon(entry)}catch(_:Exception){null}
-            try{val tint=launcherApps.tileTint(entry);tile.tintTop=tint[0];tile.tintBottom=tint[1]}catch(_:Exception){}
-            if(tile.banner!=null){tile.tintTop=0;tile.tintBottom=0}
             tile.setOnClickListener{rememberedFocus=tileKey(tile);if(!placeMovingTile(tile)&&!launcherApps.launch(entry))NativeUi.notice(context,"应用已移除或无法打开")}
             tile.setOnLongClickListener{openerDownTime=heldConfirmDownTime;showAppMenu(tile);true}
             NativeUi.touchClicks(tile);tile.isFocusableInTouchMode=true
@@ -253,15 +289,8 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private fun folderRepresentative(id:String)=if(id.startsWith("folder:"))
         launcherApps.orderedIds().firstOrNull{it in launcherApps.folderMembers(id.removePrefix("folder:"))}?:id else id
 
-    private fun moduleArtwork(id:String):android.graphics.drawable.Drawable?{
-        val resource=when(id){
-            "module:live"->R.drawable.home_live_wide
-            "module:files"->R.drawable.home_files_wide
-            "module:browser"->R.drawable.home_browser_wide
-            else->return null
-        }
-        return androidx.core.content.ContextCompat.getDrawable(context,resource)
-    }
+    /** The three built-in modules are drawn as square icons (brand gradient + glyph). */
+    private fun moduleArtwork(id:String):android.graphics.drawable.Drawable?=AppModules.square(context,id)
 
     private fun showFolder(name:String){
         val hidden=launcherApps.hiddenIds().toSet()
@@ -293,7 +322,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         var first:AppTileView?=null
         members.chunked(cols).forEach{items->
             val row=android.widget.LinearLayout(context).apply{clipChildren=false;clipToPadding=false}
-            content.addView(row,android.widget.LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=(70*scale).toInt()})
+            content.addView(row,android.widget.LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=(64*scale).toInt()})
             items.forEachIndexed{column,(id,title)->
                 val tile=AppTileView(context).apply{
                     this.title=title
@@ -301,8 +330,8 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
                     contentDescription=title
                     val entry=entries[id]
                     if(entry!=null){
-                        banner=AppArtwork.tile(context,entry.component.packageName)?:launcherApps.banner(entry)
-                        if(banner==null)icon=launcherApps.icon(entry)
+                        banner=if(launcherApps.squareCached(entry))runCatching{launcherApps.squareIcon(entry)}.getOrNull() else null
+                        if(banner==null)icon=runCatching{launcherApps.icon(entry)}.getOrNull()
                     }else banner=moduleArtwork(id)
                     setOnClickListener{dialog.dismiss();if(!launchHomeApp(id))NativeUi.notice(context,"应用已移除或无法打开")}
                     setOnLongClickListener{
@@ -315,7 +344,20 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
                     NativeUi.touchClicks(this);isFocusableInTouchMode=true
                 }
                 if(first==null)first=tile
-                row.addView(tile,android.widget.LinearLayout.LayoutParams(tileWidth,tileHeight).apply{if(column>0)leftMargin=tileGap})
+                // Same presentation as the lifted grid: the tile, then its
+                // name centred underneath (the grid draws names at 30 design
+                // under the tile; the name room lives inside the row pitch,
+                // so tile + name + the row's bottom margin add up to the
+                // grid's tile + 108 pitch).
+                val cell=android.widget.LinearLayout(context).apply{orientation=android.widget.LinearLayout.VERTICAL;clipChildren=false;clipToPadding=false}
+                cell.addView(tile,android.widget.LinearLayout.LayoutParams(tileHeight,tileHeight))
+                val nameView=android.widget.TextView(context).apply{
+                    text=title;setTextColor(GlassUi.ink(context));gravity=android.view.Gravity.CENTER
+                    isSingleLine=true;ellipsize=android.text.TextUtils.TruncateAt.END
+                    NativeUi.textSize(this,30f)
+                }
+                cell.addView(nameView,android.widget.LinearLayout.LayoutParams(tileHeight,-2).apply{topMargin=(8*scale).toInt()})
+                row.addView(cell,android.widget.LinearLayout.LayoutParams(-2,-2).apply{if(column>0)leftMargin=tileGap})
             }
         }
         val scroll=object:android.widget.ScrollView(context){
@@ -366,7 +408,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
                 gravity=Gravity.START or Gravity.CENTER_VERTICAL
                 setPadding((20*scale).toInt(),0,(20*scale).toInt(),0)
                 NativeUi.textSize(this,30f);setTextColor(GlassUi.colors(context))
-                background=GlassUi.surface(this,16f,border=false,faint=true)
+                background=GlassUi.surface(this,16f,border=false,faint=true,plain=true)
                 if(android.os.Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null}
                 val size=(32*scale).toInt()
                 val icon=AppIcons.Vector(glyph){currentTextColor}.apply{setBounds(0,0,size,size)}
@@ -391,7 +433,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
                 filters=arrayOf(android.text.InputFilter.LengthFilter(20))
                 NativeUi.textSize(this,32f);setTextColor(GlassUi.ink(context))
                 setHintTextColor(GlassUi.ink(context) and 0x75ffffff)
-                background=GlassUi.surface(this,14f,faint=true)
+                background=GlassUi.surface(this,14f,faint=true,plain=true)
                 setPadding((20*scale).toInt(),(14*scale).toInt(),(20*scale).toInt(),(14*scale).toInt())
             }
             val editor=NativeUi.show(android.app.AlertDialog.Builder(context).setTitle("新建文件夹").setView(field)
@@ -433,7 +475,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         val inset=(12*scale).toInt()
         val frame=android.graphics.Rect().also{anchor.getWindowVisibleDisplayFrame(it)}
         val location=IntArray(2).also{anchor.getLocationOnScreen(it)}
-        popup.width=(440*scale).toInt().coerceAtMost((frame.width()-2*inset).coerceAtLeast(1))
+        popup.width=(320*scale).toInt().coerceAtMost((frame.width()-2*inset).coerceAtLeast(1))
         popup.height=menuHeight
         val left=(location[0]+(anchor.width-popup.width)/2).coerceIn(frame.left+inset,(frame.right-popup.width-inset).coerceAtLeast(frame.left+inset))
         val above=location[1]-menuHeight-inset
@@ -442,7 +484,8 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         popup.horizontalOffset=left-location[0]
         popup.verticalOffset=top-location[1]-anchor.height
         popup.setAnimationStyle(0)
-        popup.setBackgroundDrawable(GlassUi.homeGlass(anchor,20f,screenLeft=left,screenTop=top))
+        GlassUi.invalidateScene();GlassUi.prepareScene(context)
+        popup.setBackgroundDrawable(GlassUi.sceneGlass(anchor,20f,screenLeft=left,screenTop=top))
         popup.setAdapter(object:android.widget.ArrayAdapter<String>(context,android.R.layout.simple_list_item_1,choices){
             override fun getView(position:Int,convert:View?,parent:ViewGroup):View=android.widget.TextView(context).apply{
                 text=getItem(position)
@@ -654,30 +697,39 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         scale=minOf(w/1920f,h/1080f).coerceAtLeast(0.001f);oy=(h-1080*scale)/2
         if(styledScale!=scale||styledWidth!=w){
             styledWidth=w
-            gridMargin=(112*scale).toInt()
-            tileGap=(56*scale).toInt()
-            tileWidth=((w-2*gridMargin-(cols-1)*tileGap)/cols).coerceAtLeast(0)
-            tileHeight=(tileWidth*9f/16f).toInt()
+            // Column count is a user setting (HomeAppearance.homeColumns), but the
+            // icon size never follows it: the side is fixed by the six-column
+            // reference slot. The grid packs with a 70-unit gap and centres as a
+            // whole; the gap only shrinks when a row would otherwise overflow.
+            // The plate follows the grid's width (see onMeasure/onLayout).
+            cols=HomeAppearance.homeColumns(context)
+            appRow.columnCount=cols
+            val refSlot=((w-2*(112*scale).toInt()-5*(40*scale).toInt())/6).coerceAtLeast(0)
+            tileHeight=(refSlot*9f/16f).toInt()
+            tileWidth=tileHeight
+            tileGap=if(cols>1)minOf((80*scale).toInt(),((w-cols*tileWidth)/(cols-1)).coerceAtLeast(0)) else (80*scale).toInt()
+            gridMargin=((w-(cols*tileWidth+(cols-1)*tileGap))/2).coerceAtLeast(0)
             styledScale=scale
             controlButton.setTextColor(Color.WHITE);controlButton.background=GlassUi.surface(controlButton,GlassUi.CIRCLE_RADIUS)
             plateView.background=GlassUi.homeGlass(plateView,64f)
             tiles.forEachIndexed{i,tile->
                 tile.layoutParams=android.widget.GridLayout.LayoutParams().apply{
-                    this.width=tileWidth;this.height=tileHeight
-                    columnSpec=android.widget.GridLayout.spec(i%5);rowSpec=android.widget.GridLayout.spec(i/5)
-                    marginEnd=if(i%5==4)0 else tileGap;bottomMargin=(100*scale).toInt()
+                    this.width=tileHeight;this.height=tileHeight
+                    columnSpec=android.widget.GridLayout.spec(i%cols);rowSpec=android.widget.GridLayout.spec(i/cols)
+                    val side=(tileWidth-tileHeight)/2
+                    leftMargin=side;rightMargin=if(i%cols==cols-1)side else tileGap+side;bottomMargin=(108*scale).toInt()
                 }
             }
         }
-        appRail.measure(MeasureSpec.makeMeasureSpec((cols*tileWidth+(cols-1)*tileGap),MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec((rows*(tileHeight+(100*scale).toInt())),MeasureSpec.EXACTLY))
-        plateView.measure(MeasureSpec.makeMeasureSpec((w-(120*scale).toInt()).coerceAtLeast(0),MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec((tileHeight+(80*scale).toInt()),MeasureSpec.EXACTLY))
+        appRail.measure(MeasureSpec.makeMeasureSpec((cols*tileWidth+(cols-1)*tileGap),MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec((rows*(tileHeight+(108*scale).toInt())),MeasureSpec.EXACTLY))
+        plateView.measure(MeasureSpec.makeMeasureSpec(minOf(cols*tileWidth+(cols-1)*tileGap+(80*scale).toInt(),w).coerceAtLeast(0),MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec((tileHeight+(80*scale).toInt()),MeasureSpec.EXACTLY))
         controlButton.measure(MeasureSpec.makeMeasureSpec((76*scale).toInt(),MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec((76*scale).toInt(),MeasureSpec.EXACTLY))
     }
     override fun onLayout(changed:Boolean,l:Int,t:Int,r:Int,b:Int){
         val railTop=(oy+(topRowY-scrollY)*scale).toInt()
         val ax=gridMargin
         appRail.layout(ax,railTop,ax+appRail.measuredWidth,railTop+appRail.measuredHeight)
-        val plateLeft=(60*scale).toInt();val plateTop=(oy+(topRowY-40)*scale).toInt()
+        val plateLeft=(gridMargin-(40*scale).toInt()).coerceAtLeast(0);val plateTop=(oy+(topRowY-40)*scale).toInt()
         plateView.layout(plateLeft,plateTop,plateLeft+plateView.measuredWidth,plateTop+plateView.measuredHeight)
         val lift=(liftFrac/.55f).coerceIn(0f,1f)
         val dissolve=lift*lift*(3f-2f*lift)
@@ -692,24 +744,84 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             val isMoving=moving==tileKey(tile)
             tile.contentDescription=tile.title+(if(isMoving)"，移动中" else "")
             tile.isSelected=isMoving
+            // Folder tiles sit on real frosted glass (the same wallpaper frost as
+            // the plate and the menus); the artwork itself only draws the minis.
+            if(tile.background==null&&(tile.tag as? String)?.startsWith("folder:")==true){
+                tile.background=GlassUi.homeGlass(tile,(tile.height/scale*0.225f).coerceAtLeast(1f))
+            }
         }
+    }
+    /** Ellipsised tile names are cached per tile: dispatchDraw runs per frame and
+     *  re-measuring every name on every frame is wasted work on TV hardware. */
+    private fun tileLabel(tile:AppTileView,focused:Boolean):String{
+        val key="${tile.title}|${tile.width}|$focused|${(30f*scale).toInt()}"
+        labelCache[tile]?.let{if(it[0]==key)return it[1] as String}
+        paint.typeface=if(focused)bold else regular;paint.textSize=30f*scale
+        val label=android.text.TextUtils.ellipsize(tile.title,paint,tile.width.toFloat(),android.text.TextUtils.TruncateAt.END).toString()
+        labelCache[tile]=arrayOf(key,label)
+        return label
+    }
+    private val shadowPaint=Paint(Paint.FILTER_BITMAP_FLAG)
+    private class BakedShadow(val bitmap:Bitmap,val ext:Int)
+    private var bakedShadow:BakedShadow?=null
+    private var bakedShadowW=0
+    private var bakedShadowH=0
+    /** Baked once per tile size, Aerial-style: the tile's rounded outline filled
+     *  with black at 70% and blurred with a real BlurMaskFilter, so the falloff is
+     *  a true soft shadow rather than stacked strokes. The bake runs on a software
+     *  bitmap canvas, where the mask filter applies on every API level; drawing
+     *  the result is a plain bitmap draw. */
+    private fun focusShadow(w:Int,h:Int):BakedShadow?{
+        if(w<=0||h<=0)return null
+        bakedShadow?.takeIf{bakedShadowW==w&&bakedShadowH==h}?.let{return it}
+        val blur=(26f*scale).coerceAtLeast(1f)
+        val ext=kotlin.math.ceil(blur*1.5f).toInt()
+        val bitmap=Bitmap.createBitmap(w+2*ext,h+2*ext,Bitmap.Config.ARGB_8888)
+        val bc=Canvas(bitmap)
+        bc.translate(ext.toFloat(),ext.toFloat())
+        val p=Paint(Paint.ANTI_ALIAS_FLAG)
+        p.color=0xb3000000.toInt()
+        p.maskFilter=android.graphics.BlurMaskFilter(blur,android.graphics.BlurMaskFilter.Blur.NORMAL)
+        bc.drawPath(GlassUi.SmoothCorners.smoothRect(RectF(0f,0f,w.toFloat(),h.toFloat()),h*0.225f,h*0.225f),p)
+        return BakedShadow(bitmap,ext).also{bakedShadow=it;bakedShadowW=w;bakedShadowH=h}
     }
     override fun dispatchDraw(canvas:Canvas){
         super.dispatchDraw(canvas)
-        // Aerial's focus caption: the shelf row rests on the glass plate and never shows a
-        // name; from the second row down the focused tile's name sits in the name room
-        // the grid pitch already reserves below the tile.
+        // At rest the only name is the focused tile's caption, and never on the
+        // shelf row (it rests on the glass plate); from the second row down the
+        // caption sits in the name room the grid pitch already reserves.
         val focused=focusedTile
         if(focused!=null&&moving==null&&tiles.indexOf(focused)>=cols){
+            paint.style=Paint.Style.FILL;paint.textAlign=Paint.Align.CENTER
+            paint.typeface=bold;paint.textSize=30f*scale;paint.color=ink;paint.alpha=255
+            paint.setShadowLayer(9f*scale,0f,3f*scale,if(darkHome)0x65000000.toInt() else 0x50ffffff)
             val cx=appRail.left+focused.left+focused.width/2f
             val bottom=appRail.top+focused.top+focused.height
-            paint.style=Paint.Style.FILL;paint.typeface=bold;paint.textSize=30f*scale;paint.color=ink
-            paint.setShadowLayer(9f*scale,0f,3f*scale,if(darkHome)0x65000000.toInt() else 0x50ffffff)
-            val label=android.text.TextUtils.ellipsize(focused.title,paint,focused.width.toFloat(),android.text.TextUtils.TruncateAt.END).toString()
-            paint.textAlign=Paint.Align.CENTER
-            canvas.drawText(label,cx,bottom+36f*scale,paint)
-            paint.textAlign=Paint.Align.LEFT;paint.clearShadowLayer()
+            canvas.drawText(tileLabel(focused,true),cx,bottom+36f*scale,paint)
+            paint.textAlign=Paint.Align.LEFT;paint.clearShadowLayer();paint.alpha=255
         }
+
+        // Lifted into the full grid, every tile earns its name: the names fade in
+        // with the lift itself — the same fraction that frosts the backdrop and
+        // dissolves the plate — under every tile except the one already carrying
+        // the bold focus caption. On the plate at rest, no names show at all.
+        val lift=liftFrac
+        if(lift>0.01f&&moving==null){
+            paint.style=Paint.Style.FILL;paint.textAlign=Paint.Align.CENTER
+            paint.typeface=regular;paint.textSize=30f*scale;paint.color=ink
+            tiles.forEachIndexed{i,tile->
+                if(tile===focused&&i>=cols)return@forEachIndexed
+                val a=(lift*(if(i<cols)1f else gridAlpha())*255).toInt().coerceIn(0,255)
+                if(a<=2)return@forEachIndexed
+                paint.alpha=a
+                paint.setShadowLayer(9f*scale,0f,3f*scale,if(darkHome)Color.argb((0x65*lift).toInt(),0,0,0) else Color.argb((0x50*lift).toInt(),255,255,255))
+                val cx=appRail.left+tile.left+tile.width/2f
+                val bottom=appRail.top+tile.top+tile.height
+                canvas.drawText(tileLabel(tile,false),cx,bottom+36f*scale,paint)
+            }
+            paint.textAlign=Paint.Align.LEFT;paint.clearShadowLayer();paint.alpha=255
+        }
+
         val entry=moving?:return
         val tile=tiles.firstOrNull{tileKey(it)==entry}?:return
         val x=appRail.left+tile.left.toFloat();val y=appRail.top+tile.top+tile.height*.5f
@@ -745,6 +857,41 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         super.onDraw(c)
         paint.shader=null;paint.isFilterBitmap=true
         if(drawsBackdrop)HomeAppearance.drawBackdrop(context,c,width,height,darkHome,paint)
+        // Pulling the grid up frosts the whole backdrop (Aerial's lifted grid):
+        // the wallpaper frost under a shade of black, fading in with the lift so
+        // the tiles read against glass instead of a sharp photo.
+        val lift=liftFrac
+        if(lift>0.01f){
+            GlassUi.snapshot(context)?.let{frost->
+                paint.alpha=(lift*255).toInt().coerceIn(0,255)
+                c.drawBitmap(frost.bitmap,null,RectF(0f,0f,width.toFloat(),height.toFloat()),paint)
+                paint.style=Paint.Style.FILL;paint.color=Color.BLACK
+                paint.alpha=(lift*96).toInt().coerceIn(0,96)
+                c.drawRect(0f,0f,width.toFloat(),height.toFloat(),paint)
+                paint.alpha=255
+            }
+        }
+        // The focused tile's soft shadow, under the tiles: a bitmap baked once per
+        // tile size (the outline filled black and blurred for real), drawn dropped
+        // and faded by the tile's own focus fraction. One bitmap draw per frame.
+        val ft=focusedTile
+        if(ft!=null&&moving==null){
+            val frac=ft.focusFraction
+            if(frac>0.01f){
+                focusShadow(ft.width,ft.height)?.let{shadow->
+                    val cx=appRail.left+ft.left+ft.width/2f;val cy=appRail.top+ft.top+ft.height/2f
+                    val grow=1f+0.05f*frac
+                    // The shadow belongs to the lifted grid: on the plate the tile
+                    // answers focus with its lit rim instead (see AppTileView).
+                    shadowPaint.alpha=(frac*lift*255).toInt().coerceIn(0,255)
+                    c.save()
+                    c.translate(cx,cy+(24f*scale)*frac);c.scale(grow,grow);c.translate(-cx,-cy)
+                    c.drawBitmap(shadow.bitmap,cx-ft.width/2f-shadow.ext,cy-ft.height/2f-shadow.ext,shadowPaint)
+                    c.restore()
+                    shadowPaint.alpha=255
+                }
+            }
+        }
         c.save();c.translate(0f,oy);c.scale(scale,scale)
         val now=java.util.Date();val zone=java.util.TimeZone.getDefault();timeFormat.timeZone=zone;dateFormat.timeZone=zone
         val time=timeFormat.format(now)
@@ -754,12 +901,12 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             paint.style=Paint.Style.FILL
             val foreground=if(darkHome)Color.WHITE else 0xff162638.toInt()
             paint.setShadowLayer(9f,0f,3f,faded(if(darkHome)0x65000000 else 0x50ffffff))
-            text(c,dateFormat.format(now),96f,364f,43f,color=faded(foreground),strong=true)
+            text(c,dateFormat.format(now),120f,364f,43f,color=faded(foreground),strong=true)
             paint.shader=null
             paint.typeface=clockFont
             paint.textSize=168f
             paint.color=faded(foreground)
-            c.drawText(time,96f,297f,paint)
+            c.drawText(time,120f,297f,paint)
             paint.clearShadowLayer()
         }
         c.restore()

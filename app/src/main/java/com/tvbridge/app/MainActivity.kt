@@ -36,7 +36,20 @@ class MainActivity:Activity() {
     private val ticker=object:Runnable{override fun run(){if(visible){if(screen=="home")updateHome();handler.postDelayed(this,2000)}}}
     override fun onCreate(state:Bundle?) {
         super.onCreate(state)
-        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(if(HomeAppearance.dark(this))0xff162233.toInt()else 0xffe9eff4.toInt()))
+        // Keep the last crash's stack on disk and surface it once at the next
+        // start: on a TV there is no logcat to read, and a bare "it crashed"
+        // report cannot be pinpointed without one.
+        val crashFile=java.io.File(filesDir,"last-crash.txt")
+        val previousHandler=Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler{thread,error->
+            try{crashFile.writeText("Thread: ${thread.name}\n"+android.util.Log.getStackTraceString(error))}catch(_:Throwable){}
+            previousHandler?.uncaughtException(thread,error)
+        }
+        if(crashFile.isFile){
+            val crashText=try{crashFile.readText()}catch(_:Throwable){""}
+            crashFile.delete()
+            if(crashText.isNotBlank())handler.postDelayed({if(visible)NativeUi.show(AlertDialog.Builder(this).setTitle("上次崩溃记录").setMessage(crashText.take(3000)).setPositiveButton("知道了",null))},1500)
+        }
         if(intent.getBooleanExtra("from_boot",false))BootReceiver.markArrived(this)
         apkInstaller=ApkInstaller(this);apkInstaller.restore(state);fileExporter=FileExporter(this)
         if(Build.VERSION.SDK_INT>=28){
@@ -45,16 +58,19 @@ class MainActivity:Activity() {
             }
         }
         window.decorView.systemUiVisibility=5894 or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-        Hub.activity=this;Hub.start(this)
-        run{
-            try{androidx.core.content.ContextCompat.startForegroundService(this,Intent(this,RemoteHostService::class.java))}catch(_:RuntimeException){}
-            if(Hub.adb.enabled())AppThreads.onIo{Hub.adb.connect(Hub.adb.port())}
-        }
         root=FrameLayout(this);sceneBackground(false);setContentView(root);UiSounds.attach(this)
         val packages=IntentFilter().apply{addAction(Intent.ACTION_PACKAGE_ADDED);addAction(Intent.ACTION_PACKAGE_REMOVED);addAction(Intent.ACTION_PACKAGE_CHANGED);addAction(Intent.ACTION_PACKAGE_REPLACED);addDataScheme("package")}
         if(Build.VERSION.SDK_INT>=33)registerReceiver(catalogReceiver,packages,Context.RECEIVER_NOT_EXPORTED)else registerReceiver(catalogReceiver,packages);catalogReceiverRegistered=true
         home=TvHomeView(this,{openTelevision()},{showFiles()},{showAppSettings()},{Hub.server?.refreshInvite();updateHome()},{startActivity(Intent(this,BrowserActivity::class.java))}).apply{drawsBackdrop=false}
         root.addView(home,FrameLayout.LayoutParams(-1,-1));updateHome();home.focusFirst()
+        // Services start once the first frame is on its way: binding the LAN
+        // server and the foreground service must not hold up the first paint.
+        root.post{
+            Hub.activity=this;Hub.start(this)
+            try{androidx.core.content.ContextCompat.startForegroundService(this,Intent(this,RemoteHostService::class.java))}catch(_:RuntimeException){}
+            if(Hub.adb.enabled())AppThreads.onIo{Hub.adb.connect(Hub.adb.port())}
+            updateHome()
+        }
         AppThreads.onIo{runCatching{LauncherApps(this).installed()}}
         HomeAppearance.prewarm(this)
         if(intent.getBooleanExtra("pointer_setup",false))root.post{requestGlobalPointer()}
@@ -113,9 +129,9 @@ class MainActivity:Activity() {
         },4000)
     }
     private fun dp(value:Int)=(value*2*NativeUi.scale(this)).toInt()
-    private fun button(parent:LinearLayout,label:String,action:()->Unit):Button {
+    private fun button(parent:LinearLayout,label:String,plain:Boolean=false,action:()->Unit):Button {
         val b=Button(this);if(android.os.Build.VERSION.SDK_INT>=21)b.backgroundTintList=null;if(android.os.Build.VERSION.SDK_INT>=21)b.stateListAnimator=null;if(android.os.Build.VERSION.SDK_INT>=26)b.defaultFocusHighlightEnabled=false;b.text=label;b.isAllCaps=false;NativeUi.textSize(b,30f);AppIcons.bind(b,size=30f);b.minWidth=0;b.minimumWidth=0;b.setPadding(dp(16),0,dp(16),0)
-        b.id=View.generateViewId();b.setTextColor(GlassUi.colors(this));b.background=GlassUi.surface(b,faint=true);b.setOnClickListener{action()};NativeUi.touchClicks(b)
+        b.id=View.generateViewId();b.setTextColor(GlassUi.colors(this));b.background=GlassUi.surface(b,faint=true,plain=plain);b.setOnClickListener{action()};NativeUi.touchClicks(b)
         parent.addView(b,LinearLayout.LayoutParams(-2,dp(40)).apply{marginEnd=dp(8)});return b
     }
     private fun isDefaultHome():Boolean=packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),0)?.activityInfo?.packageName==packageName
@@ -150,20 +166,52 @@ class MainActivity:Activity() {
         detail.addView(qrBox,FrameLayout.LayoutParams(-1,-2,Gravity.TOP))
         val refreshQr=qrBox.findViewWithTag<Button>("refresh-connection")
         NativeUi.registerQrBox(qrBox)
+        detail.post{GlassUi.prepareDetailRegion(detail,qrBox)}
         val body=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(22),dp(20),dp(22),dp(20));background=GlassUi.surface(this,GlassUi.PANEL_RADIUS)}
         scroll.addView(body,FrameLayout.LayoutParams(-1,-1))
-        fun action(parent:LinearLayout,label:String,detail:String="",run:()->Unit):Button=button(parent,label,run).apply{
+        fun action(parent:LinearLayout,label:String,detail:String="",run:()->Unit):Button=button(parent,label,true,run).apply{
             setOnClickListener{NativeUi.selectControl(this);run()}
             layoutParams=LinearLayout.LayoutParams(-1,NativeUi.settingsRowHeight(this@MainActivity)).apply{bottomMargin=NativeUi.settingsRowGap(this@MainActivity)}
             gravity=Gravity.START or Gravity.CENTER_VERTICAL;setPadding(dp(16),0,dp(16),0);NativeUi.textSize(this,30f)
             setCompoundDrawablesRelative(null,null,NativeUi.trailing(this,detail,ink=true),null)
         }
         fun toggle(parent:LinearLayout,label:String,checked:Boolean,change:(Boolean)->Unit){
-            val v=SettingsSwitch(this).apply{text=label;isChecked=checked;NativeUi.textSize(this,30f);setTextColor(GlassUi.colors(this@MainActivity));setPadding(dp(16),0,dp(16),0);background=GlassUi.surface(this,20f,faint=true);if(Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null};if(Build.VERSION.SDK_INT>=26)defaultFocusHighlightEnabled=false;setOnCheckedChangeListener{_,on->change(on)};NativeUi.touchClicks(this)}
+            val v=SettingsSwitch(this).apply{text=label;isChecked=checked;NativeUi.textSize(this,30f);setTextColor(GlassUi.colors(this@MainActivity));setPadding(dp(16),0,dp(16),0);background=GlassUi.surface(this,20f,faint=true,plain=true);if(Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null};if(Build.VERSION.SDK_INT>=26)defaultFocusHighlightEnabled=false;setOnCheckedChangeListener{_,on->change(on)};NativeUi.touchClicks(this)}
             parent.addView(v,LinearLayout.LayoutParams(-1,NativeUi.settingsRowHeight(this@MainActivity)).apply{bottomMargin=NativeUi.settingsRowGap(this@MainActivity)})
         }
         val desktop=action(body,"桌面应用",desktopLabel()){DesktopTakeover.settings(this){desktopConnectionChanged()}}
         action(body,"桌面背景",HomeAppearance.label(this)){appearanceUi.wallpaper()}
+        action(body,"每行应用数","${HomeAppearance.homeColumns(this)} 个"){
+            // A single row of small segment buttons, the current count already
+            // selected — not a list, no checkmarks. The change applies after the
+            // popup has closed, so the settings page never rebuilds mid-dismiss.
+            val values=intArrayOf(4,5,6,7)
+            val current=HomeAppearance.homeColumns(this)
+            val row=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;setPadding(dp(4),dp(2),dp(4),dp(2))}
+            var dialog:AlertDialog?=null
+            values.forEachIndexed{index,value->
+                val b=Button(this).apply{
+                    text="$value 个";isAllCaps=false;minWidth=0;minimumWidth=0
+                    NativeUi.textSize(this,30f);setTextColor(GlassUi.colors(this@MainActivity))
+                    if(Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null}
+                    if(Build.VERSION.SDK_INT>=26)defaultFocusHighlightEnabled=false
+                    background=GlassUi.surface(this,18f,faint=true)
+                    isSelected=value==current
+                    setOnClickListener{
+                        post{
+                            if(HomeAppearance.homeColumns(this@MainActivity)!=value){
+                                HomeAppearance.setHomeColumns(this@MainActivity,value)
+                                appearanceUpdated(true)
+                            }
+                        }
+                        dialog?.dismiss()
+                    }
+                    NativeUi.touchClicks(this)
+                }
+                row.addView(b,LinearLayout.LayoutParams(0,dp(44),1f).apply{marginEnd=if(index==values.lastIndex)0 else dp(8)})
+            }
+            dialog=NativeUi.show(AlertDialog.Builder(this).setTitle("每行应用数").setView(row),widthDp=300,initialFocus=row.getChildAt(values.indexOf(current).coerceAtLeast(0)))
+        }
         val apps=LauncherApps(this)
         val hiddenApps=apps.hiddenIds().mapNotNull{id->apps.appTitle(id)?.let{id to it}}
         if(hiddenApps.isNotEmpty())action(body,"恢复隐藏应用"){
@@ -245,8 +293,8 @@ class MainActivity:Activity() {
         qrBox.addView(qrImage,LinearLayout.LayoutParams(qrSize,qrSize));controlQr=qrImage
         val qrLabel=TextView(this).apply{text=home.connectionLineText();gravity=Gravity.CENTER;NativeUi.textSize(this,28f);setTextColor(GlassUi.ink(this@MainActivity));setPadding(0,dp(12),0,dp(12));maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END}
         qrBox.addView(qrLabel);controlQrLabel=qrLabel
-        val refreshQr=Button(this).apply{tag="refresh-connection";text="刷新二维码";isAllCaps=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;if(android.os.Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null;elevation=0f};background=GlassUi.surface(this,faint=true);NativeUi.textSize(this,28f);setTextColor(GlassUi.colors(this@MainActivity));setPadding(dp(12),0,dp(12),0);setOnClickListener{ConnectionState.invalidate();networkAddress="";if(Hub.server==null)Hub.start(this@MainActivity);Hub.server?.refreshInvite();updateHome()};NativeUi.touchClicks(this)}
-        qrBox.addView(refreshQr,LinearLayout.LayoutParams(-2,dp(32)))
+        val refreshQr=Button(this).apply{tag="refresh-connection";text="刷新二维码";isAllCaps=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;if(android.os.Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null;elevation=0f};background=GlassUi.surface(this,18f,faint=true);NativeUi.textSize(this,28f);setTextColor(GlassUi.colors(this@MainActivity));setPadding(dp(12),0,dp(12),0);setOnClickListener{ConnectionState.invalidate();networkAddress="";if(Hub.server==null)Hub.start(this@MainActivity);Hub.server?.refreshInvite();updateHome()};NativeUi.touchClicks(this)}
+        qrBox.addView(refreshQr,LinearLayout.LayoutParams(-2,dp(40)))
         return qrBox
     }
     private fun updateHome(){
@@ -261,9 +309,9 @@ class MainActivity:Activity() {
         if(lastControlConnected!=connected){controlQrDot?.background=GradientDrawable().apply{shape=GradientDrawable.OVAL;setColor(if(connected)0xff4caf50.toInt() else Color.WHITE)};lastControlConnected=connected}
     }
     private fun sceneBackground(live:Boolean){
-        val color=if(live)0xff121820.toInt()else if(HomeAppearance.dark(this))0xff162233.toInt()else 0xffe9eff4.toInt()
-        window.setBackgroundDrawable(ColorDrawable(color))
-        if(::root.isInitialized)root.background=if(live)ColorDrawable(color)else GlassUi.backdrop(root)
+        // No background of our own anywhere (Aerial-style): the window stays
+        // transparent and each scene paints itself.
+        if(::root.isInitialized)root.background=if(live)null else GlassUi.backdrop(root)
     }
     internal fun returnToOneHome():Boolean {
         if(!visible||screen=="home")return false
@@ -421,7 +469,7 @@ class MainActivity:Activity() {
         else{lastHomeBackMs=now;handler.removeCallbacks(homeBackExitDelay);handler.postDelayed(homeBackExitDelay,500)}
     }}}
     override fun onSaveInstanceState(state:Bundle){super.onSaveInstanceState(state);apkInstaller.save(state)}
-    override fun onResume(){super.onResume();DesktopTakeover.recover(this);DesktopTakeover.finishSetup(this){};apkInstaller.onResume();apkInstaller.checkInstallStatus();if(::home.isInitialized){if(screen=="liveSetup"&&Hub.live.resumeChannel()!=null){showLive(false);livePanel?.command("liveFull","")}};visible=true;DesktopRecovery.setHomeInFront(this,true);if(startupPrefs.getBoolean("boot",false)&&!BootReceiver.arrivedThisBoot(this))BootReceiver.markArrived(this);DesktopGuardService.onOneResumed();desktopConnectionChanged();if(::home.isInitialized&&screen=="home"){home.refreshApps();home.focusFirst();AppArtwork.refresh(this){if(!isDestroyed)home.refreshApps()}};if(::home.isInitialized){handler.removeCallbacks(ticker);handler.post(ticker)};livePanel?.resume()}
+    override fun onResume(){super.onResume();GlassUi.invalidateScene();DesktopTakeover.recover(this);DesktopTakeover.finishSetup(this){};apkInstaller.onResume();apkInstaller.checkInstallStatus();if(::home.isInitialized){if(screen=="liveSetup"&&Hub.live.resumeChannel()!=null){showLive(false);livePanel?.command("liveFull","")}};visible=true;DesktopRecovery.setHomeInFront(this,true);if(startupPrefs.getBoolean("boot",false)&&!BootReceiver.arrivedThisBoot(this))BootReceiver.markArrived(this);DesktopGuardService.onOneResumed();desktopConnectionChanged();if(::home.isInitialized&&screen=="home"){home.refreshApps();home.focusFirst()};if(::home.isInitialized){handler.removeCallbacks(ticker);handler.post(ticker)};livePanel?.resume()}
     override fun onPause(){apkInstaller.onPause();startupDialog?.dismiss();visible=false;DesktopRecovery.setHomeInFront(this,false);DesktopGuardService.onOnePaused();handler.removeCallbacks(ticker);livePanel?.pause();super.onPause()}
     private fun isInHome(view:View):Boolean{var current:View?=view;while(current!=null){if(current===home)return true;current=current.parent as? View};return false}
     override fun onWindowFocusChanged(hasFocus:Boolean){

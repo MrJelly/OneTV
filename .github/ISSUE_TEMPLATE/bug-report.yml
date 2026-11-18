@@ -1,0 +1,16 @@
+name: 问题反馈
+description: 图标、直播、浏览器等功能问题
+labels: ["bug"]
+body:
+  - type: input
+    id: env
+    attributes:
+      label: 设备与版本
+      placeholder: 品牌型号 / Android 版本 / One 版本
+    validations: {required: true}
+  - type: textarea
+    id: what
+    attributes:
+      label: 问题与复现步骤
+      description: 请尽量附截图（图标问题请附出问题的应用名）
+    validations: {required: true}

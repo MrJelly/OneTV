@@ -19,6 +19,8 @@
 
 支持 Android 4.4 及以上。32 位设备选 ARMv7，64 位设备选 ARM64，不确定时选通用包。桌面接管需在「设置 → 桌面应用」按设备提示授权。
 
+设备适配情况见 [机型兼容表](docs/devices/compatibility.md)，欢迎提交[机型适配反馈](https://github.com/MrJelly/OneTV/issues/new?template=device-report.yml)。
+
 ## 构建与许可
 
 使用 JDK 17 和 Android SDK 35，运行 `./gradlew :app:assembleDebug`。Windows 使用 `gradlew.bat`。

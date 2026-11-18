@@ -1,0 +1,41 @@
+name: 机型适配反馈
+description: 反馈某台电视/盒子/投影上桌面接管的实测结果
+title: "[机型] 品牌 型号"
+labels: ["device"]
+body:
+  - type: input
+    id: model
+    attributes:
+      label: 品牌与型号
+      placeholder: 小米 MiTV-MFTR0 / TCL 65T7L
+    validations: {required: true}
+  - type: input
+    id: android
+    attributes:
+      label: Android 版本与 One 版本
+      placeholder: Android 9，One 1.3
+    validations: {required: true}
+  - type: dropdown
+    id: result
+    attributes:
+      label: 接管结果
+      options: ["✅ 完全正常", "⚠️ 能用但有限制", "❌ 无法接管"]
+    validations: {required: true}
+  - type: checkboxes
+    id: scenes
+    attributes:
+      label: 以下场景是否回到 One（勾选表示正常）
+      options:
+        - label: 按遥控器主页键
+        - label: 断电后重新开机
+        - label: 电源键待机后唤醒
+  - type: dropdown
+    id: state
+    attributes:
+      label: 设置 → 桌面应用 中显示的状态
+      options: ["兼容接管", "One（系统默认桌面）", "正在连接", "待授权", "未设置"]
+  - type: textarea
+    id: detail
+    attributes:
+      label: 详细说明
+      description: 授权是一键设置完成还是手动开启？先闪出原桌面多久？最好附截图。

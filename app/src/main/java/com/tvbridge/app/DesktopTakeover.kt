@@ -347,7 +347,7 @@ object DesktopTakeover {
                 0->{
                     if(handoverRunning.get())return@setOnClickListener
                     enableHomeEntry(activity)
-                    preferences.edit().putBoolean("boot",true).putBoolean("desktop_guard",true).putBoolean("desktop_setup_pending",true).remove("desktop_setup_step").apply()
+                    preferences.edit().putBoolean("boot",true).putBoolean("desktop_guard",true).putBoolean("desktop_setup_pending",true).remove("desktop_setup_step").remove("desktop_setup_skipped").apply()
                     handover(activity){finishSetup(activity,::refresh)}
                     refresh()
                 }
@@ -372,15 +372,26 @@ object DesktopTakeover {
         changed()
         fun request(step:String,intent:Intent,message:String){
             val p=prefs(activity)
+            // Firmwares that strip a settings page (Coocaa/Tianci 5.1 has no
+            // usage-access page, some have no accessibility page) must not kill
+            // the whole chain: skip that step, continue with the rest, and let
+            // the ADB handover be the path that grants it instead.
+            fun skip(){
+                val skipped=(p.getStringSet("desktop_setup_skipped",emptySet())?:emptySet())+step
+                p.edit().putStringSet("desktop_setup_skipped",skipped).remove("desktop_setup_step").apply()
+                finishSetup(activity,changed)
+            }
+            if(intent.resolveActivity(activity.packageManager)==null){skip();return}
             if(p.getString("desktop_setup_step",null)==step){p.edit().putBoolean("desktop_setup_pending",false).apply();NativeUi.notice(activity,"授权尚未完成，可再次设置桌面");return}
             p.edit().putString("desktop_setup_step",step).apply();NativeUi.notice(activity,message)
-            try{activity.startActivity(intent)}catch(_:RuntimeException){p.edit().putBoolean("desktop_setup_pending",false).apply();NativeUi.notice(activity,"设备未提供此授权入口")}
+            try{activity.startActivity(intent)}catch(_:RuntimeException){skip()}
         }
-        if(!ready){
+        val skipped=prefs(activity).getStringSet("desktop_setup_skipped",emptySet())?:emptySet()
+        if(!ready&&"accessibility" !in skipped){
             request("accessibility",Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),"请开启 One 桌面接管")
-        }else if(Build.VERSION.SDK_INT>=29&&!GlobalPointer.permitted(activity)){
+        }else if(Build.VERSION.SDK_INT>=29&&!GlobalPointer.permitted(activity)&&"overlay" !in skipped){
             request("overlay",Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,android.net.Uri.parse("package:${activity.packageName}")),"请允许 One 后台显示")
-        }else if(Build.VERSION.SDK_INT>=21&&!DesktopPolicy.usageAllowed(activity)){
+        }else if(Build.VERSION.SDK_INT>=21&&!DesktopPolicy.usageAllowed(activity)&&"usage" !in skipped){
             request("usage",Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS),"请允许 One 识别前台应用，以免接管正在使用的应用")
         }else {
             prefs(activity).edit().putBoolean("desktop_setup_pending",false).remove("desktop_setup_step").apply()
@@ -388,6 +399,7 @@ object DesktopTakeover {
             NativeUi.notice(activity,when{
                 defaultHome(activity)?.packageName==activity.packageName->"One 已是系统默认桌面"
                 DesktopGuardService.connected->"兼容接管已开启"
+                "accessibility" in skipped->"此设备未提供无障碍设置页，请用手机或电脑通过 ADB 交接开启接管"
                 else->"正在连接桌面守护"
             })
             DesktopRecovery.offer(activity)
@@ -399,6 +411,7 @@ object DesktopTakeover {
             NativeUi.notice(activity,"正在还原系统桌面配置")
             AppThreads.onIo{
                 val ready=runCatching{Hub.adb.ready||(Hub.adb.enabled()&&Hub.adb.restore())}.getOrDefault(false)
+                if(ready)runCatching{Hub.adb.restoreBootApp()}
                 if(ready&&target!=null)Hub.adb.setDefaultHome(target)
                 activity.runOnUiThread{if(!activity.isFinishing&&!activity.isDestroyed){
                     if(!prefs(activity).contains("desktop_vt_previous"))restore(activity,changed)

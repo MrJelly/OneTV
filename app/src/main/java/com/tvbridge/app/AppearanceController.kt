@@ -68,8 +68,8 @@ class AppearanceController(private val activity:Activity,private val changed:(ke
         val buttons=LinearLayout(activity).apply{orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER}
         val wallpaperButtonWidth=listOf("确认","刷新壁纸","上传图片").maxOf{Button(activity).apply{NativeUi.textSize(this,30f)}.paint.measureText(it)+dp(16)}.toInt().coerceIn(dp(80),dp(200))
         fun makeButton(text:String,action:()->Unit){
-            val button=Button(activity).apply{setText(text);NativeUi.textSize(this,30f);setTextColor(GlassUi.colors(activity));isAllCaps=false;maxLines=1;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;if(android.os.Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null;elevation=0f};setPadding(dp(8),0,dp(8),0);background=GlassUi.surface(this,24f);setOnClickListener{if(draft.busy)message("正在处理图片，请稍候")else action()};NativeUi.touchClicks(this)}
-            buttons.addView(button,LinearLayout.LayoutParams(wallpaperButtonWidth,dp(32)).apply{if(buttons.childCount>0)leftMargin=dp(10)})
+            val button=Button(activity).apply{setText(text);NativeUi.textSize(this,30f);setTextColor(GlassUi.colors(activity));isAllCaps=false;maxLines=1;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;if(android.os.Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null;elevation=0f};setPadding(dp(8),0,dp(8),0);background=GlassUi.surface(this,18f);setOnClickListener{if(draft.busy)message("正在处理图片，请稍候")else action()};NativeUi.touchClicks(this)}
+            buttons.addView(button,LinearLayout.LayoutParams(wallpaperButtonWidth,dp(40)).apply{if(buttons.childCount>0)leftMargin=dp(10)})
         }
         makeButton("确认"){confirm()}
         makeButton("刷新壁纸"){

@@ -23,40 +23,23 @@ object Hub {
         val app=context.applicationContext
         val artworkCache=android.util.LruCache<String,ByteArray>(96)
         val bundleVersion=runCatching{app.packageManager.getPackageInfo(app.packageName,0).lastUpdateTime}.getOrDefault(0L)
+        fun webp(drawable:android.graphics.drawable.Drawable):ByteArray{
+            val bitmap=android.graphics.Bitmap.createBitmap(192,192,android.graphics.Bitmap.Config.ARGB_8888)
+            drawable.setBounds(0,0,192,192);drawable.draw(android.graphics.Canvas(bitmap))
+            val output=java.io.ByteArrayOutputStream()
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.WEBP,90,output)
+            bitmap.recycle()
+            return output.toByteArray()
+        }
+        // Square iOS-style icons, the same art the TV home draws.
         fun appArtwork(id:String):ByteArray?{
-            val res=when(id){
-                "module:live"->R.drawable.home_live_wide
-                "module:files"->R.drawable.home_files_wide
-                "module:browser"->R.drawable.home_browser_wide
-                else->null
-            }
-            if(res!=null)return app.resources.openRawResource(res).use{it.readBytes()}
+            val key="sq:$id"
+            if(id.startsWith("module:"))return artworkCache.get(key)?:AppModules.square(app,id)?.let{webp(it)}?.also{artworkCache.put(key,it)}
             val repository=LauncherApps(app)
             val entry=repository.installed().firstOrNull{it.component.flattenToString()==id}?:return null
-            val key="$id:${entry.updated}:${AppArtwork.version()}"
-            artworkCache.get(key)?.let{return it}
-            return runCatching{
-                val bitmap=android.graphics.Bitmap.createBitmap(160,90,android.graphics.Bitmap.Config.ARGB_8888)
-                val canvas=android.graphics.Canvas(bitmap)
-                val banner=AppArtwork.tile(app,entry.component.packageName)?:repository.banner(entry)
-                val icon=banner?:repository.icon(entry)
-                val tint=repository.tileTint(entry)
-                val paint=android.graphics.Paint().apply{
-                    shader=android.graphics.LinearGradient(0f,0f,0f,90f,tint[0],tint[1],android.graphics.Shader.TileMode.CLAMP)
-                }
-                canvas.drawRect(0f,0f,160f,90f,paint)
-                val w=icon.intrinsicWidth.coerceAtLeast(1)
-                val h=icon.intrinsicHeight.coerceAtLeast(1)
-                val scale=if(banner!=null)maxOf(160f/w,90f/h) else 50f/maxOf(w,h)
-                val x=(160-w*scale)/2
-                val y=(90-h*scale)/2
-                icon.setBounds(x.toInt(),y.toInt(),(160-x).toInt(),(90-y).toInt())
-                icon.draw(canvas)
-                val output=java.io.ByteArrayOutputStream()
-                bitmap.compress(android.graphics.Bitmap.CompressFormat.WEBP,87,output)
-                bitmap.recycle()
-                output.toByteArray().also{artworkCache.put(key,it)}
-            }.getOrNull()
+            val versioned="$key:${entry.updated}"
+            artworkCache.get(versioned)?.let{return it}
+            return runCatching{webp(repository.squareIcon(entry)).also{artworkCache.put(versioned,it)}}.getOrNull()
         }
         fun appsSnapshot(known:String):String{
             val repository=LauncherApps(app)
@@ -75,10 +58,11 @@ object Hub {
                 arr.put(JSONObject().put("id",id).put("title",repository.displayTitle(id,original))
                     .put("original",original).put("hidden",id in hidden).put("folder",folder?:JSONObject.NULL))
             }
-            val artVersion="$bundleVersion:${AppArtwork.version()}:${byId.mapValues{it.value.updated}.hashCode()}"
-            val version=(arr.toString()+folders.toString()+artVersion).hashCode().toString()
+            val artVersion="sq1:$bundleVersion:${byId.mapValues{it.value.updated}.hashCode()}"
+            val columns=HomeAppearance.homeColumns(app)
+            val version=(arr.toString()+folders.toString()+artVersion+columns).hashCode().toString()
             if(known==version)return ""
-            return JSONObject().put("version",version).put("apps",arr).put("folders",folders).put("artworkVersion",artVersion).toString()
+            return JSONObject().put("version",version).put("apps",arr).put("folders",folders).put("artworkVersion",artVersion).put("columns",columns).toString()
         }
         if(!::live.isInitialized)live=LiveRepository(app)
         if(!::adb.isInitialized)adb=AdbRemote(app)

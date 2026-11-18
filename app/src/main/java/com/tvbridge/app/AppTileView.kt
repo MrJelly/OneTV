@@ -32,9 +32,9 @@ internal fun roundedRectPath(l:Float,t:Float,r:Float,b:Float,radius:Float):Path{
     return p
 }
 
-/** Aerial-style app tile: a 16:9 card. A banner fills it edge to edge; an app icon sits
- *  centred on a gradient sampled from that icon, nameless (the name appears below the
- *  tile when focused); module glyph tiles keep their name inside at the bottom. */
+/** iOS-style app tile: a square icon drawn full-bleed under a rounded mask, finished
+ *  with a gloss sheen over the top and a bright hairline rim. Names are drawn by the
+ *  home grid below the tile; module glyph tiles keep their name inside at the bottom. */
 class AppTileView(context:Context):View(context) {
     var title=""
     var role=""
@@ -48,10 +48,24 @@ class AppTileView(context:Context):View(context) {
     /** Aerial glyph-tile mode: a white glyph over the diagonal tint gradient, no icon art. */
     var glyph:Drawable?=null
     var focusHook:((Boolean)->Unit)?=null
+    /** Fires on every focus-animation frame so the parent can repaint the shadow. */
+    var focusAnimHook:(()->Unit)?=null
+    private var focusFrac=0f
+    private var focusAnimator:android.animation.ValueAnimator?=null
+    /** 0 = at rest, 1 = fully focused: drives scale, gloss strength and ring fade. */
+    val focusFraction get()=focusFrac
+    /** 1 = resting on the glass plate, 0 = fully lifted into the grid: on the
+     *  plate, focus is a full-perimeter lit edge; lifted, it is the shadow. */
+    var plateFrac=1f
     private val paint=TextPaint(Paint.ANTI_ALIAS_FLAG)
     private val clipPath=Path()
     private var clipW=0
     private var clipH=0
+    private var glossShader:LinearGradient?=null
+    private var bottomShader:LinearGradient?=null
+    private var rimShader:LinearGradient?=null
+    private var glossW=0f
+    private var glossH=0f
 
     init {
         isFocusable=true
@@ -65,9 +79,35 @@ class AppTileView(context:Context):View(context) {
         super.onFocusChanged(focused,direction,previouslyFocusedRect)
         invalidate()
         focusHook?.invoke(focused)
+        animateFocus(focused)
     }
 
-    private val cornerRadius get()=height*(if(role=="module") .19f else .145f)
+    /** Focus motion: a 180ms swell to 1.05 with the gloss and ring fading up with
+     *  it. A new animation always starts from the current fraction and cancels the
+     *  old one, so fast D-pad repeats never stack or jump. Only the tile that owns
+     *  or just lost focus ever animates; every other tile stays static. */
+    private fun animateFocus(focused:Boolean){
+        focusAnimator?.cancel()
+        val target=if(focused)1f else 0f
+        if(focusFrac==target){applyFocusFrac();return}
+        focusAnimator=android.animation.ValueAnimator.ofFloat(focusFrac,target).apply{
+            duration=if(focused)180L else 140L
+            interpolator=android.view.animation.DecelerateInterpolator()
+            addUpdateListener{focusFrac=it.animatedValue as Float;applyFocusFrac()}
+            start()
+        }
+    }
+
+    private fun applyFocusFrac(){
+        val s=1f+0.05f*focusFrac
+        scaleX=s;scaleY=s
+        invalidate()
+        focusAnimHook?.invoke()
+    }
+
+    override fun onDetachedFromWindow(){focusAnimator?.cancel();super.onDetachedFromWindow()}
+
+    private val cornerRadius get()=height*.225f
 
     override fun onDraw(canvas:Canvas) {
         val w=width.toFloat();val h=height.toFloat()
@@ -119,18 +159,47 @@ class AppTileView(context:Context):View(context) {
             canvas.drawText(label,(w-paint.measureText(label))/2f,h*.90f,paint)
             paint.clearShadowLayer()
         }
-        canvas.restore()
-        if(hasFocus()||isSelected){
-            val inset=(h*.0055f).coerceAtLeast(.5f)
-            paint.style=Paint.Style.STROKE
-            paint.strokeWidth=inset*2
-            paint.color=0xff173958.toInt()
-            canvas.drawPath(roundedRectPath(inset,inset,w-inset,h-inset,radius-inset),paint)
-            val inner=inset*3
-            paint.color=if(isSelected)0xffa6ddff.toInt() else 0xfff3faff.toInt()
-            canvas.drawPath(roundedRectPath(inner,inner,w-inner,h-inner,(radius-inner).coerceAtLeast(0f)),paint)
-            paint.style=Paint.Style.FILL
+        // iOS gloss, inside the rounded mask: the same top/bottom light the glass
+        // panels wear — a soft reflection pooled at the top, a fainter pool at
+        // the bottom, and a rim that runs bright along the top, faint down the
+        // sides and lit again along the bottom. No diagonal light anywhere.
+        if(glossW!=w||glossH!=h){
+            glossW=w;glossH=h
+            glossShader=LinearGradient(0f,0f,0f,h*0.55f,0x59ffffff,0x00ffffff,Shader.TileMode.CLAMP)
+            bottomShader=LinearGradient(0f,h,0f,h*0.5f,0x30ffffff,0x00ffffff,Shader.TileMode.CLAMP)
+            rimShader=LinearGradient(0f,0f,0f,h,intArrayOf(0xe6ffffff.toInt(),0x40ffffff,0x2effffff,0x8cffffff.toInt()),floatArrayOf(0f,0.4f,0.6f,1f),Shader.TileMode.CLAMP)
         }
+        paint.style=Paint.Style.FILL
+        paint.alpha=(255*(0.70f+0.30f*focusFrac)).toInt().coerceIn(0,255)
+        paint.shader=glossShader
+        canvas.drawRect(0f,0f,w,h,paint)
+        paint.shader=bottomShader
+        canvas.drawRect(0f,0f,w,h,paint)
+        paint.shader=null
+        paint.style=Paint.Style.STROKE
+        paint.strokeWidth=(h*0.009f).coerceIn(1f,3f)
+        val rim=paint.strokeWidth/2f
+        val rimPath=roundedRectPath(rim,rim,w-rim,h-rim,(radius-rim).coerceAtLeast(0f))
+        paint.shader=rimShader
+        canvas.drawPath(rimPath,paint)
+        paint.shader=null
+        // On the glass plate (not yet lifted) the focused tile's whole rim lights
+        // up — a shadow would sink into the glass; lifted, this fades out as the
+        // home view's soft shadow fades in.
+        val plateGlow=focusFrac*plateFrac
+        if(plateGlow>0.01f){
+            paint.style=Paint.Style.STROKE
+            paint.strokeWidth=(h*0.014f).coerceIn(1.5f,4f)
+            paint.alpha=(plateGlow*235).toInt().coerceIn(0,255)
+            paint.color=0xffffffff.toInt()
+            val gi=paint.strokeWidth/2f
+            canvas.drawPath(roundedRectPath(gi,gi,w-gi,h-gi,(radius-gi).coerceAtLeast(0f)),paint)
+        }
+        paint.style=Paint.Style.FILL
+        paint.alpha=255
+        canvas.restore()
+        // No focus ring: focus reads from the swell, the strengthened gloss and
+        // the soft shadow the home view paints under the lifted tile.
         if(badge){
             val star=AppIcons.Vector("star"){Color.WHITE}
             val size=(h*0.17f).toInt().coerceAtLeast(1)

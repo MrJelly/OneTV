@@ -102,7 +102,10 @@ object HomeAppearance {
             .putString("bing_date",bingDate(draft)).putInt("bing_idx",bingIdx(draft)).apply()
     }
     fun label(context:Context)=when(mode(context)){"custom"->"自定义";"bing"->"壁纸";else->"默认"}
-    fun key(context:Context)="${context.packageName}:${mode(context)}:${dark(context)}:${context.getSharedPreferences("appearance",0).getLong("wallpaper_revision",0)}"
+    fun key(context:Context)="${context.packageName}:${mode(context)}:${dark(context)}:${context.getSharedPreferences("appearance",0).getLong("wallpaper_revision",0)}:cols${homeColumns(context)}"
+    /** Apps per row on Home (the Aerial-style setting): 4–7, six by default. */
+    fun homeColumns(context:Context)=context.getSharedPreferences("appearance",0).getInt("home_columns",6).takeIf{it in 4..7}?:6
+    fun setHomeColumns(context:Context,value:Int){context.getSharedPreferences("appearance",0).edit().putInt("home_columns",value).apply()}
     fun setGradient(context:Context){context.getSharedPreferences("appearance",0).edit().putString("wallpaper_mode","gradient").putLong("wallpaper_revision",System.nanoTime()).apply()}
     fun setDark(context:Context,value:Boolean)=setGradient(context)
     fun customTheme(context:Context)=context.getSharedPreferences("appearance",0).getString("custom_theme","auto").orEmpty().takeIf{it in listOf("auto","light","dark")}?:"auto"

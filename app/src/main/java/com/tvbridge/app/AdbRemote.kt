@@ -55,8 +55,44 @@ class AdbRemote(context:Context){
             if(android.os.Build.VERSION.SDK_INT>=24)runCatching{
                 shell("cmd notification allow_listener $pkg/.DesktopRevivalService",port(),false)
             }
+            runCatching{applyBootApp()}
             message="桌面授权已配置";true
         }catch(_:Exception){message="授权未完成，请检查系统遥控连接";false}
+    }
+    private fun cleanSetting(value:String)=value.trim().let{if(it.isEmpty()||it=="null")"none" else it}
+    /**
+     * TCL / FFALCON read system boot_app_mode and boot_app_componentname (com.tcl.ttvs) at power-on.
+     * Pointing them at One makes it the first screen instead of TCL's launcher (idea from Aerial's
+     * install.sh). Only where the firmware has the key: com.tcl.ttvs installed or a value already set.
+     * Original values are kept for [restoreBootApp].
+     */
+    fun applyBootApp():Boolean {
+        if(!ready)return false
+        val own="${appContext.packageName}/.MainActivity"
+        val current=cleanSetting(shell("settings get system boot_app_componentname",port(),false))
+        if(current==own)return true
+        val tcl=shell("pm path com.tcl.ttvs",port(),false).contains("package:")
+        if(!tcl&&current=="none")return false
+        val mode=cleanSetting(shell("settings get system boot_app_mode",port(),false))
+        val prefs=appContext.getSharedPreferences("startup",Context.MODE_PRIVATE)
+        if(!prefs.contains("boot_app_previous"))prefs.edit().putString("boot_app_previous",current).putString("boot_mode_previous",mode).commit()
+        if(mode=="none")shell("settings put system boot_app_mode boot_launcher",port(),false)
+        shell("settings put system boot_app_componentname $own",port(),false)
+        return true
+    }
+    fun restoreBootApp():Boolean {
+        val prefs=appContext.getSharedPreferences("startup",Context.MODE_PRIVATE)
+        val app=prefs.getString("boot_app_previous",null)?:return true
+        if(!ready)return false
+        val mode=prefs.getString("boot_mode_previous","none").orEmpty()
+        val safe=Regex("^[A-Za-z0-9_./$]+$")
+        return try{
+            if(app=="none")shell("settings delete system boot_app_componentname",port(),false)
+            else if(safe.matches(app))shell("settings put system boot_app_componentname $app",port(),false)
+            if(mode=="none")shell("settings delete system boot_app_mode",port(),false)
+            else if(safe.matches(mode))shell("settings put system boot_app_mode $mode",port(),false)
+            prefs.edit().remove("boot_app_previous").remove("boot_mode_previous").apply();true
+        }catch(_:Exception){false}
     }
     fun setDefaultHome(component:ComponentName):Boolean {
         if(!ready||android.os.Build.VERSION.SDK_INT<21)return false

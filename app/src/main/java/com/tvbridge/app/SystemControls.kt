@@ -23,10 +23,11 @@ object SystemControls {
                 }else listOf(active)
                 if(networks.any{it.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)})return "有线网络"
                 if(networks.any{it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)})return "Wi-Fi"
+                if(networks.any{it.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)})return "移动网络"
             }
         }
         val info=runCatching{manager?.activeNetworkInfo}.getOrNull()
-        return when{info?.isConnected!=true->"未连接";info.type==ConnectivityManager.TYPE_WIFI->"Wi-Fi";info.type==ConnectivityManager.TYPE_ETHERNET->"有线网络";else->"网络已连接"}
+        return when{info?.isConnected!=true->"未连接";info.type==ConnectivityManager.TYPE_WIFI->"Wi-Fi";info.type==ConnectivityManager.TYPE_ETHERNET->"有线网络";info.type==ConnectivityManager.TYPE_MOBILE->"移动网络";else->"网络已连接"}
     }
     private val fengOsPanel=ComponentName("cn.formovie.fengos.settings","cn.formovie.fengos.settings.ui.activity.MainActivity")
     private fun fengOsSettings(context:Context)=Intent(Intent.ACTION_MAIN).setComponent(fengOsPanel).takeIf{resolves(context,it)}
@@ -208,7 +209,7 @@ object SystemControls {
             body.addView(b,LinearLayout.LayoutParams(buttonWidth,-1).apply{if(body.childCount>0)leftMargin=dp(6)})
         }
         row("信号源","monitor"){openSources(activity)}
-        row(if(net=="网络已连接")"网络"else net,when(net){"有线网络"->"ethernet";"未连接"->"network_off";"Wi-Fi"->wifiIcon(activity);else->"monitor"}){
+        row(if(net=="网络已连接")"网络"else net,when(net){"有线网络"->"ethernet";"未连接"->"network_off";"Wi-Fi"->wifiIcon(activity);"移动网络"->"cellular";else->"monitor"}){
             if(!DeviceAdapters.xgimiPage(activity,"Settings://com.xgimi.settings.net/wifi_misckey"))open(activity,networkIntents(activity))
         }
         // Aerial #1528: LeTV's own settings lead where installed (the

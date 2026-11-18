@@ -54,17 +54,29 @@ object GlassUi {
         val w = 320
         val h = (b.height * 320f / b.width).toInt().coerceIn(1, 320)
         val small = Bitmap.createScaledBitmap(b, w, h, true)
-        val px = IntArray(w * h)
-        small.getPixels(px, 0, w, 0, 0, w, h)
-        if (small !== b) small.recycle()
-        val tmp = IntArray(px.size)
+        blurInPlace(small)
+        return small
+    }
+
+    /** The one blur core shared by every frost source — wallpaper, static fallback
+     *  and captured scene alike: 3 box passes, radius 7, over a pixel buffer the
+     *  caller owns (so the scene path can reuse its buffers instead of allocating
+     *  per capture). Pure CPU work; no RenderScript, no RenderEffect, API 19 safe. */
+    private fun blurPasses(px: IntArray, tmp: IntArray, w: Int, h: Int) {
         repeat(3) {
             pass(px, tmp, w, h, 7, horizontal = true)
             pass(tmp, px, w, h, 7, horizontal = false)
         }
-        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        out.setPixels(px, 0, w, 0, 0, w, h)
-        return out
+    }
+
+    private fun blurInPlace(bitmap: Bitmap) {
+        val w = bitmap.width; val h = bitmap.height
+        if (w < 2 || h < 2) return
+        val px = IntArray(w * h)
+        bitmap.getPixels(px, 0, w, 0, 0, w, h)
+        val tmp = IntArray(px.size)
+        blurPasses(px, tmp, w, h)
+        bitmap.setPixels(px, 0, w, 0, 0, w, h)
     }
 
     private fun pass(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int, horizontal: Boolean) {
@@ -132,6 +144,129 @@ object GlassUi {
         }
     }
 
+    private var sceneFrostCache: Frost? = null
+    @Volatile private var sceneCaptureGen = 0
+    @Volatile private var sceneCaptureRunning = false
+    private var sceneBitmap: Bitmap? = null
+    private var scenePx: IntArray? = null
+    private var sceneTmp: IntArray? = null
+    private val sceneMaterials = java.util.Collections.newSetFromMap(java.util.WeakHashMap<Material, Boolean>())
+
+    private fun registerSceneMaterial(material: Material) {
+        synchronized(sceneMaterials) { sceneMaterials.add(material) }
+    }
+
+    /** Drop the captured scene and void any capture still in flight. Call whenever
+     *  the underlying content may have changed (a page switch, a resume); the next
+     *  popup prepares a fresh one before it shows. */
+    fun invalidateScene() {
+        synchronized(this) { sceneFrostCache = null; sceneCaptureGen++ }
+    }
+
+    /**
+     * The scene frost for drawing: the last completed capture if one is ready,
+     * otherwise the wallpaper frost while a fresh capture runs. Never blocks and
+     * never captures from inside a draw — captures are kicked off by
+     * [prepareScene] before a surface shows.
+     */
+    @Synchronized
+    fun sceneFrost(context: Context): Frost {
+        sceneFrostCache?.let { return it }
+        return try { wallpaper(context) } catch (_: Exception) { staticFrost(context) }
+    }
+
+    /**
+     * Capture the scene behind upcoming glass, BEFORE the glass shows, so a popup
+     * can never capture itself (popup and dialog windows are separate windows and
+     * never appear in the activity's hierarchy anyway). The hierarchy draw happens
+     * here, once, into a reused bitmap at 1/10 scale; the blur itself runs on the
+     * io lane over reused pixel buffers, so a low-end box neither stalls its UI
+     * thread nor churns the GC. When the frost lands, every live scene material
+     * repaints itself with it; until then it shows the wallpaper frost. SurfaceView
+     * content (live video) cannot be captured this way — surfaces over video keep
+     * the smoke fallback via the existing video branch.
+     */
+    fun prepareScene(context: Context) {
+        val root = activity(context)?.window?.decorView ?: return
+        val w = root.width.takeIf { it > 0 } ?: return
+        val h = root.height.takeIf { it > 0 } ?: return
+        synchronized(this) {
+            if (sceneCaptureRunning) return
+            sceneCaptureRunning = true
+        }
+        val gen = sceneCaptureGen
+        val bw = (w / 10).coerceAtLeast(1); val bh = (h / 10).coerceAtLeast(1)
+        val bitmap = sceneBitmap?.takeIf { it.width == bw && it.height == bh && !it.isRecycled }
+            ?: Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888).also { sceneBitmap = it }
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.scale(bw.toFloat() / w, bh.toFloat() / h)
+        root.draw(canvas)
+        val px = scenePx?.takeIf { it.size == bw * bh } ?: IntArray(bw * bh).also { scenePx = it }
+        bitmap.getPixels(px, 0, bw, 0, 0, bw, bh)
+        val point = IntArray(2); root.getLocationOnScreen(point)
+        AppThreads.io.execute {
+            val tmp = sceneTmp?.takeIf { it.size == px.size } ?: IntArray(px.size).also { sceneTmp = it }
+            blurPasses(px, tmp, bw, bh)
+            val out = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+            out.setPixels(px, 0, bw, 0, 0, bw, bh)
+            val frost = Frost(out, w, h, point[0], point[1])
+            AppThreads.main.post {
+                sceneCaptureRunning = false
+                if (gen == sceneCaptureGen) {
+                    synchronized(this@GlassUi) { sceneFrostCache = frost }
+                    val targets = synchronized(sceneMaterials) { sceneMaterials.toList() }
+                    targets.forEach { it.invalidateSelf() }
+                }
+            }
+        }
+    }
+
+    // ---- One-time detail-region capture -------------------------------------
+    // Pages with a detail area (settings/control) capture that region ONCE
+    // when the page settles; every popup over it then samples this stored
+    // frost directly instead of re-capturing (and re-tinting) the whole scene
+    // per popup. The QR card is hidden for the synchronous draw, as with the
+    // scene capture, so it never bakes into a popup's backdrop.
+    private var detailFrostCache: Frost? = null
+    private var detailFrostKey = ""
+
+    private fun detailKey(detail: View): String {
+        val loc = IntArray(2); detail.getLocationOnScreen(loc)
+        return "${HomeAppearance.key(detail.context)}:${loc[0]},${loc[1]}:${detail.width}x${detail.height}"
+    }
+
+    fun detailFrost(detail: View): Frost? {
+        if (detail.width <= 0 || detail.height <= 0) return null
+        val key = detailKey(detail)
+        return synchronized(this) { detailFrostCache?.takeIf { detailFrostKey == key } }
+    }
+
+    fun prepareDetailRegion(detail: View, qrBox: View?) {
+        if (!detail.isAttachedToWindow) return
+        val decor = activity(detail.context)?.window?.decorView ?: return
+        val w = detail.width; val h = detail.height
+        if (w <= 0 || h <= 0) return
+        val loc = IntArray(2); detail.getLocationOnScreen(loc)
+        val key = detailKey(detail)
+        val bw = (w / 10).coerceAtLeast(1); val bh = (h / 10).coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.scale(bw.toFloat() / w, bh.toFloat() / h)
+        canvas.translate(-loc[0].toFloat(), -loc[1].toFloat())
+        val qrWasVisible = qrBox != null && qrBox.visibility == View.VISIBLE
+        if (qrWasVisible) qrBox!!.visibility = View.GONE
+        try { decor.draw(canvas) } finally { if (qrWasVisible) qrBox!!.visibility = View.VISIBLE }
+        val px = IntArray(bw * bh); bitmap.getPixels(px, 0, bw, 0, 0, bw, bh)
+        AppThreads.io.execute {
+            val tmp = IntArray(px.size)
+            blurPasses(px, tmp, bw, bh)
+            val out = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+            out.setPixels(px, 0, bw, 0, 0, bw, bh)
+            val frost = Frost(out, w, h, loc[0], loc[1])
+            AppThreads.main.post { synchronized(this@GlassUi) { detailFrostCache = frost; detailFrostKey = key } }
+        }
+    }
+
     fun video(context: Context): Boolean {
         if (activity(context)?.javaClass?.name == "com.tvbridge.app.BrowserActivity") return false
         if (context.packageName == "com.tvbridge.engine") return true
@@ -171,11 +306,18 @@ object GlassUi {
         border: Boolean = true,
         faint: Boolean = false,
         alphaBoost: Int = 0,
-        bottomCorners: Boolean = true
-    ): Drawable = Material(view, radius, frost, video, dark, dense, border, faint, alphaBoost, bottomCorners)
+        bottomCorners: Boolean = true,
+        scene: Boolean = false,
+        plain: Boolean = false
+    ): Drawable = Material(view, radius, frost, video, dark, dense, border, faint, alphaBoost, bottomCorners, false, null, null, scene, plain)
 
     fun homeGlass(view:View,radius:Float,screenLeft:Int?=null,screenTop:Int?=null):Drawable =
         Material(view,radius,null,false,true,false,true,false,0,true,true,screenLeft,screenTop)
+
+    /** Home-glass positioning over the captured scene instead of the wallpaper:
+     *  for popups and menus that float above arbitrary activity content. */
+    fun sceneGlass(view:View,radius:Float,screenLeft:Int?=null,screenTop:Int?=null):Drawable =
+        Material(view,radius,null,false,true,false,true,false,0,true,true,screenLeft,screenTop,true)
 
     fun selectedBorder(view: View, radius: Float = 18f): Drawable {
         val scale = NativeUi.scale(view.context)
@@ -274,7 +416,9 @@ object GlassUi {
         private val bottomCorners: Boolean = true,
         private val homeGlass: Boolean = false,
         private val screenLeft: Int? = null,
-        private val screenTop: Int? = null
+        private val screenTop: Int? = null,
+        private val scene: Boolean = false,
+        private val plain: Boolean = false
     ) : Drawable() {
         private var sampled: Bitmap? = null
         private var sampledShader: BitmapShader? = null
@@ -291,7 +435,11 @@ object GlassUi {
         private var geometryDirty = true
         private var geometryScale = -1f
         private var topHighlight: Shader? = null
-        private var sideHighlight: Shader? = null
+        private var bottomHighlight: Shader? = null
+        private var smokeShader: Shader? = null
+        private var smokeKey: String? = null
+
+        init { if (scene) registerSceneMaterial(this) }
 
         override fun onBoundsChange(bounds: Rect) { geometryDirty = true }
 
@@ -301,17 +449,39 @@ object GlassUi {
             rect.set(bounds)
             val corner = radius * scale
             path.set(SmoothCorners.smoothRect(rect, corner, if (bottomCorners) corner else 0f))
-            val rimWidth = (if(homeGlass) 2.4f else if (isSelected) 1.8f else 1.2f) * scale
+            val rimWidth = (if(homeGlass) 2.4f else if (scene) 2.0f else if (isSelected && !plain) 2.2f else if (isSelected) 1.8f else 1.2f) * scale
             rimPaint.strokeWidth = rimWidth
-            rimPaint.color = if(homeGlass) Color.WHITE else Color.argb(if (isSelected) 178 else 56, 255, 255, 255)
-            if(homeGlass)rimPaint.shader=LinearGradient(rect.left,rect.top,rect.right,rect.bottom,
-                intArrayOf(0x20ffffff,0x1affffff,0x0fffffff,0x16ffffff),
-                floatArrayOf(0f,.35f,.7f,1f),Shader.TileMode.CLAMP)
-            if (homeGlass && rect.width() > 0 && rect.height() > 0) {
-                topHighlight = LinearGradient(0f, rect.top, 0f, rect.centerY(), 0x1affffff, 0x00ffffff, Shader.TileMode.CLAMP)
-                sideHighlight = LinearGradient(rect.left, 0f, rect.right, 0f,
-                    intArrayOf(0x00ffffff, 0x17ffffff, 0x17ffffff, 0x00ffffff),
-                    floatArrayOf(0f, .30f, .70f, 1f), Shader.TileMode.CLAMP)
+            if (plain) {
+                // List items keep the original border: a flat hairline rim, no lit
+                // edge and no sheen — the glass light is for windows and buttons.
+                rimPaint.shader = null
+                rimPaint.color = Color.argb(if (isSelected) 178 else 56, 255, 255, 255)
+                topHighlight = null
+                bottomHighlight = null
+            } else {
+                rimPaint.color = Color.WHITE
+                // One lit edge, the folder's recipe: iOS glass catches its light on
+                // the horizontal edges — bright along the top, faint down the sides,
+                // lit again (a little less) along the bottom. Selected, the whole
+                // perimeter lights up instead. Over video the same light runs at
+                // a lower strength on the smoked glass.
+                rimPaint.shader = if (video) {
+                    if (isSelected) LinearGradient(rect.left,rect.top,rect.left,rect.bottom,
+                        intArrayOf(0xb3ffffff.toInt(),0x59ffffff,0x59ffffff,0xb3ffffff.toInt()),
+                        floatArrayOf(0f,.4f,.6f,1f),Shader.TileMode.CLAMP)
+                    else LinearGradient(rect.left,rect.top,rect.left,rect.bottom,
+                        intArrayOf(0x59ffffff,0x10ffffff,0x10ffffff,0x38ffffff),
+                        floatArrayOf(0f,.4f,.6f,1f),Shader.TileMode.CLAMP)
+                } else if (isSelected) LinearGradient(rect.left,rect.top,rect.left,rect.bottom,
+                    intArrayOf(0xf2ffffff.toInt(),0x99ffffff.toInt(),0x99ffffff.toInt(),0xf2ffffff.toInt()),
+                    floatArrayOf(0f,.4f,.6f,1f),Shader.TileMode.CLAMP)
+                else LinearGradient(rect.left,rect.top,rect.left,rect.bottom,
+                    intArrayOf(0x8cffffff.toInt(),0x14ffffff,0x14ffffff,0x57ffffff),
+                    floatArrayOf(0f,.4f,.6f,1f),Shader.TileMode.CLAMP)
+                if (rect.width() > 0 && rect.height() > 0) {
+                    topHighlight = LinearGradient(0f, rect.top, 0f, rect.centerY(), 0x1affffff, 0x00ffffff, Shader.TileMode.CLAMP)
+                    bottomHighlight = LinearGradient(0f, rect.bottom, 0f, rect.top+rect.height()*0.55f, 0x12ffffff, 0x00ffffff, Shader.TileMode.CLAMP)
+                }
             }
             edgeRect.set(rect); edgeRect.inset(rimWidth / 2f, rimWidth / 2f)
             val edgeCorner = (corner - rimWidth / 2f).coerceAtLeast(0f)
@@ -332,7 +502,7 @@ object GlassUi {
         }
 
         private fun drawHomeGlass(canvas:Canvas,view:View){
-            val source=try{wallpaper(view.context)}catch(_:Exception){staticFrost(view.context)}
+            val source=try{if(scene)sceneFrost(view.context) else wallpaper(view.context)}catch(_:Exception){staticFrost(view.context)}
             view.getLocationOnScreen(point)
             val x=(screenLeft ?: (point[0]+(view.width*(view.scaleX-1f)/2f-view.translationX).toInt()))-source.left
             val y=(screenTop ?: (point[1]+(view.height*(view.scaleY-1f)/2f-view.translationY).toInt()))-source.top
@@ -350,7 +520,7 @@ object GlassUi {
             paint.colorFilter = null
             paint.shader = topHighlight
             canvas.drawPath(path, paint)
-            paint.shader = sideHighlight
+            paint.shader = bottomHighlight
             canvas.drawPath(path, paint)
             paint.shader = null
             canvas.drawPath(edgePath, rimPaint)
@@ -371,21 +541,46 @@ object GlassUi {
                 paint.shader = null
                 paint.colorFilter = null
                 paint.style = Paint.Style.FILL
-                val smokeAlpha = if (dense) 0xd4 else if (faint) 0x90 else 0xc8
+                val smokeAlpha = if (dense) 0xe8 else if (faint) 0xa6 else 0xdc
+                val a = (smokeAlpha + alphaBoost).coerceIn(0, 255)
                 paint.color = if (dark) {
                     Color.argb(
-                        (smokeAlpha + alphaBoost).coerceIn(0, 255),
+                        a,
                         if (dense) 32 else 20,
                         if (dense) 36 else 24,
                         if (dense) 40 else 28
                     )
                 } else {
-                    Color.argb((smokeAlpha + alphaBoost).coerceIn(0, 255), 235, 240, 245)
+                    Color.argb(a, 235, 240, 245)
+                }
+                if (!plain) {
+                    // Smoked glass instead of a flat slab: the fixed panels over
+                    // video get a vertical fall-off (lit at the top, deep at the
+                    // bottom) plus the same sheen the frosted glass wears.
+                    val key = "${rect.width()}x${rect.height()}|$dark|$a"
+                    if (key != smokeKey) {
+                        smokeKey = key
+                        smokeShader = if (dark) LinearGradient(rect.left, rect.top, rect.left, rect.bottom,
+                            intArrayOf(Color.argb(a, 58, 63, 68), Color.argb(a, 32, 36, 40), Color.argb(a, 17, 19, 22)),
+                            floatArrayOf(0f, .55f, 1f), Shader.TileMode.CLAMP)
+                        else LinearGradient(rect.left, rect.top, rect.left, rect.bottom,
+                            intArrayOf(Color.argb(a, 248, 250, 252), Color.argb(a, 235, 240, 245), Color.argb(a, 208, 215, 222)),
+                            floatArrayOf(0f, .55f, 1f), Shader.TileMode.CLAMP)
+                    }
+                    paint.shader = smokeShader
                 }
                 canvas.drawRect(rect, paint)
+                paint.shader = null
+                if (!plain) {
+                    paint.shader = topHighlight
+                    canvas.drawRect(rect, paint)
+                    paint.shader = bottomHighlight
+                    canvas.drawRect(rect, paint)
+                    paint.shader = null
+                }
 
             } else {
-                val source = captured ?: try { wallpaper(view.context) } catch (_: Exception) { staticFrost(view.context) }
+                val source = captured ?: if (scene) sceneFrost(view.context) else try { wallpaper(view.context) } catch (_: Exception) { staticFrost(view.context) }
                 view.getLocationOnScreen(point)
                 if (sampled !== source.bitmap) {
                     sampled = source.bitmap
@@ -395,7 +590,11 @@ object GlassUi {
                 placement.postTranslate((source.left - point[0]).toFloat(), (source.top - point[1]).toFloat())
                 sampledShader!!.setLocalMatrix(placement)
                 paint.shader = sampledShader
-                paint.colorFilter = if(dark)plateTintDark else plateTintLight
+                // Scene captures already hold final displayed colours, so a
+                // second tint would darken them; a captured REGION holds the
+                // raw backdrop (its page furniture was hidden for the draw),
+                // so it takes the same single tint as the wallpaper frost.
+                paint.colorFilter = if (scene) null else if(dark)plateTintDark else plateTintLight
                 paint.alpha = 255
                 canvas.drawRect(rect, paint)
                 paint.shader = null
@@ -405,6 +604,17 @@ object GlassUi {
                     paint.style = Paint.Style.FILL
                     paint.color = Color.argb(((if (dense) 18 else 0) + alphaBoost).coerceIn(0, 100), if (dark) 0 else 255, if (dark) 0 else 255, if (dark) 0 else 255)
                     canvas.drawRect(rect, paint)
+                }
+
+                if (!plain) {
+                    // The glass edge's sheen: light pooled inside the top of the
+                    // pane, and a fainter pool along the bottom.
+                    paint.style = Paint.Style.FILL
+                    paint.shader = topHighlight
+                    canvas.drawRect(rect, paint)
+                    paint.shader = bottomHighlight
+                    canvas.drawRect(rect, paint)
+                    paint.shader = null
                 }
             }
 

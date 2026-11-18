@@ -214,7 +214,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             row.isSelected=selected
             row.isFocusable=true
             row.isFocusableInTouchMode=touchDevice
-            row.background=GlassUi.surface(row,GlassUi.CHIP_RADIUS,video=true,dark=true,faint=true)
+            row.background=GlassUi.surface(row,GlassUi.CHIP_RADIUS,video=true,dark=true,faint=true,plain=true)
             row.setOnClickListener{run();drawerList.requestFocus()}
             row.onFocusChangeListener=View.OnFocusChangeListener{_,hasFocus->if(hasFocus&&!row.isSelected)run()}
             NativeUi.touchClicks(row)
@@ -307,11 +307,11 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     }
     private fun setupList(view:AbsListView,channelClicks:Boolean=true){if(android.os.Build.VERSION.SDK_INT>=26)view.defaultFocusHighlightEnabled=false;view.isVerticalScrollBarEnabled=false;view.setSelector(if(channelClicks)android.graphics.drawable.ColorDrawable(Color.TRANSPARENT) else liveFocusBackground());view.isFocusable=true;view.isFocusableInTouchMode=true
         view.setOnFocusChangeListener{_,focused->
-            for(i in 0 until view.childCount){val row=view.getChildAt(i);row.isSelected=focused&&view.firstVisiblePosition+i==view.selectedItemPosition;(row as? ViewGroup)?.findViewWithTag<TextView>("name")?.setTextColor(liveFocusColors())}
+            if(focused)for(i in 0 until view.childCount){val row=view.getChildAt(i);row.isSelected=view.firstVisiblePosition+i==view.selectedItemPosition;(row as? ViewGroup)?.findViewWithTag<TextView>("name")?.setTextColor(liveFocusColors())}
         }
         view.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{
             override fun onNothingSelected(parent:AdapterView<*>?){}
-            override fun onItemSelected(parent:AdapterView<*>?,child:View?,position:Int,id:Long){for(i in 0 until view.childCount)view.getChildAt(i).isSelected=view.hasFocus()&&view.firstVisiblePosition+i==position}
+            override fun onItemSelected(parent:AdapterView<*>?,child:View?,position:Int,id:Long){for(i in 0 until view.childCount)view.getChildAt(i).isSelected=view.firstVisiblePosition+i==position}
         }
         if(channelClicks){view.setOnItemClickListener{_,_,position,_->shown.getOrNull(position)?.let{play(it,true)}};view.setOnItemLongClickListener{_,_,position,_->shown.getOrNull(position)?.let{channel->val pos=view.firstVisiblePosition;val top=view.getChildAt(0)?.top?:0;repo.toggleFavorite(channel.id);refresh();(view as? ListView)?.setSelectionFromTop(pos,top)};true}}}
     fun refresh(rebuildFilters:Boolean=true){
@@ -342,8 +342,8 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             }
             val badge=row.findViewWithTag<TextView>("badge");val name=row.findViewWithTag<TextView>("name");val star=row.findViewWithTag<View>("star")
             val favorite=repo.favorite(item.id)
-            row.isSelected=parent.hasFocus()&&(parent as? AbsListView)?.selectedItemPosition==position
-            row.background=GlassUi.surface(row,GlassUi.CHIP_RADIUS,video=true,dark=true,faint=true)
+            row.isSelected=(parent as? AbsListView)?.selectedItemPosition==position||item.id==current?.id
+            row.background=GlassUi.surface(row,GlassUi.CHIP_RADIUS,video=true,dark=true,faint=true,plain=true)
             row.setPadding(dp(8),0,dp(6),0);row.minimumHeight=dp(if(touchDevice)42 else 36)
             badge.text=(position+1).toString();NativeUi.textSize(badge,20f);badge.setTextColor(0xffc8d0d8.toInt())
             name.text=item.name;NativeUi.textSize(name,28f);name.setTextColor(liveFocusColors())
@@ -352,6 +352,8 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             return row
         }}
         drawerList.adapter=adapter()
+        val playingIndex=shown.indexOfFirst{it.id==current?.id}
+        if(playingIndex>=0)drawerList.setSelectionFromTop(playingIndex,dp(6))
         if(current!=null)refreshTitle()
         maybeAutoRefreshSubscription()
     }
@@ -461,7 +463,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     private fun closePanels(){drawer.visibility=View.GONE;hideControls()}
     private fun showControls(focus:Boolean=!touchDevice){fullTitle.visibility=View.VISIBLE;overlay.visibility=View.VISIBLE;ui.removeCallbacks(hide);if(focus){if(!controls.hasFocus())controls.getChildAt(0)?.requestFocus()}else ui.postDelayed(hide,5000)}
     private fun hideControls(){ui.removeCallbacks(hide);overlay.visibility=View.GONE;fullTitle.visibility=View.GONE;isFocusableInTouchMode=true;requestFocus()}
-    private fun showDrawer(){ui.removeCallbacks(hide);overlay.visibility=View.GONE;fullTitle.visibility=View.GONE;current?.let{ch->if(all.any{it.group==ch.group}&&(favoritesOnly||category!=ch.group)){favoritesOnly=false;category=ch.group;refresh()}};drawer.visibility=View.VISIBLE;drawerList.setSelection(shown.indexOfFirst{it.id==current?.id}.coerceAtLeast(0));drawerList.requestFocus()}
+    private fun showDrawer(){ui.removeCallbacks(hide);overlay.visibility=View.GONE;fullTitle.visibility=View.GONE;current?.let{ch->if(all.any{it.group==ch.group}&&(favoritesOnly||category!=ch.group)){favoritesOnly=false;category=ch.group;refresh()}};drawer.visibility=View.VISIBLE;val playingIndex=shown.indexOfFirst{it.id==current?.id};if(playingIndex>=0)drawerList.setSelectionFromTop(playingIndex,dp(6)) else drawerList.setSelection(0);drawerList.requestFocus()}
     fun back():Boolean{if(groupPopup?.isShowing==true){groupPopup?.dismiss();return true};if(drawer.visibility==View.VISIBLE){drawer.visibility=View.GONE;hideControls();return true};if(overlay.visibility==View.VISIBLE){hideControls();return true};return false}
     private var channelDigits=""
     private val selectNumber=Runnable{

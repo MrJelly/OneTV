@@ -327,7 +327,7 @@ class BrowserActivity : Activity() {
             items.forEachIndexed{index,item->
                 val card=LinearLayout(this).apply{
                     orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
-                    background=GlassUi.surface(this,faint=true)
+                    background=GlassUi.surface(this,faint=true,plain=true)
                     setPadding(dp(16),0,dp(4),0)
                 }
                 val label=LinearLayout(this).apply{
