@@ -193,7 +193,7 @@ object SystemControls {
         val net=network(activity)
         val iconSize=(36*unit).toInt()
         val buttonWidth=(android.graphics.Paint().apply{textSize=NativeUi.BODY_TEXT_SIZE*unit}.measureText("系统设置")+iconSize+dp(26)).toInt()
-        fun row(title:String,icon:String,action:()->Unit){
+        fun row(title:String,icon:String,action:()->Unit):Button{
             val b=Button(activity).apply{
                 text=title;isAllCaps=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0
                 NativeUi.textSize(this,NativeUi.BODY_TEXT_SIZE);gravity=Gravity.CENTER;includeFontPadding=false
@@ -207,10 +207,48 @@ object SystemControls {
                 setOnClickListener{NativeUi.selectControl(this);action()};NativeUi.touchClicks(this)
             }
             body.addView(b,LinearLayout.LayoutParams(buttonWidth,-1).apply{if(body.childCount>0)leftMargin=dp(6)})
+            return b
         }
         row("信号源","monitor"){openSources(activity)}
-        row(if(net=="网络已连接")"网络"else net,when(net){"有线网络"->"ethernet";"未连接"->"network_off";"Wi-Fi"->wifiIcon(activity);"移动网络"->"cellular";else->"monitor"}){
+        val netButton=row(if(net=="网络已连接")"网络"else net,when(net){"有线网络"->"ethernet";"未连接"->"network_off";"Wi-Fi"->wifiIcon(activity);"移动网络"->"cellular";else->"monitor"}){
             if(!DeviceAdapters.xgimiPage(activity,"Settings://com.xgimi.settings.net/wifi_misckey"))open(activity,networkIntents(activity))
+        }
+        // The header is built once, so without this the network button kept
+        // showing the state from when the settings page was opened. Follow
+        // connectivity changes while the header is on screen.
+        fun refreshNet(){
+            val n=network(activity);val label=if(n=="网络已连接")"网络" else n
+            val icon=when(n){"有线网络"->"ethernet";"未连接"->"network_off";"Wi-Fi"->wifiIcon(activity);"移动网络"->"cellular";else->"monitor"}
+            netButton.text=label
+            netButton.setCompoundDrawablesRelative(AppIcons.Vector(icon){netButton.currentTextColor}.apply{setBounds(0,0,iconSize,iconSize)},null,null,null)
+            val inset=((buttonWidth-netButton.paint.measureText(label)-iconSize-netButton.compoundDrawablePadding)/2).toInt().coerceAtLeast(0)
+            netButton.setPadding(inset,0,inset,0)
+        }
+        val manager=activity.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        if(Build.VERSION.SDK_INT>=21&&manager!=null){
+            val callback=object:ConnectivityManager.NetworkCallback(){
+                override fun onAvailable(network:android.net.Network){body.post{refreshNet()}}
+                override fun onLost(network:android.net.Network){body.post{refreshNet()}}
+                override fun onCapabilitiesChanged(network:android.net.Network,capabilities:NetworkCapabilities){body.post{refreshNet()}}
+                override fun onLinkPropertiesChanged(network:android.net.Network,linkProperties:android.net.LinkProperties){body.post{refreshNet()}}
+            }
+            body.addOnAttachStateChangeListener(object:android.view.View.OnAttachStateChangeListener{
+                override fun onViewAttachedToWindow(v:android.view.View){
+                    refreshNet()
+                    // Track the default network (what network() reads): the
+                    // default-network callback fires on every Wi-Fi/cellular/
+                    // ethernet hand-over; an empty NetworkRequest could be
+                    // filtered differently by vendor firmwares.
+                    runCatching{if(Build.VERSION.SDK_INT>=24)manager.registerDefaultNetworkCallback(callback) else manager.registerNetworkCallback(android.net.NetworkRequest.Builder().addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET).build(),callback)}
+                }
+                override fun onViewDetachedFromWindow(v:android.view.View){runCatching{manager.unregisterNetworkCallback(callback)}}
+            })
+        }else{
+            val receiver=object:android.content.BroadcastReceiver(){override fun onReceive(c:Context,intent:Intent){body.post{refreshNet()}}}
+            body.addOnAttachStateChangeListener(object:android.view.View.OnAttachStateChangeListener{
+                override fun onViewAttachedToWindow(v:android.view.View){runCatching{activity.registerReceiver(receiver,android.content.IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION))}}
+                override fun onViewDetachedFromWindow(v:android.view.View){runCatching{activity.unregisterReceiver(receiver)}}
+            })
         }
         // Aerial #1528: LeTV's own settings lead where installed (the
         // explicit component resolves nowhere else); EUI has no usable
