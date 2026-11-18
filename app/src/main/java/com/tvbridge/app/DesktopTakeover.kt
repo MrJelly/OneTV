@@ -172,11 +172,36 @@ object DesktopTakeover {
         unlockPoll=poll
         recovery.postDelayed(poll,2000)
     }
+    // Some firmwares (Xiaomi after standby) switch ADB debugging off. With WRITE_SECURE_SETTINGS from the
+    // one-time setup, One can switch it back on itself, no script and no computer. Opt-in: it leaves
+    // debugging open for the local network.
+    fun keepAdb(context:Context)=prefs(context).getBoolean("keep_adb",false)
+    fun reopenAdb(context:Context){
+        if(!keepAdb(context)||!unlocked(context))return
+        if(androidx.core.content.ContextCompat.checkSelfPermission(context,android.Manifest.permission.WRITE_SECURE_SETTINGS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)return
+        runCatching{
+            val resolver=context.contentResolver
+            if(Settings.Global.getInt(resolver,Settings.Global.ADB_ENABLED,0)!=1)Settings.Global.putInt(resolver,Settings.Global.ADB_ENABLED,1)
+        }
+    }
+    private var adbObserver:ContentObserver?=null
+    private fun watchAdb(context:Context){
+        val app=context.applicationContext
+        if(!keepAdb(app)){
+            adbObserver?.let{runCatching{app.contentResolver.unregisterContentObserver(it)}};adbObserver=null
+            return
+        }
+        if(adbObserver!=null)return
+        val reopen=Runnable{reopenAdb(app)}
+        val obs=object:ContentObserver(recovery){override fun onChange(selfChange:Boolean){recovery.removeCallbacks(reopen);recovery.postDelayed(reopen,1500)}}
+        if(runCatching{app.contentResolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ADB_ENABLED),false,obs)}.isSuccess)adbObserver=obs
+    }
     fun recover(context:Context){
         val app=context.applicationContext
         DesktopState.refresh(app)
         DeviceProfile.warm(app)
         if(!unlocked(app)){afterUnlock(app);return}
+        reopenAdb(app);watchAdb(app)
         if(!wanted(app))return
         if(standbyOut)return
         restoreHomeEntry(app)
@@ -222,6 +247,7 @@ object DesktopTakeover {
             },1500)
         }.onFailure{rebinding=false}
     }
+    private const val BOOT_APP_NOT_RESTORED="开机启动项仍指向 One：请连接 ADB 后再点一次「还原原桌面」，卸载前请先完成还原"
     const val ATTEMPT="com.tvbridge.app.BOOT_ATTEMPT"
     private const val REQUEST=7130
     private val delays=longArrayOf(4000,12000,25000)
@@ -240,8 +266,16 @@ object DesktopTakeover {
     // defaultHome's strict one; a preferred record written without
     // CATEGORY_DEFAULT answers this while the strict query falls to the chooser.
     fun wideHome(context:Context):ComponentName? = runCatching{context.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),0)?.activityInfo?.let{ComponentName(it.packageName,it.name)}}.getOrNull()
+    /** The home entry ships disabled; while takeover is wanted it must be explicitly ENABLED (this also migrates installs from before). */
     private fun restoreHomeEntry(context:Context){
-        restoreDisabledComponent(context,ComponentName(context,"com.tvbridge.app.DesktopActivity"))
+        if(DesktopState.hasDataFor(context)&&DesktopState.homeEntryEnabled)return
+        val pm=context.packageManager;val entry=ComponentName(context,"com.tvbridge.app.DesktopActivity")
+        runCatching{
+            if(pm.getComponentEnabledSetting(entry)!=android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED){
+                pm.setComponentEnabledSetting(entry,android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,android.content.pm.PackageManager.DONT_KILL_APP)
+                DesktopState.refresh(context)
+            }
+        }
     }
     private fun restoreDisabledComponent(context:Context,component:ComponentName){
         if(DesktopState.hasDataFor(context)){
@@ -329,10 +363,10 @@ object DesktopTakeover {
             enabled(activity)->"正在连接"
             else->"待授权"
         }
-        val labels=listOf("一键设置桌面","待机唤醒返回 One","还原原桌面")
+        val labels=listOf("一键设置桌面","待机唤醒返回 One","保持 ADB 调试开启","还原原桌面")
         val body=android.widget.LinearLayout(activity).apply{orientation=android.widget.LinearLayout.VERTICAL}
         fun refresh(){
-            val values=listOf(guardLabel(),if(returnsAfterStandby(activity))"开启" else "关闭")
+            val values=listOf(guardLabel(),if(returnsAfterStandby(activity))"开启" else "关闭",if(keepAdb(activity))"开启" else "关闭")
             values.forEachIndexed{index,value->
                 val button=body.getChildAt(index) as android.widget.Button
                 button.setCompoundDrawablesRelative(null,null,NativeUi.trailing(button,value,ink=true),null)
@@ -357,7 +391,18 @@ object DesktopTakeover {
                     if(next&&!guarding())NativeUi.notice(activity,"请开启桌面守护，以便待机后返回 One")
                     refresh()
                 }
-                2->if(!handoverRunning.get())restore(activity,::refresh)
+                2->{
+                    val next=!keepAdb(activity)
+                    if(next&&androidx.core.content.ContextCompat.checkSelfPermission(activity,android.Manifest.permission.WRITE_SECURE_SETTINGS)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
+                        NativeUi.notice(activity,"请先完成「一键设置桌面」获得授权")
+                    }else{
+                        preferences.edit().putBoolean("keep_adb",next).apply()
+                        if(next){reopenAdb(activity);NativeUi.notice(activity,"ADB 调试开启后同一网络的设备可连接，请仅在可信网络使用")}
+                        watchAdb(activity)
+                    }
+                    refresh()
+                }
+                3->if(!handoverRunning.get())restore(activity,::refresh)
             }
             }
         }
@@ -411,9 +456,10 @@ object DesktopTakeover {
             NativeUi.notice(activity,"正在还原系统桌面配置")
             AppThreads.onIo{
                 val ready=runCatching{Hub.adb.ready||(Hub.adb.enabled()&&Hub.adb.restore())}.getOrDefault(false)
-                if(ready)runCatching{Hub.adb.restoreBootApp()}
+                val bootRestored=!ready||runCatching{Hub.adb.restoreBootApp()}.getOrDefault(false)
                 if(ready&&target!=null)Hub.adb.setDefaultHome(target)
                 activity.runOnUiThread{if(!activity.isFinishing&&!activity.isDestroyed){
+                    if(!bootRestored)NativeUi.notice(activity,BOOT_APP_NOT_RESTORED)
                     if(!prefs(activity).contains("desktop_vt_previous"))restore(activity,changed)
                     else NativeUi.notice(activity,if(ready)"固件尚未完成还原，请重试"else "请恢复设备调试连接后再还原桌面")
                 }}
@@ -423,10 +469,16 @@ object DesktopTakeover {
         cancel(activity);DesktopGuardService.allowStockLauncher()
         activity.packageManager.clearPackagePreferredActivities(activity.packageName)
         homeEntry(activity,false)
+        DesktopState.refresh(activity)
         AppThreads.onIo{
-            if(target!=null&&runCatching{Hub.adb.ready}.getOrDefault(false))Hub.adb.setDefaultHome(target)
+            val adbUp=runCatching{Hub.adb.ready||(Hub.adb.enabled()&&Hub.adb.restore())}.getOrDefault(false)
+            // The TCL/FFALCON boot entry was pointed at One by the setup; put the original back and
+            // say so when that could not be done, instead of leaving the TV booting into a missing/removed One.
+            val bootRestored=!Hub.adb.bootAppPending()||(adbUp&&runCatching{Hub.adb.restoreBootApp()}.getOrDefault(false))
+            if(target!=null&&adbUp)Hub.adb.setDefaultHome(target)
             activity.runOnUiThread{if(!activity.isFinishing&&!activity.isDestroyed){
                 changed()
+                if(!bootRestored)NativeUi.notice(activity,BOOT_APP_NOT_RESTORED)
                 if(defaultHome(activity)?.packageName==activity.packageName){
                     try{activity.startActivity(Intent(Settings.ACTION_HOME_SETTINGS));NativeUi.notice(activity,"请选择原来的桌面")}catch(_:RuntimeException){NativeUi.notice(activity,"已停止接管，请在系统设置选择原桌面")}
                 }else try{

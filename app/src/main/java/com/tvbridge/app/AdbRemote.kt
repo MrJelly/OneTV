@@ -80,17 +80,23 @@ class AdbRemote(context:Context){
         shell("settings put system boot_app_componentname $own",port(),false)
         return true
     }
+    /** True when there is nothing to restore or the original values are back (verified by reading them again). */
+    fun bootAppPending():Boolean=appContext.getSharedPreferences("startup",Context.MODE_PRIVATE).contains("boot_app_previous")
     fun restoreBootApp():Boolean {
         val prefs=appContext.getSharedPreferences("startup",Context.MODE_PRIVATE)
         val app=prefs.getString("boot_app_previous",null)?:return true
         if(!ready)return false
         val mode=prefs.getString("boot_mode_previous","none").orEmpty()
         val safe=Regex("^[A-Za-z0-9_./$]+$")
+        if((app!="none"&&!safe.matches(app))||(mode!="none"&&!safe.matches(mode)))return false
         return try{
             if(app=="none")shell("settings delete system boot_app_componentname",port(),false)
-            else if(safe.matches(app))shell("settings put system boot_app_componentname $app",port(),false)
+            else shell("settings put system boot_app_componentname $app",port(),false)
             if(mode=="none")shell("settings delete system boot_app_mode",port(),false)
-            else if(safe.matches(mode))shell("settings put system boot_app_mode $mode",port(),false)
+            else shell("settings put system boot_app_mode $mode",port(),false)
+            val nowApp=cleanSetting(shell("settings get system boot_app_componentname",port(),false))
+            val nowMode=cleanSetting(shell("settings get system boot_app_mode",port(),false))
+            if(nowApp!=app||nowMode!=mode)return false
             prefs.edit().remove("boot_app_previous").remove("boot_mode_previous").apply();true
         }catch(_:Exception){false}
     }

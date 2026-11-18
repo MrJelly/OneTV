@@ -216,21 +216,30 @@ object SystemControls {
         // The header is built once, so without this the network button kept
         // showing the state from when the settings page was opened. Follow
         // connectivity changes while the header is on screen.
+        var shown=""
         fun refreshNet(){
             val n=network(activity);val label=if(n=="网络已连接")"网络" else n
             val icon=when(n){"有线网络"->"ethernet";"未连接"->"network_off";"Wi-Fi"->wifiIcon(activity);"移动网络"->"cellular";else->"monitor"}
+            // Capability/link callbacks fire in bursts (Wi-Fi signal jitter, hand-overs); only touch the
+            // view when what it shows actually changes.
+            if("$label|$icon"==shown)return
+            shown="$label|$icon"
             netButton.text=label
             netButton.setCompoundDrawablesRelative(AppIcons.Vector(icon){netButton.currentTextColor}.apply{setBounds(0,0,iconSize,iconSize)},null,null,null)
             val inset=((buttonWidth-netButton.paint.measureText(label)-iconSize-netButton.compoundDrawablePadding)/2).toInt().coerceAtLeast(0)
             netButton.setPadding(inset,0,inset,0)
         }
+        // Settle for a moment before reading: during a Wi-Fi/Ethernet hand-over the old network is lost
+        // a beat before the new default is announced, which would flash "未连接".
+        val settle=Runnable{refreshNet()}
+        fun scheduleRefresh(){body.removeCallbacks(settle);body.postDelayed(settle,400)}
         val manager=activity.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
         if(Build.VERSION.SDK_INT>=21&&manager!=null){
             val callback=object:ConnectivityManager.NetworkCallback(){
-                override fun onAvailable(network:android.net.Network){body.post{refreshNet()}}
-                override fun onLost(network:android.net.Network){body.post{refreshNet()}}
-                override fun onCapabilitiesChanged(network:android.net.Network,capabilities:NetworkCapabilities){body.post{refreshNet()}}
-                override fun onLinkPropertiesChanged(network:android.net.Network,linkProperties:android.net.LinkProperties){body.post{refreshNet()}}
+                override fun onAvailable(network:android.net.Network){scheduleRefresh()}
+                override fun onLost(network:android.net.Network){scheduleRefresh()}
+                override fun onCapabilitiesChanged(network:android.net.Network,capabilities:NetworkCapabilities){scheduleRefresh()}
+                override fun onLinkPropertiesChanged(network:android.net.Network,linkProperties:android.net.LinkProperties){scheduleRefresh()}
             }
             body.addOnAttachStateChangeListener(object:android.view.View.OnAttachStateChangeListener{
                 override fun onViewAttachedToWindow(v:android.view.View){
@@ -241,13 +250,13 @@ object SystemControls {
                     // filtered differently by vendor firmwares.
                     runCatching{if(Build.VERSION.SDK_INT>=24)manager.registerDefaultNetworkCallback(callback) else manager.registerNetworkCallback(android.net.NetworkRequest.Builder().addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET).build(),callback)}
                 }
-                override fun onViewDetachedFromWindow(v:android.view.View){runCatching{manager.unregisterNetworkCallback(callback)}}
+                override fun onViewDetachedFromWindow(v:android.view.View){body.removeCallbacks(settle);runCatching{manager.unregisterNetworkCallback(callback)}}
             })
         }else{
-            val receiver=object:android.content.BroadcastReceiver(){override fun onReceive(c:Context,intent:Intent){body.post{refreshNet()}}}
+            val receiver=object:android.content.BroadcastReceiver(){override fun onReceive(c:Context,intent:Intent){scheduleRefresh()}}
             body.addOnAttachStateChangeListener(object:android.view.View.OnAttachStateChangeListener{
                 override fun onViewAttachedToWindow(v:android.view.View){runCatching{activity.registerReceiver(receiver,android.content.IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION))}}
-                override fun onViewDetachedFromWindow(v:android.view.View){runCatching{activity.unregisterReceiver(receiver)}}
+                override fun onViewDetachedFromWindow(v:android.view.View){body.removeCallbacks(settle);runCatching{activity.unregisterReceiver(receiver)}}
             })
         }
         // Aerial #1528: LeTV's own settings lead where installed (the

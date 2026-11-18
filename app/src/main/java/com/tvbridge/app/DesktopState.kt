@@ -110,7 +110,8 @@ object DesktopState {
         val listener = ComponentName(app, DesktopRevivalService::class.java)
         listenerListed = Settings.Secure.getString(resolver, "enabled_notification_listeners").orEmpty()
             .split(':').any { ComponentName.unflattenFromString(it) == listener }
-        homeEntryEnabled = componentEnabled(pm, ComponentName(app, "com.tvbridge.app.DesktopActivity"))
+        // The alias ships disabled in the manifest, so only an explicit ENABLED counts.
+        homeEntryEnabled = runCatching { pm.getComponentEnabledSetting(ComponentName(app, "com.tvbridge.app.DesktopActivity")) == PackageManager.COMPONENT_ENABLED_STATE_ENABLED }.getOrDefault(false)
         bootReceiverEnabled = componentEnabled(pm, ComponentName(app, BootReceiver::class.java))
         hasSecureWrite = androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
         usageAllowed = DesktopPolicy.usageAllowed(app)
