@@ -220,28 +220,43 @@ object GlassUi {
         }
         val gen = sceneCaptureGen
         val bw = (w / 10).coerceAtLeast(1); val bh = (h / 10).coerceAtLeast(1)
-        val bitmap = sceneBitmap?.takeIf { it.width == bw && it.height == bh && !it.isRecycled }
-            ?: Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888).also { sceneBitmap = it }
-        val canvas = android.graphics.Canvas(bitmap)
-        canvas.scale(bw.toFloat() / w, bh.toFloat() / h)
-        root.draw(canvas)
-        val px = scenePx?.takeIf { it.size == bw * bh } ?: IntArray(bw * bh).also { scenePx = it }
-        bitmap.getPixels(px, 0, bw, 0, 0, bw, bh)
-        val point = IntArray(2); root.getLocationOnScreen(point)
-        AppThreads.io.execute {
-            val tmp = sceneTmp?.takeIf { it.size == px.size } ?: IntArray(px.size).also { sceneTmp = it }
-            blurPasses(px, tmp, bw, bh)
-            val out = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
-            out.setPixels(px, 0, bw, 0, 0, bw, bh)
-            val frost = Frost(out, w, h, point[0], point[1])
-            AppThreads.main.post {
-                sceneCaptureRunning = false
-                if (gen == sceneCaptureGen) {
-                    synchronized(this@GlassUi) { sceneFrostCache = frost }
-                    val targets = synchronized(sceneMaterials) { sceneMaterials.toList() }
-                    targets.forEach { it.invalidateSelf() }
+        val px: IntArray
+        val point = IntArray(2)
+        try {
+            val bitmap = sceneBitmap?.takeIf { it.width == bw && it.height == bh && !it.isRecycled }
+                ?: Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888).also { sceneBitmap = it }
+            val canvas = android.graphics.Canvas(bitmap)
+            canvas.scale(bw.toFloat() / w, bh.toFloat() / h)
+            root.draw(canvas)
+            px = scenePx?.takeIf { it.size == bw * bh } ?: IntArray(bw * bh).also { scenePx = it }
+            bitmap.getPixels(px, 0, bw, 0, 0, bw, bh)
+            root.getLocationOnScreen(point)
+        } catch (_: Throwable) {
+            synchronized(this) { sceneCaptureRunning = false }
+            return
+        }
+        try {
+            AppThreads.io.execute {
+                val frost = try {
+                    val tmp = sceneTmp?.takeIf { it.size == px.size } ?: IntArray(px.size).also { sceneTmp = it }
+                    blurPasses(px, tmp, bw, bh)
+                    val out = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+                    out.setPixels(px, 0, bw, 0, 0, bw, bh)
+                    Frost(out, w, h, point[0], point[1])
+                } catch (_: Throwable) {
+                    null
+                }
+                AppThreads.main.post {
+                    synchronized(this@GlassUi) { sceneCaptureRunning = false }
+                    if (frost != null && gen == sceneCaptureGen) {
+                        synchronized(this@GlassUi) { sceneFrostCache = frost }
+                        val targets = synchronized(sceneMaterials) { sceneMaterials.toList() }
+                        targets.forEach { it.invalidateSelf() }
+                    }
                 }
             }
+        } catch (_: Throwable) {
+            synchronized(this) { sceneCaptureRunning = false }
         }
     }
 

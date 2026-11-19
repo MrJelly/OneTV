@@ -55,7 +55,8 @@ object NativePlayback {
         url: String,
         userAgent: String,
         headers: Map<String, String>,
-        attempt: PlaybackAttempts? = null
+        attempt: PlaybackAttempts? = null,
+        hintMime: String? = null
     ): MediaSource {
         val http = DefaultHttpDataSource.Factory()
             .setUserAgent(userAgent)
@@ -63,14 +64,14 @@ object NativePlayback {
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(8000)
             .setReadTimeoutMs(12000)
-        val cookies = android.webkit.CookieManager.getInstance()
+        val cookies = runCatching { android.webkit.CookieManager.getInstance() }.getOrNull()
         val data = ResolvingDataSource.Factory(http) { spec ->
-            val cookie = cookies.getCookie(spec.uri.toString())
+            val cookie = cookies?.let { runCatching { it.getCookie(spec.uri.toString()) }.getOrNull() }
             if (cookie.isNullOrEmpty()) spec else spec.withAdditionalHeaders(mapOf("Cookie" to cookie))
         }
         val path = url.substringBefore('?').substringBefore('#').lowercase()
         val item = MediaItem.Builder().setUri(url).apply {
-            val forcedMime = attempt?.format?.mime
+            val forcedMime = attempt?.format?.mime ?: hintMime
             when {
                 forcedMime != null -> setMimeType(forcedMime)
                 path.endsWith(".m3u8") -> setMimeType(MimeTypes.APPLICATION_M3U8)

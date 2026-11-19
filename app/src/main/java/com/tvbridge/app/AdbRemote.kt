@@ -153,18 +153,29 @@ class AdbRemote(context:Context){
                     if(!vendorHome&&!hadBackup)startup.edit().remove("desktop_vt_previous").apply()
                 }
             }else if(pkg!=appContext.packageName){
-                val previous=startup.getString("desktop_vt_previous",null)
-                if(previous!=null&&packagePattern.matches(previous)){
-                    val current=shell("getprop persist.vt.use_home_pkg",port(),false).trim()
-                    if(current==appContext.packageName)shell("setprop persist.vt.use_home_pkg '$previous'",port(),false)
-                    if(shell("getprop persist.vt.use_home_pkg",port(),false).trim()!=appContext.packageName)startup.edit().remove("desktop_vt_previous").apply()
-                }
+                restoreVendorHomePkg()
             }
             val command=if(android.os.Build.VERSION.SDK_INT>=24)"cmd package"else "pm"
             if(android.os.Build.VERSION.SDK_INT>=29)runCatching{shell("cmd role add-role-holder --user 0 android.app.role.HOME '$pkg'",port(),false,timeout=2500)}
             shell("$command set-home-activity --user 0 '$id'",port(),false)
             val result=shell("$command resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME",port(),false)
             vendorHome||result.lineSequence().mapNotNull{ComponentName.unflattenFromString(it.trim())}.lastOrNull()?.packageName==component.packageName
+        }catch(_:Exception){false}
+    }
+    fun restoreVendorHomePkg():Boolean {
+        val startup=appContext.getSharedPreferences("startup",Context.MODE_PRIVATE)
+        val previous=startup.getString("desktop_vt_previous",null)?:return true
+        val packagePattern=Regex("^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+$")
+        if(!packagePattern.matches(previous)){
+            startup.edit().remove("desktop_vt_previous").apply()
+            return true
+        }
+        return try{
+            val current=shell("getprop persist.vt.use_home_pkg",port(),false).trim()
+            if(current==appContext.packageName)shell("setprop persist.vt.use_home_pkg '$previous'",port(),false)
+            val restored=shell("getprop persist.vt.use_home_pkg",port(),false).trim()!=appContext.packageName
+            if(restored)startup.edit().remove("desktop_vt_previous").apply()
+            restored
         }catch(_:Exception){false}
     }
     fun command(cmd:String):Boolean {

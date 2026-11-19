@@ -21,6 +21,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import org.json.JSONArray
 import org.json.JSONObject
@@ -28,12 +29,15 @@ import org.json.JSONTokener
 
 /**
  * Owns browser video playback takeover across three seamless modes:
- * 1. Native [ExoPlayer] (with software-decoder & format fallback via [PlaybackAttempts]).
- * 2. WebView `onShowCustomView` fullscreen.
+ * 1. Native [ExoPlayer] (with software-decoder & format fallback via [PlaybackAttempts],
+ *    manual SW/HW decode switch, aspect ratio control, and one-click fallback to web player).
+ * 2. WebView `onShowCustomView` fullscreen (automatically upgraded to native ExoPlayer when
+ *    a high-confidence stream is sniffed and not opted out).
  * 3. In-page expanded `<video>` fullscreen fallback.
  *
- * Also manages the TV overlay control bar, speed selector, background progress telemetry
- * for the phone remote, and pause/resume preservation across transient Activity pauses.
+ * Also manages automatic video takeover with per-page opt-out, the TV overlay control bar,
+ * speed selector, background progress telemetry for the phone remote, and pause/resume
+ * preservation across transient Activity pauses.
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 internal class BrowserVideoController(
@@ -53,6 +57,7 @@ internal class BrowserVideoController(
         fun isDestroyed(): Boolean
         fun isActive(): Boolean
         fun showTools(show: Boolean)
+        fun onVideoAvailabilityChanged(sniffedCount: Int)
     }
 
     var customView: View? = null
@@ -68,11 +73,26 @@ internal class BrowserVideoController(
     val isBusyOrActive: Boolean
         get() = isVideoActive || playbackPhase == "searching" || playbackPhase == "loading"
 
+    private val prefs = activity.getSharedPreferences("browser-video-prefs", Activity.MODE_PRIVATE)
+    var autoTakeover: Boolean = prefs.getBoolean("auto_takeover", true)
+        set(value) {
+            field = value
+            prefs.edit().putBoolean("auto_takeover", value).apply()
+        }
+    private var manualSoftwareDecode: Boolean = prefs.getBoolean("software_decode", false)
+    private var aspectMode: Int = prefs.getInt("aspect_mode", 0).coerceIn(0, 2)
+
     private var customCallback: WebChromeClient.CustomViewCallback? = null
     private var pagePlayer: ExoPlayer? = null
+    private var nativeSurface: PlayerView? = null
+    private var webPausedForNative = false
     private var speedRow: LinearLayout? = null
     private var speedButton: Button? = null
     private var loopButton: Button? = null
+    private var sourceButton: Button? = null
+    private var decodeButton: Button? = null
+    private var aspectButton: Button? = null
+    private var webFallbackButton: Button? = null
     private var barPlay: Button? = null
     private var barSeek: SeekBar? = null
     private var barTime: TextView? = null
@@ -93,6 +113,8 @@ internal class BrowserVideoController(
     private var playbackPhase = "idle"
     private var sessionSources = emptyList<String>()
     private var sourceIndex = 0
+    private var dismissedAutoPageUrl: String? = null
+    private var preferWebPageUrl: String? = null
 
     // Preserves playback across transient onPause/onResume (e.g. system dialogs).
     private var resumeNativeOnForeground = false
@@ -100,16 +122,94 @@ internal class BrowserVideoController(
 
     private val barHide = Runnable { hideVideoBar() }
     private val barPoll = Runnable { pollVideoBar() }
+    private val autoProbeRunnable = Runnable { runAutoProbe() }
 
     fun notePageGesture() {
         pageGestureAt = SystemClock.uptimeMillis()
     }
 
     fun onNavigationStarted() {
+        root.removeCallbacks(autoProbeRunnable)
+        dismissedAutoPageUrl = null
+        preferWebPageUrl = null
         exitVideo()
+        host.onVideoAvailabilityChanged(0)
+    }
+
+    fun onSpaUrlChanged() {
+        root.removeCallbacks(autoProbeRunnable)
+        dismissedAutoPageUrl = null
+        preferWebPageUrl = null
+        host.onVideoAvailabilityChanged(0)
+    }
+
+    fun onSniffedMedia(total: Int) {
+        if (host.isDestroyed() || host.isHomepageVisible()) return
+        host.onVideoAvailabilityChanged(total)
+        if (!isBusyOrActive && autoTakeover) {
+            scheduleAutoProbe(AUTO_PROBE_SNIFF_DELAY_MS)
+        }
+    }
+
+    fun onPageFinished(url: String) {
+        if (host.isDestroyed() || host.isHomepageVisible() || !url.startsWith("http")) return
+        val count = sniffer.count(SystemClock.uptimeMillis())
+        if (count > 0) host.onVideoAvailabilityChanged(count)
+        if (!isBusyOrActive && autoTakeover) {
+            scheduleAutoProbe(AUTO_PROBE_PAGE_DELAY_MS)
+        }
+    }
+
+    private fun scheduleAutoProbe(delayMs: Long) {
+        root.removeCallbacks(autoProbeRunnable)
+        root.postDelayed(autoProbeRunnable, delayMs)
+    }
+
+    private fun runAutoProbe() {
+        if (host.isDestroyed() || !host.isActive() || host.isHomepageVisible() || isBusyOrActive) return
+        if (!autoTakeover) return
+        val page = host.webView
+        val address = page.url ?: return
+        if (!address.startsWith("http")) return
+        if (address == dismissedAutoPageUrl || address == preferWebPageUrl) return
+        if (sniffer.sitePolicy(address) == BrowserVideoSniffer.SitePolicy.WEB_ONLY) return
+
+        val now = SystemClock.uptimeMillis()
+        val hasHigh = sniffer.hasHighConfidence(now)
+        val generation = videoGeneration
+        page.evaluateJavascript(BrowserVideoSniffer.DOM_DETECT_JS) { result ->
+            if (host.isDestroyed() || !host.isActive() || host.isHomepageVisible() ||
+                isBusyOrActive || page !== host.webView || page.url != address ||
+                videoGeneration != generation || address == dismissedAutoPageUrl || address == preferWebPageUrl
+            ) {
+                return@evaluateJavascript
+            }
+            val payload = parseDomPayload(result)
+            val domActiveUrl = payload?.optString("activeUrl")?.takeIf { it.isNotBlank() }
+            val domFallbackUrl = payload?.optString("fallbackUrl")?.takeIf { it.isNotBlank() }
+            val playingLarge = payload?.optBoolean("playingLarge", false) == true
+            val jsUrls = payload?.optJSONArray("jsUrls")?.let { arr ->
+                (0 until arr.length()).mapNotNull { i -> arr.optString(i).takeIf { it.isNotBlank() } }
+            } ?: emptyList()
+
+            val playable = sniffer.mergeCandidates(
+                domActiveUrl = domActiveUrl,
+                domFallbackUrl = domFallbackUrl,
+                jsUrls = jsUrls,
+                nowMs = SystemClock.uptimeMillis()
+            )
+            if (playable.isEmpty()) return@evaluateJavascript
+            host.onVideoAvailabilityChanged(playable.size)
+            // Auto-takeover when a high-confidence stream (HLS/DASH/direct) is present or a large video is actively playing.
+            if (hasHigh || playingLarge || domActiveUrl != null || jsUrls.isNotEmpty()) {
+                val nextGen = ++videoGeneration
+                playNativeCandidates(playable, nextGen)
+            }
+        }
     }
 
     fun onActivityPause() {
+        root.removeCallbacks(autoProbeRunnable)
         hideVideoBar()
         stopBarPoll()
         pagePlayer?.let { player ->
@@ -151,6 +251,16 @@ internal class BrowserVideoController(
         val withinGesture = SystemClock.uptimeMillis() - pageGestureAt <= CUSTOM_VIEW_GESTURE_WINDOW_MS
         if (!withinGesture && !webVideoActive && playbackPhase != "searching") {
             callback.onCustomViewHidden()
+            return
+        }
+        val pageUrl = host.webView.url
+        val canUpgradeToNative = pageUrl != null &&
+            pageUrl != preferWebPageUrl &&
+            sniffer.sitePolicy(pageUrl) == BrowserVideoSniffer.SitePolicy.NATIVE_FIRST &&
+            sniffer.hasHighConfidence(SystemClock.uptimeMillis())
+        if (canUpgradeToNative) {
+            callback.onCustomViewHidden()
+            playDetectedVideo {}
             return
         }
         webVideoActive = true
@@ -195,6 +305,7 @@ internal class BrowserVideoController(
         }
         val page = host.webView
         val address = page.url
+        preferWebPageUrl = null
         val generation = ++videoGeneration
         publishPlayback("searching")
         done(true)
@@ -206,8 +317,13 @@ internal class BrowserVideoController(
 
         videoDeadline = Runnable {
             if (videoGeneration == generation && playbackPhase == "searching") {
-                videoGeneration++
-                publishPlayback("failed")
+                val sniffedOnly = sniffer.mergeCandidates(null, null, emptyList(), SystemClock.uptimeMillis())
+                if (sniffedOnly.isNotEmpty()) {
+                    playNativeCandidates(sniffedOnly, generation)
+                } else {
+                    videoGeneration++
+                    publishPlayback("failed")
+                }
             }
         }.also { root.postDelayed(it, 4000L) }
 
@@ -218,14 +334,7 @@ internal class BrowserVideoController(
                 return@evaluateJavascript
             }
             clearVideoDeadline()
-            val payload = runCatching {
-                val raw = JSONTokener(result).nextValue()
-                when (raw) {
-                    is String -> JSONObject(raw)
-                    is JSONObject -> raw
-                    else -> null
-                }
-            }.getOrNull()
+            val payload = parseDomPayload(result)
 
             val domActiveUrl = payload?.optString("activeUrl")?.takeIf { it.isNotBlank() }
             val domFallbackUrl = payload?.optString("fallbackUrl")?.takeIf { it.isNotBlank() }
@@ -247,7 +356,21 @@ internal class BrowserVideoController(
         }
     }
 
-    private fun playNativeCandidates(urls: List<String>, generation: Long, startAt: Int = 0) {
+    private fun parseDomPayload(result: String?): JSONObject? = runCatching {
+        val raw = JSONTokener(result).nextValue()
+        when (raw) {
+            is String -> JSONObject(raw)
+            is JSONObject -> raw
+            else -> null
+        }
+    }.getOrNull()
+
+    private fun playNativeCandidates(
+        urls: List<String>,
+        generation: Long,
+        startAt: Int = 0,
+        seekToMs: Long = 0L
+    ) {
         videoSpeed = 1f
         sessionSources = urls
         var surface: PlayerView? = null
@@ -275,14 +398,17 @@ internal class BrowserVideoController(
             sourceIndex = index
             publishPlayback("loading")
             try {
-                val player = NativePlayback.player(activity, softwareTracks = attempts.softwareTracks)
+                val swTracks = if (manualSoftwareDecode && NativePlayback.softwareAvailable()) 3 else attempts.softwareTracks
+                val player = NativePlayback.player(activity, softwareTracks = swTracks)
                 pagePlayer = player
                 val view = surface ?: PlayerView(activity).apply {
                     setBackgroundColor(Color.BLACK)
                     setShutterBackgroundColor(Color.BLACK)
                     useController = false
                     surface = this
+                    nativeSurface = this
                     customView = this
+                    applyAspectMode(this)
                     root.addView(this, FrameLayout.LayoutParams(-1, -1))
                     host.showTools(false)
                     host.webView.visibility = View.GONE
@@ -302,6 +428,11 @@ internal class BrowserVideoController(
                             "Array.prototype.forEach.call(document.querySelectorAll('video'),function(v){v.pause();})",
                             null
                         )
+                        // Pause WebView timers and cross-origin iframe media decoders to prevent double audio.
+                        if (!webPausedForNative) {
+                            runCatching { host.webView.onPause() }
+                            webPausedForNative = true
+                        }
                         showVideoBar()
                     }
 
@@ -348,9 +479,13 @@ internal class BrowserVideoController(
                         url,
                         host.webView.settings.userAgentString,
                         headers,
-                        attempts
+                        attempts,
+                        sniffer.mimeHint(url)
                     )
                 )
+                if (seekToMs > 0L && index == startAt) {
+                    player.seekTo(seekToMs)
+                }
                 player.prepare()
                 player.play()
             } catch (_: RuntimeException) {
@@ -358,6 +493,56 @@ internal class BrowserVideoController(
             }
         }
         startAttempt(startAt, resetAttempts = true)
+    }
+
+    private fun applyAspectMode(view: PlayerView? = nativeSurface) {
+        val target = view ?: return
+        target.resizeMode = when (aspectMode) {
+            1 -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+            2 -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
+    }
+
+    private fun aspectLabel(): String = when (aspectMode) {
+        1 -> "画面 铺满"
+        2 -> "画面 裁切"
+        else -> "画面 自适应"
+    }
+
+    private fun cycleAspectMode() {
+        aspectMode = (aspectMode + 1) % 3
+        prefs.edit().putInt("aspect_mode", aspectMode).apply()
+        applyAspectMode()
+        aspectButton?.text = aspectLabel()
+        NativeUi.notice(activity, "已切换为${aspectLabel()}")
+    }
+
+    private fun toggleSoftwareDecode() {
+        if (!NativePlayback.softwareAvailable()) return
+        val player = pagePlayer ?: return
+        val sources = sessionSources
+        if (sources.isEmpty()) return
+        val currentIndex = sourceIndex.coerceIn(0, sources.lastIndex)
+        val resumePos = player.currentPosition.coerceAtLeast(0L)
+        manualSoftwareDecode = !manualSoftwareDecode
+        prefs.edit().putBoolean("software_decode", manualSoftwareDecode).apply()
+        NativeUi.notice(activity, if (manualSoftwareDecode) "已切换软解播放" else "已切换硬解播放")
+        exitVideo()
+        playNativeCandidates(sources, videoGeneration, currentIndex, resumePos)
+    }
+
+    private fun switchToWebPlayer() {
+        val pageUrl = host.webView.url
+        preferWebPageUrl = pageUrl
+        dismissedAutoPageUrl = pageUrl
+        exitVideo()
+        fallbackWebVideo { ok ->
+            if (!ok) {
+                publishPlayback("idle")
+                NativeUi.notice(activity, "已切回网页，请点击页面播放")
+            }
+        }
     }
 
     private fun isDecoderError(error: PlaybackException): Boolean = when (error.errorCode) {
@@ -382,6 +567,10 @@ internal class BrowserVideoController(
         val generation = videoGeneration
         val page = host.webView
         val url = page.url
+        if (webPausedForNative) {
+            runCatching { page.onResume() }
+            webPausedForNative = false
+        }
         publishPlayback("loading")
         videoDeadline = Runnable {
             if (videoGeneration == generation && playbackPhase == "loading") {
@@ -423,6 +612,10 @@ internal class BrowserVideoController(
         resumeNativeOnForeground = false
         resumeWebOnForeground = false
         pageGestureAt = -10_000L
+        if (webPausedForNative) {
+            runCatching { host.webView.onResume() }
+            webPausedForNative = false
+        }
         if (webExpanded) host.webView.evaluateJavascript(RESTORE_VIDEO_JS, null)
         webExpanded = false
         webVideoActive = false
@@ -431,6 +624,7 @@ internal class BrowserVideoController(
         sourceIndex = 0
         pagePlayer?.release()
         pagePlayer = null
+        nativeSurface = null
         stopBarPoll()
         customView?.let { root.removeView(it) }
         customView = null
@@ -446,6 +640,7 @@ internal class BrowserVideoController(
     }
 
     fun exitVideoBar() {
+        dismissedAutoPageUrl = host.webView.url
         if (customView != null || pagePlayer != null || playbackPhase == "searching") {
             exitVideo()
             return
@@ -462,10 +657,16 @@ internal class BrowserVideoController(
     }
 
     /**
-     * Handles D-pad and Menu keys while video playback is active.
+     * Handles D-pad, Menu, and Media Play/Pause keys while video playback is active or available.
      * Returns `true` if handled, `false` to let [BrowserActivity] continue normal dispatch.
      */
     fun handleKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY || event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                if (isVideoActive) toggleVideoPlay() else if (!host.isHomepageVisible()) playDetectedVideo {}
+            }
+            return true
+        }
         if (isVideoActive && event.keyCode in DPAD_KEYS) {
             if (videoBarView?.visibility != View.VISIBLE) {
                 if (event.action == KeyEvent.ACTION_DOWN) showVideoBar()
@@ -965,6 +1166,8 @@ internal class BrowserVideoController(
         private const val BAR_AUTO_HIDE_MS = 5000L
         private const val NATIVE_FIRST_FRAME_TIMEOUT_MS = 10_000L
         private const val CUSTOM_VIEW_GESTURE_WINDOW_MS = 2500L
+        private const val AUTO_PROBE_SNIFF_DELAY_MS = 650L
+        private const val AUTO_PROBE_PAGE_DELAY_MS = 1200L
         private val DPAD_KEYS = setOf(19, 20, 21, 22, 23, 66)
 
         private const val PICK_VIDEO_JS =

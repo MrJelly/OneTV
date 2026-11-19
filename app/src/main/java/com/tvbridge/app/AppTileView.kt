@@ -257,8 +257,8 @@ class AppTileView(context:Context):View(context) {
         if (plateGlow > 0.01f) {
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = glowStroke
-            paint.alpha = (plateGlow * 235).toInt().coerceIn(0, 255)
             paint.color = 0xffffffff.toInt()
+            paint.alpha = (plateGlow * 235).toInt().coerceIn(0, 255)
             canvas.drawPath(glowPath, paint)
         }
         paint.style = Paint.Style.FILL

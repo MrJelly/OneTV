@@ -335,15 +335,13 @@ class LiveRepository(private val context:Context) {
         val text = snapshot.first
         val seq = snapshot.second
         AppThreads.onPersist {
-            synchronized(this) {
-                try {
-                    if (seq == persistSeq) {
-                        writeStore(text)
-                        onPersist?.invoke(text)
-                    }
-                } catch (e: Throwable) {
-                    Log.w("LiveRepository", "live-sources.json 异步写盘失败", e)
+            try {
+                if (seq == persistSeq) {
+                    writeStore(text)
+                    onPersist?.invoke(text)
                 }
+            } catch (e: Throwable) {
+                Log.w("LiveRepository", "live-sources.json 异步写盘失败", e)
             }
         }
     }

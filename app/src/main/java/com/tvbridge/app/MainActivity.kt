@@ -13,7 +13,7 @@ import java.net.*
 import java.io.File
 
 class MainActivity:Activity() {
-    @JvmField var visible=false
+    @Volatile @JvmField var visible=false
     private lateinit var root:FrameLayout
     private lateinit var home:TvHomeView
     private var livePanel:LivePanel?=null
@@ -439,7 +439,7 @@ class MainActivity:Activity() {
         fileObserver=object:android.os.FileObserver(receivedDir.path,android.os.FileObserver.CREATE or android.os.FileObserver.MOVED_TO or android.os.FileObserver.DELETE or android.os.FileObserver.MOVED_FROM){
             override fun onEvent(event:Int,path:String?){handler.post{refreshFiles()}}
         }
-        filesDialog=NativeUi.show(AlertDialog.Builder(this).setTitle("收到的文件").setAdapter(fileAdapter){_,which->val file=files[which]
+        filesDialog=NativeUi.show(AlertDialog.Builder(this).setTitle("收到的文件").setAdapter(fileAdapter){_,which->val file=files.getOrNull(which)?:return@setAdapter
             val extension=file.extension.lowercase()
             val options=(if(extension in listOf("jpg","jpeg","png","webp","gif","bmp","mp4","mkv","webm","mov","m4v","ts"))listOf("预览")else emptyList())+(if(extension in listOf("jpg","jpeg","png","webp","gif","bmp"))listOf("设为桌面背景")else emptyList())+(if(extension=="apk")listOf("安装 APK")else emptyList())+(if(extension in listOf("m3u","m3u8","txt","json","csv","pls","xspf"))listOf("导入直播节目单")else emptyList())+listOf("保存到下载","删除")
             NativeUi.show(AlertDialog.Builder(this).setTitle(file.name).setItems(options.toTypedArray()){_,index->when(options[index]){
@@ -451,6 +451,10 @@ class MainActivity:Activity() {
                 else->NativeUi.show(AlertDialog.Builder(this).setMessage("确认删除？").setPositiveButton("删除"){_,_->file.delete();showFiles()}.setNegativeButton("取消",null))
             }}.setNegativeButton("关闭",null))
         }.setNegativeButton("关闭",null),maxListHeightDp=240)
+        filesDialog?.setOnDismissListener{dialog->
+            (dialog as? AlertDialog)?.let(NativeUi::handleExternalDismiss)
+            fileObserver?.stopWatching()
+        }
         fileObserver?.startWatching()
     }
     override fun onActivityResult(request:Int,result:Int,data:Intent?){super.onActivityResult(request,result,data);if(appearanceUi.onResult(request,result,data)){startupDialog?.dismiss();return};if(request==41){pointerPermissionPending=false;if(GlobalPointer.permitted(this)&&GlobalPointer.requested)requestGlobalPointer()else NativeUi.notice(this,"未授予悬浮窗权限");return};if(apkInstaller.onResult(request))return;if(request==20){desktopConnectionChanged();return};if(request==52){if(::home.isInitialized)home.refreshApps();return}}
@@ -469,7 +473,7 @@ class MainActivity:Activity() {
         if(event.action==KeyEvent.ACTION_DOWN&&screen=="live"&&livePanel?.handleKey(event.keyCode)==true)return true
         return super.dispatchKeyEvent(event)
     }
-    private fun exitOne(){DesktopTakeover.cancel(this);DesktopGuardService.allowStockLauncher();startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));if(Build.VERSION.SDK_INT>=21)finishAndRemoveTask()else finish()}
+    private fun exitOne(){DesktopTakeover.cancel(this);DesktopGuardService.allowStockLauncher();runCatching{startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))};if(Build.VERSION.SDK_INT>=21)finishAndRemoveTask()else finish()}
     private fun showExitDialog(){NativeUi.show(AlertDialog.Builder(this).setMessage("退出One？").setPositiveButton("退出"){_,_->exitOne()}.setNegativeButton("继续使用",null))}
     override fun onBackPressed(){when(screen){"settings","control","liveSetup"->showHome();"live"->if(livePanel?.back()!=true)showHome();else->if(!isDefaultHome()&&!DesktopTakeover.wanted(this)){
         val now=System.currentTimeMillis()

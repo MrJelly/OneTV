@@ -77,6 +77,7 @@ object PlaylistParser {
                 text.lineSequence().forEach {raw->val line=raw.trim()
                     if(line.startsWith("#EXTINF:")){
                         val comma=Regex(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)").find(line)?.range?.first
+                            ?: line.lastIndexOf(',').takeIf{it>=0}
                         name=if(comma!=null)line.substring(comma+1).trim() else ""
                         group=Regex("group-title=\"([^\"]*)\"").find(line)?.groupValues?.get(1)?:"未分组"
                         key=(Regex("tvg-id=\"([^\"]*)\"").find(line)?.groupValues?.get(1)?:name).replace(Regex("@(SD|HD|FHD|UHD|4K)$",RegexOption.IGNORE_CASE),"")

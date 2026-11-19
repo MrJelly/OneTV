@@ -69,8 +69,8 @@ object NativeUi {
     fun scale(context:Context):Float {val metrics=context.resources.displayMetrics;return minOf(metrics.widthPixels/1920f,metrics.heightPixels/1080f)}
     const val BODY_TEXT_SIZE = 30f
     fun textSize(view:android.widget.TextView,pixels:Float){view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,pixels.coerceAtLeast(BODY_TEXT_SIZE)*scale(view.context))}
-    private var dialog=WeakReference<AlertDialog>(null)
-    private val dialogStack=mutableListOf<WeakReference<AlertDialog>>()
+    private var dialog=WeakReference<android.app.Dialog>(null)
+    private val dialogStack=mutableListOf<WeakReference<android.app.Dialog>>()
     private var hiddenQrBox:WeakReference<android.view.View>?=null
     private fun hideQrBox(qrBox:android.view.View){qrBox.visibility=android.view.View.GONE;hiddenQrBox=WeakReference(qrBox)}
     private fun restoreQrBox(){hiddenQrBox?.get()?.let{it.visibility=android.view.View.VISIBLE};hiddenQrBox=null}
@@ -280,7 +280,12 @@ object NativeUi {
         value.show();dialog=WeakReference(value);dialogStack.add(WeakReference(value))
         return value
     }
-    fun handleExternalDismiss(value:AlertDialog){
+    fun registerDialog(value:android.app.Dialog){
+        dialog=WeakReference(value)
+        dialogStack.add(WeakReference(value))
+        value.setOnDismissListener{handleExternalDismiss(value)}
+    }
+    fun handleExternalDismiss(value:android.app.Dialog){
         dialogStack.removeAll{it.get()==null||it.get()===value||it.get()?.isShowing!=true}
         if(dialogStack.isEmpty())restoreQrBox()
         if(dialog.get()===value)dialog=WeakReference(dialogStack.lastOrNull()?.get())
@@ -294,7 +299,14 @@ object NativeUi {
     fun dialogCommand(cmd:String):Boolean? {
         val value=dialog.get()?.takeIf{it.isShowing}?:return null
         if(cmd=="back"){value.dismiss();return true}
-        if(cmd=="ok"){val list=value.listView;if(list!=null&&list.hasFocus()&&list.selectedItemPosition>=0)return list.performItemClick(list.selectedView,list.selectedItemPosition,list.selectedItemId);val focused=value.currentFocus;if(focused!=null&&focused.performClick())return true;return value.getButton(AlertDialog.BUTTON_POSITIVE)?.performClick()==true}
+        if(cmd=="ok"){
+            val alert=value as? AlertDialog
+            val list=alert?.listView
+            if(list!=null&&list.hasFocus()&&list.selectedItemPosition>=0)return list.performItemClick(list.selectedView,list.selectedItemPosition,list.selectedItemId)
+            val focused=value.currentFocus
+            if(focused!=null&&focused.performClick())return true
+            return alert?.getButton(AlertDialog.BUTTON_POSITIVE)?.performClick()==true
+        }
         val code=when(cmd){"up"->19;"down"->20;"left"->21;"right"->22;"ok"->23;else->return null}
         value.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN,code));value.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP,code));return true
     }

@@ -10,7 +10,7 @@ import java.io.InputStream
 object HomeAppearance {
     const val MAX_IMAGE_BYTES=20*1024*1024
     private val importLock=Any()
-    @Volatile private var writingImage=false
+    @Volatile private var writingImagePath:String?=null
     private class CachedBackdrop(val key: String, val bitmap: Bitmap)
     @Volatile private var lastBackdrop: CachedBackdrop? = null
     private val backdropCache = object : android.util.LruCache<String, Bitmap>(3) {}
@@ -89,10 +89,21 @@ object HomeAppearance {
             null
         }catch(e:Exception){e.message?:"今日壁纸下载失败"}
     }
-    fun customThumbnail(context:Context):Bitmap? = try {
-        val options=BitmapFactory.Options().apply{inSampleSize=8}
-        if(writingImage)BitmapFactory.decodeFile(customFile(context).path+".bak",options)else AtomicFile(customFile(context)).openRead().use{BitmapFactory.decodeStream(it,null,options)}
-    }catch(_:Exception){null}
+    private fun readCustomBitmap(context: Context, options: BitmapFactory.Options? = null): Bitmap? {
+        val target = customFile(context)
+        val bak = File(target.path + ".bak")
+        if (writingImagePath == target.path && bak.isFile) {
+            try {
+                BitmapFactory.decodeFile(bak.path, options)?.let { return it }
+            } catch (_: Exception) {}
+        }
+        return try {
+            AtomicFile(target).openRead().use { BitmapFactory.decodeStream(it, null, options) }
+        } catch (_: Exception) {
+            if (bak.isFile) try { BitmapFactory.decodeFile(bak.path, options) } catch (_: Exception) { null } else null
+        }
+    }
+    fun customThumbnail(context:Context):Bitmap? = readCustomBitmap(context, BitmapFactory.Options().apply{inSampleSize=8})
     internal fun applyBingDraft(context:Context,draft:Context){
         val directory=File(context.filesDir,"wallpapers").apply{check(isDirectory||mkdirs())}
         val file=AtomicFile(File(directory,"bing.jpg"));val output=file.startWrite()
@@ -138,8 +149,9 @@ object HomeAppearance {
             Canvas(target!!).drawBitmap(oriented!!,null,RectF((1920-w)/2,(1080-h)/2,(1920+w)/2,(1080+h)/2),Paint(Paint.FILTER_BITMAP_FLAG))
             var luminance=0.0;var count=0
             for(y in 0 until target!!.height step 32)for(x in 0 until target!!.width step 32){val c=target!!.getPixel(x,y);luminance+=(Color.red(c)*.2126+Color.green(c)*.7152+Color.blue(c)*.0722)/255;count++}
-            val file=AtomicFile(customFile(context));writingImage=true
-            try{val output=file.startWrite();try{check(target!!.compress(Bitmap.CompressFormat.JPEG,90,output));file.finishWrite(output)}catch(e:Exception){file.failWrite(output);throw e}}finally{writingImage=false}
+            val customTarget=customFile(context)
+            val file=AtomicFile(customTarget);writingImagePath=customTarget.path
+            try{val output=file.startWrite();try{check(target!!.compress(Bitmap.CompressFormat.JPEG,90,output));file.finishWrite(output)}catch(e:Exception){file.failWrite(output);throw e}}finally{writingImagePath=null}
             context.getSharedPreferences("appearance",0).edit().putBoolean("dark_home",customDark(context,luminance/count<.48)).putBoolean("custom_dark",luminance/count<.48).putString("wallpaper_mode","custom").putLong("wallpaper_revision",System.nanoTime()).apply()
         }finally{target?.recycle();if(oriented!==decoded)oriented?.recycle();decoded?.recycle();temp.delete()}
     }
@@ -191,12 +203,7 @@ object HomeAppearance {
             ProceduralWallpaper.draw(Canvas(target), target.width, target.height, dark)
             return target
         }
-        val source = try {
-            if (writingImage) BitmapFactory.decodeFile(customFile(context).path + ".bak")
-            else AtomicFile(customFile(context)).openRead().use { BitmapFactory.decodeStream(it) }
-        } catch (_: Exception) {
-            null
-        }
+        val source = readCustomBitmap(context)
         if (source == null) {
             Canvas(target).drawColor(if (dark) 0xff14263c.toInt() else 0xffe4edf5.toInt())
             return target

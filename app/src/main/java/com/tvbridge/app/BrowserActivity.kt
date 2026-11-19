@@ -61,7 +61,9 @@ class BrowserActivity : Activity() {
     private lateinit var homepage: ScrollView
     private lateinit var homeContent: LinearLayout
     private lateinit var bookmarkButton: ToolbarButton
+    private lateinit var playButton: ToolbarButton
     private lateinit var modeButton: ToolbarButton
+    private lateinit var videoPill: TextView
 
     private val sniffer = BrowserVideoSniffer()
     private val bookmarks by lazy { BrowserBookmarks(this) }
@@ -76,6 +78,7 @@ class BrowserActivity : Activity() {
     private var buttonHint: PopupWindow? = null
     private var bookmarkLayoutWidth = 0
     @Volatile private var currentPageUrl = ""
+    private var lastSniffedCount = 0
 
     fun remotePlaybackState(): String = if (::videoController.isInitialized) videoController.playbackState else "{}"
 
@@ -144,11 +147,42 @@ class BrowserActivity : Activity() {
             override fun isDestroyed(): Boolean = destroyed
             override fun isActive(): Boolean = active === this@BrowserActivity
             override fun showTools(show: Boolean) = this@BrowserActivity.showTools(show)
+            override fun onVideoAvailabilityChanged(sniffedCount: Int) = updateVideoAvailability(sniffedCount)
         })
+        sniffer.onSniffed = { _, _, total ->
+            AppThreads.main.post {
+                if (!destroyed && ::videoController.isInitialized) {
+                    videoController.onSniffedMedia(total)
+                }
+            }
+        }
 
         buildToolbar()
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
         root.addView(progress, FrameLayout.LayoutParams(-1, dp(3), Gravity.TOP))
+
+        videoPill = TextView(this).apply {
+            text = "发现视频 · 接管播放"
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(dp(16), dp(9), dp(16), dp(9))
+            background = GlassUi.surface(this, 20f, video = true, dark = true, dense = true)
+            visibility = View.GONE
+            isFocusable = false
+            isFocusableInTouchMode = false
+            NativeUi.touchClicks(this)
+            setOnClickListener {
+                visibility = View.GONE
+                playDetectedVideo {}
+            }
+        }
+        root.addView(
+            videoPill,
+            FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply {
+                setMargins(0, 0, dp(20), dp(20))
+            }
+        )
 
         createPage()
 
@@ -166,7 +200,8 @@ class BrowserActivity : Activity() {
             background = GlassUi.backdrop(this)
             addView(homeContent)
         }
-        root.addView(homepage, 2, FrameLayout.LayoutParams(-1, -1))
+        val insertIndex = root.indexOfChild(toolbar).coerceAtLeast(0)
+        root.addView(homepage, insertIndex, FrameLayout.LayoutParams(-1, -1))
         homeContent.addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
             val width = right - left - homeContent.paddingLeft - homeContent.paddingRight
             if (width > 0 && width != bookmarkLayoutWidth) renderBookmarks()
@@ -187,6 +222,31 @@ class BrowserActivity : Activity() {
             showHomepage()
         }
         if (state == null) intent.getStringExtra("address")?.let(::navigate)
+    }
+
+    private fun updateVideoAvailability(sniffedCount: Int) {
+        lastSniffedCount = sniffedCount
+        val onPage = ::homepage.isInitialized && homepage.visibility != View.VISIBLE
+        val hasVideo = onPage && sniffedCount > 0
+        if (::playButton.isInitialized) {
+            playButton.isEnabled = onPage
+            playButton.alpha = if (onPage) 1f else 0.35f
+            playButton.isSelected = hasVideo
+            playButton.isActivated = hasVideo
+            playButton.contentDescription = if (hasVideo) "接管播放（已发现 $sniffedCount 路视频）" else "接管网页视频"
+            playButton.invalidate()
+        }
+        if (::videoPill.isInitialized) {
+            val showPill = hasVideo && !videoController.isBusyOrActive
+            if (showPill) {
+                videoPill.text = if (sniffedCount > 1) "发现 $sniffedCount 路视频 · 接管播放" else "发现视频 · 接管播放"
+                videoPill.visibility = View.VISIBLE
+                videoPill.bringToFront()
+                cursor.bringToFront()
+            } else {
+                videoPill.visibility = View.GONE
+            }
+        }
     }
 
     private fun buildToolbar() {
@@ -238,6 +298,24 @@ class BrowserActivity : Activity() {
             addressGroup.isActivated = focused || address.hasFocus()
         }
         addButton(toolbar, "主页") { showHomepage() }
+        playButton = addButton(toolbar, "接管播放") {
+            if (homepage.visibility != View.VISIBLE) {
+                playDetectedVideo { ok ->
+                    if (!ok) NativeUi.notice(this, "当前网页未检测到可播放视频")
+                }
+            }
+        }.apply {
+            isEnabled = false
+            alpha = 0.35f
+            setOnLongClickListener {
+                videoController.autoTakeover = !videoController.autoTakeover
+                NativeUi.notice(
+                    this@BrowserActivity,
+                    if (videoController.autoTakeover) "已开启自动接管网页视频" else "已关闭自动接管（可手动点播放接管）"
+                )
+                true
+            }
+        }
         bookmarkButton = addButton(toolbar, "收藏网页") { toggleBookmark() }.apply {
             isEnabled = false
             alpha = 0.35f
@@ -606,6 +684,7 @@ class BrowserActivity : Activity() {
                 "返回" -> "exit"
                 "打开" -> "search"
                 "主页" -> "home"
+                "接管播放" -> "play"
                 "收藏网页" -> "star"
                 "后退" -> "history-back"
                 "前进" -> "history-forward"
@@ -634,6 +713,7 @@ class BrowserActivity : Activity() {
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(address.windowToken, 0)
         videoController.exitVideo()
         sniffer.clear()
+        updateVideoAvailability(0)
         web.stopLoading()
         editingAddress = false
         address.setText(candidate)
@@ -650,6 +730,7 @@ class BrowserActivity : Activity() {
         val homeVisible = ::homepage.isInitialized && homepage.visibility == View.VISIBLE
         if (show) toolsCollapsed = false
         toolbar.visibility = if (!videoController.isVideoActive && !toolsCollapsed) View.VISIBLE else View.GONE
+        updateVideoAvailability(if (homeVisible) 0 else lastSniffedCount)
         updateInsets()
         cursor.visibility = if (GlobalPointer.enabled) View.GONE else View.VISIBLE
         cursor.bringToFront()
@@ -693,9 +774,9 @@ class BrowserActivity : Activity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (videoController.isVideoActive) {
-            if (videoController.handleKeyEvent(event)) return true
-            if (event.keyCode in DPAD_KEYS) return super.dispatchKeyEvent(event)
+        if (videoController.handleKeyEvent(event)) return true
+        if (videoController.isVideoActive && event.keyCode in DPAD_KEYS) {
+            return super.dispatchKeyEvent(event)
         }
         if (event.keyCode == KeyEvent.KEYCODE_MENU) {
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
@@ -745,6 +826,9 @@ class BrowserActivity : Activity() {
 
     override fun onSaveInstanceState(state: Bundle) {
         super.onSaveInstanceState(state)
+        if (::web.isInitialized && ::homepage.isInitialized && homepage.visibility != View.VISIBLE) {
+            runCatching { web.saveState(state) }
+        }
     }
 
     fun globalPointerChanged(enabled: Boolean) {

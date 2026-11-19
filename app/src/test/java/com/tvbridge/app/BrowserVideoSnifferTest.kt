@@ -133,4 +133,51 @@ class BrowserVideoSnifferTest {
         assertEquals(BrowserVideoSniffer.SitePolicy.WEB_ONLY, sniffer.sitePolicy("https://pan.quark.cn/s/abc"))
         assertEquals(BrowserVideoSniffer.SitePolicy.NATIVE_FIRST, sniffer.sitePolicy("https://example.com/video"))
     }
+
+    @Test
+    fun classifiesPathEmbeddedHlsAndLegacyRangeStreams() {
+        val sniffer = BrowserVideoSniffer()
+        assertEquals(
+            BrowserVideoSniffer.StreamKind.HLS,
+            sniffer.classify("https://cdn.example.com/hls/stream.m3u8/token123")
+        )
+        assertEquals(
+            BrowserVideoSniffer.StreamKind.HLS,
+            sniffer.classify("https://cdn.example.com/live/m3u8/channel1")
+        )
+        assertEquals(
+            BrowserVideoSniffer.StreamKind.DASH,
+            sniffer.classify("https://cdn.example.com/dash/manifest.mpd/segment_init")
+        )
+        assertEquals(
+            BrowserVideoSniffer.StreamKind.RANGE_MEDIA,
+            sniffer.classify(
+                "https://cdn.example.com/media/play?id=100",
+                mapOf("Range" to "bytes=0-")
+            )
+        )
+        assertNull(
+            sniffer.classify(
+                "https://cdn.example.com/media/seg_001",
+                mapOf("Range" to "bytes=0-1024")
+            )
+        )
+        assertEquals("application/x-mpegURL", sniffer.mimeHint("https://cdn.example.com/play?format=m3u8"))
+        assertEquals("application/dash+xml", sniffer.mimeHint("https://cdn.example.com/play?type=mpd"))
+    }
+
+    @Test
+    fun clearForUrlChangeHandlesSpaRoutesAndIgnoresPlainAnchors() {
+        val sniffer = BrowserVideoSniffer()
+        sniffer.record("https://cdn.example.com/v1.m3u8", emptyMap(), sniffer.generation, 1000L)
+        assertEquals(1, sniffer.count(1000L))
+
+        // Plain in-page anchor should NOT clear sniffed streams
+        assertFalse(sniffer.clearForUrlChange("https://site.com/watch?id=1", "https://site.com/watch?id=1#comments"))
+        assertEquals(1, sniffer.count(1000L))
+
+        // Hash-router SPA navigation (#/video/2) MUST clear sniffed streams
+        assertTrue(sniffer.clearForUrlChange("https://site.com/#/video/1", "https://site.com/#/video/2"))
+        assertEquals(0, sniffer.count(1000L))
+    }
 }

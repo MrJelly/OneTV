@@ -24,7 +24,8 @@ internal class BrowserVideoSniffer {
         HLS(1, "HLS"),
         DASH(2, "DASH"),
         VIDEO_DEST(3, "视频"),
-        DIRECT_VIDEO(4, "视频")
+        DIRECT_VIDEO(4, "视频"),
+        RANGE_MEDIA(5, "视频")
     }
 
     private data class SniffedEntry(
@@ -37,11 +38,51 @@ internal class BrowserVideoSniffer {
     private val entries = LinkedHashMap<String, SniffedEntry>()
     @Volatile var generation: Long = 0L
         private set
+    @Volatile var onSniffed: ((url: String, kind: StreamKind, total: Int) -> Unit)? = null
 
     fun clear() {
         synchronized(entries) {
             generation++
             entries.clear()
+        }
+    }
+
+    /**
+     * Clears sniffed entries when an SPA route change navigates to a different page
+     * (scheme/host/path/query changed, ignoring pure `#anchor` hash changes unless the hash
+     * itself looks like a route such as `#/video/123`).
+     */
+    fun clearForUrlChange(previousUrl: String?, newUrl: String?): Boolean {
+        if (previousUrl.isNullOrBlank() || newUrl.isNullOrBlank()) return false
+        if (previousUrl == newUrl) return false
+        val prevBase = previousUrl.substringBefore('#')
+        val nextBase = newUrl.substringBefore('#')
+        val prevHash = previousUrl.substringAfter('#', "")
+        val nextHash = newUrl.substringAfter('#', "")
+        val isHashRouteChange = prevBase == nextBase && (nextHash.startsWith("/") || prevHash.startsWith("/"))
+        if (prevBase != nextBase || isHashRouteChange) {
+            clear()
+            return true
+        }
+        return false
+    }
+
+    fun count(nowMs: Long): Int = synchronized(entries) {
+        val cutoff = nowMs - ENTRY_TTL_MS
+        entries.values.count { it.seenAtMs >= cutoff }
+    }
+
+    fun hasHighConfidence(nowMs: Long): Boolean = synchronized(entries) {
+        val cutoff = nowMs - ENTRY_TTL_MS
+        entries.values.any { it.seenAtMs >= cutoff && it.kind.priority <= StreamKind.DIRECT_VIDEO.priority }
+    }
+
+    fun mimeHint(url: String): String? {
+        val kind = synchronized(entries) { entries[url]?.kind } ?: classify(url) ?: return null
+        return when (kind) {
+            StreamKind.HLS_MASTER, StreamKind.HLS -> "application/x-mpegURL"
+            StreamKind.DASH -> "application/dash+xml"
+            else -> null
         }
     }
 
@@ -56,7 +97,7 @@ internal class BrowserVideoSniffer {
     /**
      * Evaluates a sub-resource request intercepted by WebView and stores it if it looks
      * like a playable media stream (including extensionless streams tagged with
-     * `Sec-Fetch-Dest: video` or media query parameters).
+     * `Sec-Fetch-Dest: video`, `Range: bytes=0-` on older WebViews, or media query parameters).
      */
     fun record(
         url: String,
@@ -66,6 +107,7 @@ internal class BrowserVideoSniffer {
     ): Boolean {
         val normalized = PlaylistParser.httpUrl(url) ?: return false
         val kind = classify(normalized, requestHeaders) ?: return false
+        val total: Int
         synchronized(entries) {
             if (expectedGeneration != generation) return false
             entries.remove(normalized)
@@ -78,7 +120,9 @@ internal class BrowserVideoSniffer {
             while (entries.size > MAX_ENTRIES) {
                 entries.remove(entries.keys.first())
             }
+            total = entries.size
         }
+        onSniffed?.invoke(normalized, kind, total)
         return true
     }
 
@@ -97,11 +141,11 @@ internal class BrowserVideoSniffer {
 
         val lowerQuery = url.substringAfter('?', "").substringBefore('#').lowercase(Locale.ROOT)
 
-        // 1. Explicit HLS / DASH manifest by extension or query hints
-        if (lowerPath.endsWith(".m3u8") || HLS_QUERY_HINT.containsMatchIn(lowerQuery)) {
+        // 1. Explicit HLS / DASH manifest by extension, embedded path segment, or query hints
+        if (lowerPath.endsWith(".m3u8") || EMBEDDED_HLS_PATH.containsMatchIn(lowerPath) || HLS_QUERY_HINT.containsMatchIn(lowerQuery)) {
             return if (isMasterManifest(lowerPath)) StreamKind.HLS_MASTER else StreamKind.HLS
         }
-        if (lowerPath.endsWith(".mpd") || DASH_QUERY_HINT.containsMatchIn(lowerQuery)) {
+        if (lowerPath.endsWith(".mpd") || EMBEDDED_DASH_PATH.containsMatchIn(lowerPath) || DASH_QUERY_HINT.containsMatchIn(lowerQuery)) {
             return StreamKind.DASH
         }
 
@@ -130,6 +174,16 @@ internal class BrowserVideoSniffer {
         }
         if (accept.startsWith("video/") && !isSegmentLike(lowerPath)) {
             return StreamKind.VIDEO_DEST
+        }
+
+        // 4. Legacy WebView fallback (Android 4.4-9 lacks Sec-Fetch-Dest, but <video> sends Range: bytes=0-)
+        val range = headerIgnoreCase(requestHeaders, "Range")?.lowercase(Locale.ROOT)
+        if (secFetchDest == null && range != null && range.startsWith("bytes=")) {
+            val nonVideoAccept = accept.startsWith("image/") || accept.startsWith("text/") ||
+                accept.startsWith("font/") || accept.contains("application/json") || accept.contains("javascript")
+            if (!nonVideoAccept && !isSegmentLike(lowerPath)) {
+                return StreamKind.RANGE_MEDIA
+            }
         }
 
         return null
@@ -169,14 +223,14 @@ internal class BrowserVideoSniffer {
         // 1. Currently playing DOM <video> URL has highest confidence
         tryAdd(domActiveUrl)
 
-        // 2. Sniffed streams sorted by kind priority & recency (master m3u8 -> m3u8 -> mpd -> video dest -> mp4)
+        // 2. Sniffed streams sorted by kind priority & recency (master m3u8 -> m3u8 -> mpd -> video dest -> mp4 -> range)
         for (url in sniffed) tryAdd(url)
 
         // 3. JS XHR/fetch captured manifests/videos (prefer manifests first)
         val jsClassified = jsUrls
             .mapNotNull { raw ->
                 val clean = PlaylistParser.httpUrl(raw) ?: return@mapNotNull null
-                val kind = classify(clean) ?: return@mapNotNull null
+                val kind = classify(clean) ?: StreamKind.VIDEO_DEST
                 clean to kind
             }
             .sortedBy { it.second.priority }
@@ -284,6 +338,8 @@ internal class BrowserVideoSniffer {
         )
 
         private val DIRECT_MEDIA_SUFFIX = Regex("\\.(mp4|webm|mov|m4v|mkv|flv)$")
+        private val EMBEDDED_HLS_PATH = Regex("\\.m3u8(?:/|$)|/m3u8(?:/|$)")
+        private val EMBEDDED_DASH_PATH = Regex("\\.mpd(?:/|$)")
         private val SEGMENT_SUFFIX = Regex("\\.(ts|m4s|cmfv|cmfa|vtt|srt|ass)$")
         private val STATIC_ASSET_SUFFIX = Regex(
             "\\.(js|mjs|css|png|jpg|jpeg|gif|webp|svg|ico|woff|woff2|ttf|otf|eot|html|htm|xml|json|txt|map)$"
@@ -304,50 +360,90 @@ internal class BrowserVideoSniffer {
 
         /**
          * Idempotent lightweight hook injected on page load to capture media manifest/stream
-         * URLs requested via `fetch` or `XMLHttpRequest` (e.g. `hls.js`, `dash.js`, `flv.js`)
-         * without exposing a JavascriptInterface bridge.
+         * URLs requested via `fetch` (including response Content-Type inspection for extensionless
+         * or 302-redirected streams), `XMLHttpRequest`, and `<video>` play events without exposing
+         * a JavascriptInterface bridge.
          */
         const val INJECT_SNIFF_JS = """
             (function(){
               if(window.__oneSniffHooked)return;
               window.__oneSniffHooked=true;
               window.__oneSniffed=[];
-              var mediaRe=/\.(m3u8|mpd|mp4|webm|flv|mkv|m4v)(?:[?#]|$)/i;
-              function record(u){
+              var mediaRe=/\.(m3u8|mpd|mp4|webm|flv|mkv|m4v)(?:[/?#]|$)/i;
+              var ctRe=/(mpegurl|dash\+xml|^video\/)/i;
+              function pushUrl(u){
                 if(typeof u!=='string')return;
                 try{u=new URL(u,location.href).href;}catch(e){return;}
-                if(!/^https?:\/\//i.test(u)||!mediaRe.test(u))return;
+                if(!/^https?:\/\//i.test(u))return;
                 var list=window.__oneSniffed;
                 var idx=list.indexOf(u);
                 if(idx>=0)list.splice(idx,1);
                 list.push(u);
                 if(list.length>24)list.shift();
               }
+              function record(u){
+                if(typeof u==='string'&&mediaRe.test(u))pushUrl(u);
+              }
               if(window.XMLHttpRequest&&XMLHttpRequest.prototype){
                 var origOpen=XMLHttpRequest.prototype.open;
                 XMLHttpRequest.prototype.open=function(method,url){
-                  try{record(url);}catch(e){}
+                  try{this.__oneUrl=url;record(url);}catch(e){}
                   return origOpen.apply(this,arguments);
+                };
+                var origSend=XMLHttpRequest.prototype.send;
+                XMLHttpRequest.prototype.send=function(){
+                  try{
+                    this.addEventListener('readystatechange',function(){
+                      if(this.readyState===2){
+                        try{
+                          var ct=this.getResponseHeader('content-type')||'';
+                          if(ctRe.test(ct))pushUrl(this.responseURL||this.__oneUrl);
+                        }catch(e){}
+                      }
+                    });
+                  }catch(e){}
+                  return origSend.apply(this,arguments);
                 };
               }
               if(typeof window.fetch==='function'){
                 var origFetch=window.fetch;
                 window.fetch=function(input){
-                  try{record(typeof input==='string'?input:(input&&input.url));}catch(e){}
-                  return origFetch.apply(this,arguments);
+                  var reqUrl=typeof input==='string'?input:(input&&input.url);
+                  try{record(reqUrl);}catch(e){}
+                  var p=origFetch.apply(this,arguments);
+                  try{
+                    if(p&&p.then){
+                      p.then(function(res){
+                        try{
+                          var ct=res&&res.headers&&res.headers.get('content-type')||'';
+                          if(ctRe.test(ct))pushUrl((res&&res.url)||reqUrl);
+                        }catch(e){}
+                      },function(){});
+                    }
+                  }catch(e){}
+                  return p;
                 };
               }
+              document.addEventListener('play',function(ev){
+                try{
+                  var t=ev&&ev.target;
+                  if(t&&t.tagName==='VIDEO'){
+                    var u=t.currentSrc||t.src||'';
+                    if(/^https?:\/\//i.test(u))pushUrl(u);
+                  }
+                }catch(e){}
+              },true);
             })();
         """
 
         /**
          * Scans `<video>` and `<source>` elements across the main document and up to 3 levels
          * of same-origin `<iframe>`s, returning active URL, fallback URL, JS-captured URLs,
-         * and whether an MSE `blob:` video was observed.
+         * whether an MSE `blob:` video was observed, and whether a sizeable video is actively playing.
          */
         const val DOM_DETECT_JS = """
             (function(){
-              var activeUrl='',activeArea=-1,fallbackUrl='',fallbackArea=-1,hasBlob=false,jsUrls=[];
+              var activeUrl='',activeArea=-1,fallbackUrl='',fallbackArea=-1,hasBlob=false,playingLarge=false,jsUrls=[];
               function pushJs(arr){
                 if(!arr||!arr.length)return;
                 for(var i=0;i<arr.length;i++){
@@ -368,12 +464,14 @@ internal class BrowserVideoSniffer {
                 var videos=doc.querySelectorAll('video');
                 for(var i=0;i<videos.length;i++){
                   var v=videos[i];
+                  var rect=v.getBoundingClientRect?v.getBoundingClientRect():{width:0,height:0};
+                  var area=(rect.width||0)*(rect.height||0);
+                  var isPlaying=!v.paused&&!v.ended&&v.readyState>=2;
+                  if(isPlaying&&(rect.width>=200||v.videoWidth>=320))playingLarge=true;
                   var u=videoSrc(v);
                   if(/^blob:/i.test(u)){hasBlob=true;continue;}
                   if(/^https?:\/\//i.test(u)){
-                    var rect=v.getBoundingClientRect?v.getBoundingClientRect():{width:0,height:0};
-                    var area=(rect.width||0)*(rect.height||0);
-                    if(!v.paused&&v.readyState>=2){
+                    if(isPlaying){
                       if(area>=activeArea){activeUrl=u;activeArea=area;}
                     }else if(area>=fallbackArea){
                       fallbackUrl=u;fallbackArea=area;
@@ -386,7 +484,7 @@ internal class BrowserVideoSniffer {
                 }
               }
               scan(document,window,0);
-              return JSON.stringify({activeUrl:activeUrl,fallbackUrl:fallbackUrl,jsUrls:jsUrls,hasBlob:hasBlob});
+              return JSON.stringify({activeUrl:activeUrl,fallbackUrl:fallbackUrl,jsUrls:jsUrls,hasBlob:hasBlob,playingLarge:playingLarge});
             })();
         """
     }

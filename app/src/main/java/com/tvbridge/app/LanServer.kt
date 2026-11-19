@@ -215,7 +215,8 @@ class LanServer(base:File,html:InputStream,private val onFatal: ((LanServer) -> 
             if (!sessions.containsKey(headers["x-tv-token"].orEmpty())) return reject(401, "请重新配对")
             when (path) {
                 "/status" -> {
-                    if (length in 1..8192) read(input, length.toInt())
+                    if (length > 8192) return reject(413, "请求体过大")
+                    if (length > 0) read(input, length.toInt())
                     response(out, 200, "application/json; charset=utf-8", capabilities.get().toByteArray(), keepAlive)
                     return keepAlive
                 }
@@ -225,7 +226,8 @@ class LanServer(base:File,html:InputStream,private val onFatal: ((LanServer) -> 
                     return keepAlive
                 }
                 "/playback" -> {
-                    if (length in 1..8192) read(input, length.toInt())
+                    if (length > 8192) return reject(413, "请求体过大")
+                    if (length > 0) read(input, length.toInt())
                     response(out, 200, "application/json; charset=utf-8", playbackData.get().toByteArray(), keepAlive)
                     return keepAlive
                 }
@@ -242,7 +244,8 @@ class LanServer(base:File,html:InputStream,private val onFatal: ((LanServer) -> 
                     return keepAlive
                 }
                 "/files" -> {
-                    if (length in 1..8192) read(input, length.toInt())
+                    if (length > 8192) return reject(413, "请求体过大")
+                    if (length > 0) read(input, length.toInt())
                     val files = directory.listFiles { f -> !f.name.endsWith(".part") }.orEmpty().sortedByDescending { it.lastModified() }.take(100)
                     val json = files.joinToString(",", "[", "]") { "{\"name\":${quote(it.name)},\"size\":${it.length()}}" }
                     response(out, 200, "application/json; charset=utf-8", json.toByteArray(), keepAlive)
@@ -301,7 +304,11 @@ class LanServer(base:File,html:InputStream,private val onFatal: ((LanServer) -> 
                 upload(input, out, path, length)
                 return false
             }
-            if (length in 1..8192) read(input, length.toInt())
+            if (length > 8192) {
+                reply(out, 404, "Not found", keepAlive = false)
+                return false
+            }
+            if (length > 0) read(input, length.toInt())
             reply(out, 404, "Not found", keepAlive)
             return keepAlive
         } catch (t: Throwable) {

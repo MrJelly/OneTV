@@ -86,7 +86,7 @@ object Hub {
                     }
                     return@LanServer done.await(5,TimeUnit.SECONDS)&&played
                 }
-                if(cmd=="adbConnect"){val connected=adb.connect(value.toIntOrNull()?:5555);if(connected)main.post{androidx.core.content.ContextCompat.startForegroundService(app,Intent(app,RemoteHostService::class.java))};return@LanServer connected}
+                if(cmd=="adbConnect"){val connected=adb.connect(value.toIntOrNull()?:5555);if(connected)main.post{runCatching{androidx.core.content.ContextCompat.startForegroundService(app,Intent(app,RemoteHostService::class.java))}};return@LanServer connected}
                 if(cmd=="adbDisconnect"){main.post{GlobalPointer.hide()};adb.disconnect();return@LanServer true}
                 if(cmd=="pointerMode"||cmd in setOf("touchMove","touchClick","touchScroll")) {
                     if(cmd=="pointerMode"&&value=="on"&&adb.enabled()&&!adb.ready)adb.restore()

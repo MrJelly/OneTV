@@ -223,10 +223,13 @@ class ApkInstaller(private val activity:Activity){
             InstallHandoff.begin(activity)
             val session=installer.openSession(sessionId)
             try{
-                val out=session.openWrite("apk",0,file.length())
-                file.inputStream().use{input->input.copyTo(out)}
-                session.fsync(out);out.close()
-                val flags=android.app.PendingIntent.FLAG_UPDATE_CURRENT or if(android.os.Build.VERSION.SDK_INT>=31)android.app.PendingIntent.FLAG_MUTABLE else 0
+                session.openWrite("apk",0,file.length()).use{out->
+                    file.inputStream().use{input->input.copyTo(out)}
+                    session.fsync(out)
+                }
+                val flags=android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                    (if(android.os.Build.VERSION.SDK_INT>=31)android.app.PendingIntent.FLAG_MUTABLE else 0) or
+                    (if(android.os.Build.VERSION.SDK_INT>=34)android.app.PendingIntent.FLAG_ALLOW_UNSAFE_IMPLICIT_INTENT else 0)
                 val sender=android.app.PendingIntent.getBroadcast(activity,sessionId,Intent(INSTALL_STATUS_ACTION).setPackage(activity.packageName),flags)
                 session.commit(sender.intentSender)
             }finally{session.close()}

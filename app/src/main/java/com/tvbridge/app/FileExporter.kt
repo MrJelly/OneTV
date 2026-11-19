@@ -45,7 +45,8 @@ class FileExporter(private val activity:Activity){
                     @Suppress("DEPRECATION") val directory=File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),"One")
                     check(directory.isDirectory||directory.mkdirs())
                     var target=File(directory,file.name);var suffix=1
-                    while(target.exists()){target=File(directory,"${file.nameWithoutExtension} (${suffix++}).${file.extension}")}
+                    val ext=file.extension.let{if(it.isEmpty())"" else ".$it"}
+                    while(target.exists()){target=File(directory,"${file.nameWithoutExtension} (${suffix++})$ext")}
                     try{file.inputStream().use{input->target.outputStream().use{input.copyTo(it)}}}catch(e:Exception){target.delete();throw e}
                 }
                 "已保存到 Download/One"

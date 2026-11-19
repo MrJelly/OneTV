@@ -492,7 +492,9 @@ object DesktopTakeover {
             AppThreads.onIo{
                 val ready=runCatching{Hub.adb.ready||(Hub.adb.enabled()&&Hub.adb.restore())}.getOrDefault(false)
                 val bootRestored=!ready||runCatching{Hub.adb.restoreBootApp()}.getOrDefault(false)
-                if(ready&&target!=null)Hub.adb.setDefaultHome(target)
+                if(ready){
+                    if(target!=null)Hub.adb.setDefaultHome(target) else Hub.adb.restoreVendorHomePkg()
+                }
                 activity.runOnUiThread{if(!activity.isFinishing&&!activity.isDestroyed){
                     if(!bootRestored)NativeUi.notice(activity,BOOT_APP_NOT_RESTORED)
                     if(!prefs(activity).contains("desktop_vt_previous"))restore(activity,changed)
@@ -529,14 +531,16 @@ object DesktopTakeover {
     fun cancel(context:Context){
         (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager).cancel(pending(context));prefs(context).edit().remove("boot_token").apply()
         if (!wanted(context)) {
-            standbyOut = false
-            standbyWatch?.let { runCatching { context.applicationContext.unregisterReceiver(it) } }
-            standbyWatch = null
-            val (prevEnabled, prevAdb) = synchronized(stateLock) {
-                val e = enabledObserver; enabledObserver = null
-                val a = adbObserver; adbObserver = null
-                e to a
+            val prevStandby: BroadcastReceiver?
+            val prevEnabled: ContentObserver?
+            val prevAdb: ContentObserver?
+            synchronized(stateLock) {
+                standbyOut = false
+                prevStandby = standbyWatch; standbyWatch = null
+                prevEnabled = enabledObserver; enabledObserver = null
+                prevAdb = adbObserver; adbObserver = null
             }
+            prevStandby?.let { runCatching { context.applicationContext.unregisterReceiver(it) } }
             prevEnabled?.let { runCatching { context.applicationContext.contentResolver.unregisterContentObserver(it) } }
             prevAdb?.let { runCatching { context.applicationContext.contentResolver.unregisterContentObserver(it) } }
             removeGuard(context)

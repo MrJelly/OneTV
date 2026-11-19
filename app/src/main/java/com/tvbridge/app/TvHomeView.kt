@@ -414,6 +414,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             }
         }
         dialog.show()
+        NativeUi.registerDialog(dialog)
         dialog.window?.setLayout(-1,-1)
         first?.requestFocusFromTouch()
     }

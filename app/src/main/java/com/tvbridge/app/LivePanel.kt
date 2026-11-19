@@ -56,7 +56,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         setBackgroundColor(Color.BLACK)
         isFocusable=false
         resizeMode = when (aspectMode) {
-            2 -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
+            1, 2 -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
             else -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
         }
     }
@@ -557,7 +557,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         if(next!=null){line=next;retries=0;resetAttempt();startLine()}else{multicastFor(null);player.stop();val reason=lastFailure.ifBlank{"播放失败，请切换线路"};refreshTitle(reason);showCover(reason,false);fullTitle.visibility=View.VISIBLE}
     }
     private fun refreshTitle(state:String=""){favoriteAction?.text=if(current?.let{repo.favorite(it.id)}==true)"已收藏"else "收藏";lineAction?.text="切换线路";val channel=current;val text=channel?.let{it.name+(if(it.id=="cast")""else " · 线路 ${line+1}/${it.streams.size}")+(if(repo.favorite(it.id))" · 已收藏" else "")+(if(state.isNotEmpty())" · $state" else "")}?:"直播";fullTitle.text=text}
-    private fun nextLine(){val channel=current?:return;routes.manual();line=(line+1)%channel.streams.size;retries=0;lastFailure="";resetAttempt();startLine()}
+    private fun nextLine(){val channel=current?:return;if(channel.streams.isEmpty())return;routes.manual();line=(line+1)%channel.streams.size;retries=0;lastFailure="";resetAttempt();startLine()}
     private fun stepChannel(step:Int){
         val items=shown.ifEmpty{all}
         if(items.isEmpty())return
@@ -614,7 +614,12 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             val inRail=rail.findFocus()!=null||sourceButton.hasFocus()
             if(code==KeyEvent.KEYCODE_DPAD_LEFT){
                 if(inRail)return true
-                if(drawerList.hasFocus()){for(i in 0 until rail.childCount){val railItem=rail.getChildAt(i);if(railItem.isSelected){railItem.requestFocus();break}};return true}
+                if(drawerList.hasFocus()){
+                    var focused=false
+                    for(i in 0 until rail.childCount){val railItem=rail.getChildAt(i);if(railItem.isSelected){focused=railItem.requestFocus();break}}
+                    if(!focused)(rail.getChildAt(0)?:sourceButton).requestFocus()
+                    return true
+                }
                 return false
             }
             if(code==KeyEvent.KEYCODE_DPAD_RIGHT){
@@ -649,7 +654,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         }
         return true
     }
-    fun command(cmd:String,value:String):Boolean=when(cmd){"videoToggle"->{if(player.playWhenReady)player.pause()else player.play();true};"videoPause"->{player.pause();true};"videoBack"->{player.seekTo((player.currentPosition-10000).coerceAtLeast(0));true};"videoForward"->{player.seekTo(player.currentPosition+10000);true};"videoFull"->{showControls();true};"liveNext"->{stepChannel(1);true};"livePrev"->{stepChannel(-1);true};"liveLine"->{nextLine();true};"liveFull"->{showDrawer();true};"volumeUp","volumeDown"->{(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager).adjustStreamVolume(AudioManager.STREAM_MUSIC,if(cmd=="volumeUp")AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,AudioManager.FLAG_SHOW_UI);true};else->false}
+    fun command(cmd:String,value:String):Boolean{if(released)return false;return when(cmd){"videoToggle"->{if(player.playWhenReady)player.pause()else player.play();true};"videoPause"->{player.pause();true};"videoBack"->{player.seekTo((player.currentPosition-10000).coerceAtLeast(0));true};"videoForward"->{player.seekTo(player.currentPosition+10000);true};"videoFull"->{showControls();true};"liveNext"->{stepChannel(1);true};"livePrev"->{stepChannel(-1);true};"liveLine"->{nextLine();true};"liveFull"->{showDrawer();true};"volumeUp","volumeDown"->{(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager).adjustStreamVolume(AudioManager.STREAM_MUSIC,if(cmd=="volumeUp")AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,AudioManager.FLAG_SHOW_UI);true};else->false}}
     fun pause(){ui.removeCallbacks(selectNumber);channelDigits="";multicastFor(null);resumePlayback=nativePlayer?.playWhenReady==true;paused=true;cancelRecovery();nativePlayer?.pause();ui.removeCallbacks(timeout);ui.removeCallbacks(hide)}
     fun resume(){if(!released&&paused&&current!=null){paused=false;multicastFor(current?.streams?.getOrNull(line));if(resumePlayback){if(current?.id!="cast")player.seekToDefaultPosition();if(player.playerError!=null)player.prepare();player.play();ui.postDelayed(timeout,20000)}}}
     fun stop(){ui.removeCallbacks(selectNumber);channelDigits="";multicastFor(null);groupPopup?.dismiss();released=true;loading.visibility=View.GONE;ui.removeCallbacksAndMessages(null);playerView.player=null;nativePlayer?.release();nativePlayer=null}
