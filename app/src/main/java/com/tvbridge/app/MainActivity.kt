@@ -33,7 +33,13 @@ class MainActivity:Activity() {
     private var screen="home"
     private val handler=Handler(Looper.getMainLooper())
     private var networkAddress=""
-    private val ticker=object:Runnable{override fun run(){if(visible){if(screen=="home")updateHome();handler.postDelayed(this,2000)}}}
+    private val ticker = object : Runnable {
+        override fun run() {
+            if (!visible) return
+            if (screen == "home" || controlQr != null) updateHome()
+            handler.postDelayed(this, if (controlQr != null) 2000L else 5000L)
+        }
+    }
     override fun onCreate(state:Bundle?) {
         super.onCreate(state)
         // Keep the last crash's stack on disk and surface it once at the next
@@ -277,7 +283,12 @@ class MainActivity:Activity() {
     // themselves, with no action and no category; that start counts as Home
     // too. Our own starts of MainActivity always carry an action or extras.
     override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);if(intent.getBooleanExtra("from_boot",false))BootReceiver.markArrived(this);if(intent.getBooleanExtra("pointer_setup",false)){requestGlobalPointer();return};if(::home.isInitialized){if(intent.getBooleanExtra("open_live",false))openSelectedLive()else if(intent.getBooleanExtra("show_home",false)||intent.hasCategory(Intent.CATEGORY_HOME)||(intent.action==null&&intent.component?.className?.endsWith(".DesktopActivity")==true))showHome()else scheduleBootApp()}}
-    private fun addresses():List<String> = ConnectionState.addresses(this,Hub.server?.port()?.takeIf{it>0}?:8888)
+    private fun addresses(): List<String> = ConnectionState.addresses(
+        this,
+        Hub.server?.port()?.takeIf { it > 0 } ?: 8888
+    ) {
+        handler.post { if (visible && !isDestroyed) updateHome() }
+    }
     private var lastControlQr:android.graphics.Bitmap?=null
     private var lastControlSummary=""
     private var lastControlConnected:Boolean?=null

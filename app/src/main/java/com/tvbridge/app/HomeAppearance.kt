@@ -11,13 +11,14 @@ object HomeAppearance {
     const val MAX_IMAGE_BYTES=20*1024*1024
     private val importLock=Any()
     @Volatile private var writingImage=false
-    private var cachedKey=""
-    private var cached:Bitmap?=null
-    private class PhotoShade(val height:Int){
-        val top=Paint().apply{shader=LinearGradient(0f,0f,0f,height*0.28f,intArrayOf(0x66000000,0),null,Shader.TileMode.CLAMP)}
-        val bottom=Paint().apply{shader=LinearGradient(0f,height*0.62f,0f,height.toFloat(),intArrayOf(0,0x73000000),null,Shader.TileMode.CLAMP)}
+    private class CachedBackdrop(val key: String, val bitmap: Bitmap)
+    @Volatile private var lastBackdrop: CachedBackdrop? = null
+    private val backdropCache = object : android.util.LruCache<String, Bitmap>(3) {}
+    private class PhotoShade(val height: Int) {
+        val top = Paint().apply { shader = LinearGradient(0f, 0f, 0f, height * 0.28f, intArrayOf(0x66000000, 0), null, Shader.TileMode.CLAMP) }
+        val bottom = Paint().apply { shader = LinearGradient(0f, height * 0.62f, 0f, height.toFloat(), intArrayOf(0, 0x73000000), null, Shader.TileMode.CLAMP) }
     }
-    @Volatile private var photoShade:PhotoShade?=null
+    @Volatile private var photoShade: PhotoShade? = null
     fun drawBackdrop(context:Context,canvas:Canvas,width:Int,height:Int,dark:Boolean,paint:Paint){
         if(mode(context)!="custom"||!hasCustom(context)){
             val w=width.coerceIn(1,1280)
@@ -158,27 +159,64 @@ object HomeAppearance {
             }catch(_:Throwable){}
         }
     }
-    @Synchronized fun backdrop(context:Context,width:Int,height:Int,dark:Boolean):Bitmap {
-        val requested="${key(context)}:$width:$height:$dark"
-        if(cachedKey==requested)cached?.takeUnless{it.isRecycled}?.let{return it}
-        val target=Bitmap.createBitmap(width.coerceAtLeast(1),height.coerceAtLeast(1),Bitmap.Config.ARGB_8888)
-        if(mode(context)=="bing"&&hasBing(context)){
-            val source=try{BitmapFactory.decodeFile(bingFile(context).path)}catch(_:Exception){null}
-            if(source!=null){
-                val canvas=Canvas(target);val scale=maxOf(width/source.width.toFloat(),height/source.height.toFloat())
-                val w=source.width*scale;val h=source.height*scale
-                canvas.drawBitmap(source,null,RectF((width-w)/2,(height-h)/2,(width+w)/2,(height+h)/2),Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-                source.recycle();cached=target;cachedKey=requested;return target
+    fun backdrop(context: Context, width: Int, height: Int, dark: Boolean): Bitmap {
+        val requested = "${key(context)}:$width:$height:$dark"
+        lastBackdrop?.let { if (it.key == requested && !it.bitmap.isRecycled) return it.bitmap }
+        synchronized(backdropCache) {
+            backdropCache.get(requested)?.takeUnless { it.isRecycled }?.let { hit ->
+                lastBackdrop = CachedBackdrop(requested, hit)
+                return hit
             }
         }
-        if(mode(context)!="custom"||!hasCustom(context)){
-            ProceduralWallpaper.draw(Canvas(target),target.width,target.height,dark);cached=target;cachedKey=requested;return target
+        val target = renderBackdrop(context, width, height, dark)
+        synchronized(backdropCache) {
+            backdropCache.put(requested, target)
+            lastBackdrop = CachedBackdrop(requested, target)
         }
-        val source=try{if(writingImage)BitmapFactory.decodeFile(customFile(context).path+".bak")else AtomicFile(customFile(context)).openRead().use{BitmapFactory.decodeStream(it)}}catch(_:Exception){null}
-        if(source==null){Canvas(target).drawColor(if(dark)0xff14263c.toInt()else 0xffe4edf5.toInt());cached=target;cachedKey=requested;return target}
-        val canvas=Canvas(target);val scale=maxOf(width/source.width.toFloat(),height/source.height.toFloat())
-        val w=source.width*scale;val h=source.height*scale
-        canvas.drawBitmap(source,null,RectF((width-w)/2,(height-h)/2,(width+w)/2,(height+h)/2),Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-        source.recycle();cached=target;cachedKey=requested;return target
+        return target
+    }
+
+    private fun renderBackdrop(context: Context, width: Int, height: Int, dark: Boolean): Bitmap {
+        val target = Bitmap.createBitmap(width.coerceAtLeast(1), height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        if (mode(context) == "bing" && hasBing(context)) {
+            val source = try { BitmapFactory.decodeFile(bingFile(context).path) } catch (_: Exception) { null }
+            if (source != null) {
+                drawCenterCrop(target, source)
+                source.recycle()
+                return target
+            }
+        }
+        if (mode(context) != "custom" || !hasCustom(context)) {
+            ProceduralWallpaper.draw(Canvas(target), target.width, target.height, dark)
+            return target
+        }
+        val source = try {
+            if (writingImage) BitmapFactory.decodeFile(customFile(context).path + ".bak")
+            else AtomicFile(customFile(context)).openRead().use { BitmapFactory.decodeStream(it) }
+        } catch (_: Exception) {
+            null
+        }
+        if (source == null) {
+            Canvas(target).drawColor(if (dark) 0xff14263c.toInt() else 0xffe4edf5.toInt())
+            return target
+        }
+        drawCenterCrop(target, source)
+        source.recycle()
+        return target
+    }
+
+    private fun drawCenterCrop(target: Bitmap, source: Bitmap) {
+        val width = target.width
+        val height = target.height
+        val canvas = Canvas(target)
+        val scale = maxOf(width / source.width.toFloat(), height / source.height.toFloat())
+        val w = source.width * scale
+        val h = source.height * scale
+        canvas.drawBitmap(
+            source,
+            null,
+            RectF((width - w) / 2f, (height - h) / 2f, (width + w) / 2f, (height + h) / 2f),
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        )
     }
 }

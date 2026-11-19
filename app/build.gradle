@@ -88,4 +88,5 @@ dependencies {
     implementation "androidx.media3:media3-exoplayer-smoothstreaming:${playerVersion}"
     implementation 'com.github.anilbeesetti.nextlib:nextlib-media3ext:v0.8.2'
     implementation "androidx.media3:media3-ui:${playerVersion}"
+    testImplementation 'junit:junit:4.13.2'
 }

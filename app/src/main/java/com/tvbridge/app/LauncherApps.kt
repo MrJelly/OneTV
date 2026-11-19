@@ -63,55 +63,117 @@ class LauncherApps(private val context:Context){
         drawable.constantState?.let{synchronized(icons){icons.put(key,it)}}
         return drawable
     }
-    fun squareCached(entry:Entry):Boolean {
-        val key="${entry.component.flattenToString()}:${entry.updated}"
-        return synchronized(squares){squares.get(key)!=null}
+    private fun squareCacheFile(key: String): java.io.File {
+        val dir = java.io.File(context.cacheDir, "square-icons-v1")
+        if (!dir.isDirectory) dir.mkdirs()
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(key.toByteArray(Charsets.UTF_8))
+            .take(12)
+            .joinToString("") { "%02x".format(it) }
+        return java.io.File(dir, "$digest.webp")
     }
+
+    fun squareCached(entry: Entry): Boolean {
+        val key = "${entry.component.flattenToString()}:${entry.updated}"
+        return synchronized(squares) { squares.get(key) != null }
+    }
+
     /**
      * iOS-style square app icon: the app's own artwork, full-bleed (the tile applies the
-     * rounded mask and the gloss). No colour sampling and no generated backdrop: adaptive
-     * icons draw their own background + foreground layers cropped to the safe zone; a
-     * legacy icon whose artwork is opaque fills the square; a transparent glyph sits
-     * centred on plain white, like the glyph icons on iOS.
+     * rounded mask and the gloss). Adaptive icons draw their own background + foreground
+     * layers cropped to the safe zone; opaque square legacy icons fill edge-to-edge;
+     * strongly non-square opaque icons sit fitted over their corner colour so nothing is
+     * chopped off; transparent glyphs sit centred on plain white.
+     * Results are cached in memory and persisted as WebP in cacheDir so cold starts skip
+     * APK icon decoding.
      */
-    fun squareIcon(entry:Entry):android.graphics.drawable.Drawable {
-        val key="${entry.component.flattenToString()}:${entry.updated}"
-        synchronized(squares){squares.get(key)?.let{return android.graphics.drawable.BitmapDrawable(context.resources,it)}}
-        val size=256
-        val out=android.graphics.Bitmap.createBitmap(size,size,android.graphics.Bitmap.Config.ARGB_8888)
-        val canvas=android.graphics.Canvas(out)
-        val pm=context.packageManager
-        val original=try{pm.getActivityIcon(entry.component)}catch(_:Exception){pm.defaultActivityIcon}
-        if(android.os.Build.VERSION.SDK_INT>=26&&original is android.graphics.drawable.AdaptiveIconDrawable){
+    fun squareIcon(entry: Entry): android.graphics.drawable.Drawable {
+        val key = "${entry.component.flattenToString()}:${entry.updated}"
+        synchronized(squares) {
+            squares.get(key)?.let { return android.graphics.drawable.BitmapDrawable(context.resources, it) }
+        }
+        val cacheFile = runCatching { squareCacheFile(key) }.getOrNull()
+        if (cacheFile != null && cacheFile.isFile) {
+            val cached = runCatching { android.graphics.BitmapFactory.decodeFile(cacheFile.path) }.getOrNull()
+            if (cached != null) {
+                synchronized(squares) { squares.put(key, cached) }
+                return android.graphics.drawable.BitmapDrawable(context.resources, cached)
+            }
+        }
+        val size = 256
+        val out = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(out)
+        val pm = context.packageManager
+        val original = try { pm.getActivityIcon(entry.component) } catch (_: Exception) { pm.defaultActivityIcon }
+        if (android.os.Build.VERSION.SDK_INT >= 26 && original is android.graphics.drawable.AdaptiveIconDrawable) {
             canvas.drawColor(android.graphics.Color.WHITE)
-            val lo=-size/4;val hi=size+size/4
-            original.background?.let{it.setBounds(lo,lo,hi,hi);it.draw(canvas)}
-            original.foreground?.let{it.setBounds(lo,lo,hi,hi);it.draw(canvas)}
-        }else{
-            val bitmap=(icon(entry) as? android.graphics.drawable.BitmapDrawable)?.bitmap
-            if(bitmap!=null&&isOpaque(bitmap)){
-                val paint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
-                val side=minOf(bitmap.width,bitmap.height)
-                val src=android.graphics.Rect((bitmap.width-side)/2,(bitmap.height-side)/2,(bitmap.width+side)/2,(bitmap.height+side)/2)
-                canvas.drawBitmap(bitmap,src,android.graphics.Rect(0,0,size,size),paint)
-            }else{
+            val lo = -size / 4
+            val hi = size + size / 4
+            original.background?.let { it.setBounds(lo, lo, hi, hi); it.draw(canvas) }
+            original.foreground?.let { it.setBounds(lo, lo, hi, hi); it.draw(canvas) }
+        } else {
+            val bitmap = (icon(entry) as? android.graphics.drawable.BitmapDrawable)?.bitmap
+            val iw = original.intrinsicWidth.coerceAtLeast(1)
+            val ih = original.intrinsicHeight.coerceAtLeast(1)
+            val nearSquare = maxOf(iw, ih) <= minOf(iw, ih) * 1.25f
+            if (bitmap != null && isOpaque(bitmap) && nearSquare) {
+                val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+                val side = minOf(bitmap.width, bitmap.height)
+                val src = android.graphics.Rect(
+                    (bitmap.width - side) / 2,
+                    (bitmap.height - side) / 2,
+                    (bitmap.width + side) / 2,
+                    (bitmap.height + side) / 2
+                )
+                canvas.drawBitmap(bitmap, src, android.graphics.Rect(0, 0, size, size), paint)
+            } else if (bitmap != null && isOpaque(bitmap)) {
+                canvas.drawColor(bitmap.getPixel(0, 0))
+                val inner = size * 0.88f
+                val s = inner / maxOf(iw, ih)
+                val dw = iw * s
+                val dh = ih * s
+                original.setBounds(((size - dw) / 2).toInt(), ((size - dh) / 2).toInt(), ((size + dw) / 2).toInt(), ((size + dh) / 2).toInt())
+                original.draw(canvas)
+            } else {
                 canvas.drawColor(android.graphics.Color.WHITE)
-                val inner=size*0.72f
-                val w=original.intrinsicWidth.coerceAtLeast(1);val h=original.intrinsicHeight.coerceAtLeast(1)
-                val s=inner/maxOf(w,h);val dw=w*s;val dh=h*s
-                original.setBounds(((size-dw)/2).toInt(),((size-dh)/2).toInt(),((size+dw)/2).toInt(),((size+dh)/2).toInt())
+                val inner = size * 0.72f
+                val s = inner / maxOf(iw, ih)
+                val dw = iw * s
+                val dh = ih * s
+                original.setBounds(((size - dw) / 2).toInt(), ((size - dh) / 2).toInt(), ((size + dw) / 2).toInt(), ((size + dh) / 2).toInt())
                 original.draw(canvas)
             }
         }
-        synchronized(squares){squares.put(key,out)}
-        return android.graphics.drawable.BitmapDrawable(context.resources,out)
+        synchronized(squares) { squares.put(key, out) }
+        if (cacheFile != null) {
+            AppThreads.onIo {
+                runCatching {
+                    val tmp = java.io.File(cacheFile.parentFile, cacheFile.name + ".tmp")
+                    tmp.outputStream().use { out.compress(android.graphics.Bitmap.CompressFormat.WEBP, 90, it) }
+                    if (!tmp.renameTo(cacheFile)) tmp.delete()
+                }
+            }
+        }
+        return android.graphics.drawable.BitmapDrawable(context.resources, out)
     }
+
     /** Alpha-only probe: does this artwork paint (nearly) the whole square by itself? */
-    private fun isOpaque(bitmap:android.graphics.Bitmap):Boolean {
-        val stepX=maxOf(1,bitmap.width/16);val stepY=maxOf(1,bitmap.height/16)
-        var total=0;var clear=0;var y=0
-        while(y<bitmap.height){var x=0;while(x<bitmap.width){total++;if(android.graphics.Color.alpha(bitmap.getPixel(x,y))<250)clear++;x+=stepX};y+=stepY}
-        return total>0&&clear*50<=total
+    private fun isOpaque(bitmap: android.graphics.Bitmap): Boolean {
+        val stepX = maxOf(1, bitmap.width / 16)
+        val stepY = maxOf(1, bitmap.height / 16)
+        var total = 0
+        var clear = 0
+        var y = 0
+        while (y < bitmap.height) {
+            var x = 0
+            while (x < bitmap.width) {
+                total++
+                if (android.graphics.Color.alpha(bitmap.getPixel(x, y)) < 250) clear++
+                x += stepX
+            }
+            y += stepY
+        }
+        return total > 0 && clear * 50 <= total
     }
     private fun readIds(key:String):List<String>? = try{val raw=prefs.getString(key,null)?:return null;val a=JSONArray(raw);(0 until a.length()).map{a.getString(it)}}catch(_:Exception){null}
     private fun writeIds(key:String,ids:List<String>){prefs.edit().putString(key,JSONArray(ids).toString()).apply()}

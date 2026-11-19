@@ -21,38 +21,47 @@ object ConnectionState {
     @Volatile private var cachedAddressesMs = 0L
     private val refreshing = AtomicBoolean(false)
 
+    private const val FRESH_TTL_MS = 30_000L
+    private const val EMPTY_RETRY_MS = 5_000L
+
     /** Drop the cached list so the next read recomputes it (refresh button). */
     fun invalidate() {
         cachedAddresses = emptyList()
         cachedAddressesMs = 0L
     }
 
-    fun addresses(context: Context, port: Int): List<String> {
+    /**
+     * Returns the last known LAN addresses without blocking the caller.
+     * When the cache is empty or stale, refreshes on [AppThreads.onIo] and
+     * invokes [onUpdated] if the resolved list changed.
+     */
+    fun addresses(context: Context, port: Int, onUpdated: (() -> Unit)? = null): List<String> {
+        val current = cachedAddresses
         val now = SystemClock.elapsedRealtime()
-        if (now - cachedAddressesMs < 30000 && cachedAddresses.isNotEmpty() && cachedAddresses.all { it.endsWith(":$port") }) return cachedAddresses
-        if (cachedAddresses.isEmpty()) {
-            val found = compute(context, port)
-            if (found.isNotEmpty()) {
-                cachedAddresses = found
-                cachedAddressesMs = now
-            }
-            return found
+        val age = now - cachedAddressesMs
+        val fresh = if (current.isNotEmpty()) {
+            age < FRESH_TTL_MS && current.all { it.endsWith(":$port") }
+        } else {
+            cachedAddressesMs != 0L && age < EMPTY_RETRY_MS
         }
+        if (fresh) return current
+
         if (refreshing.compareAndSet(false, true)) {
             val app = context.applicationContext
             AppThreads.onIo {
+                var changed = false
                 try {
                     val found = compute(app, port)
-                    if (found.isNotEmpty()) {
-                        cachedAddresses = found
-                        cachedAddressesMs = SystemClock.elapsedRealtime()
-                    }
+                    changed = found != cachedAddresses
+                    cachedAddresses = found
+                    cachedAddressesMs = SystemClock.elapsedRealtime()
                 } finally {
                     refreshing.set(false)
                 }
+                if (changed) onUpdated?.invoke()
             }
         }
-        return cachedAddresses
+        return current
     }
 
     private fun compute(context: Context, port: Int): List<String> {

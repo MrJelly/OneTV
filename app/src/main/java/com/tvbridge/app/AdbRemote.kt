@@ -18,7 +18,7 @@ class AdbRemote(context:Context){
     private val prefs=context.getSharedPreferences("remote-adb",Context.MODE_PRIVATE)
     private val keyDir=File(context.filesDir,"adb-key").apply{mkdirs()}
     @Volatile var ready=false;private set
-    @Volatile var message="未连接。先开启投影仪 ADB 调试，再确认屏幕上的授权请求。";private set
+    @Volatile var message="未连接。先开启设备 ADB 调试，再确认屏幕上的授权请求。";private set
     private val keyPair:KeyPair by lazy {
         val privateFile=File(keyDir,"private.der");val publicFile=File(keyDir,"public.der")
         if(privateFile.exists()&&publicFile.exists()){

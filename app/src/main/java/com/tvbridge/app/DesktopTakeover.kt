@@ -9,56 +9,72 @@ import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
 
 object DesktopTakeover {
-    private val recovery=Handler(Looper.getMainLooper())
-    private var recoveryPending=false
-    private var lastRebind=-60000L
-    private var lastRescan=-60000L
-    private var rebinding=false
-    private val handoverRunning=java.util.concurrent.atomic.AtomicBoolean(false)
-    private var enabledObserver:ContentObserver?=null
-    private val unwatchEnabled=Runnable{
-        enabledObserver?.let{ obs->
-            enabledObserver=null
-            runCatching{Hub.activity?.applicationContext?.contentResolver?.unregisterContentObserver(obs)}
-        }
-    }
-    private var watchTries=0
-    fun watchEnabledList(context:Context){
-        if(enabledObserver!=null||SystemClock.elapsedRealtime()>=300000)return
-        if(androidx.core.content.ContextCompat.checkSelfPermission(context,android.Manifest.permission.WRITE_SECURE_SETTINGS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)return
-        val app=context.applicationContext
+    private val recovery = Handler(Looper.getMainLooper())
+    private val stateLock = Any()
+    private var recoveryPending = false
+    private var lastRebind = -60000L
+    private var lastRescan = -60000L
+    @Volatile private var rebinding = false
+    private val handoverRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+    private var enabledObserver: ContentObserver? = null
+    private var watchTries = 0
+
+    fun watchEnabledList(context: Context) {
+        if (SystemClock.elapsedRealtime() >= 300000) return
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.WRITE_SECURE_SETTINGS
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) return
+        val app = context.applicationContext
         // Aerial c21c8f3: the firmware's rewrite lands once and settles; recheck
         // 1.5 s after a change instead of racing it, and count only the times
         // the guard actually had to be put back, at most three per boot.
-        val recheck=object:Runnable{override fun run(){
-            AppThreads.onState{
+        val recheck = Runnable {
+            AppThreads.onState {
                 DesktopState.refreshNow(app)
                 DeviceProfile.invalidate(app)
-                if(!rebinding&&!standbyOut&&wanted(app)&&!DesktopState.guardListed&&watchTries<3&&ensureGuard(app))watchTries++
+                val shouldWrite = synchronized(stateLock) { !rebinding && !standbyOut && wanted(app) && !DesktopState.guardListed && watchTries < 3 }
+                if (shouldWrite && ensureGuard(app)) {
+                    synchronized(stateLock) { watchTries++ }
+                }
             }
-        }}
-        val obs=object:ContentObserver(recovery){
-            override fun onChange(selfChange:Boolean){
-                if(SystemClock.elapsedRealtime()>=300000){
-                    enabledObserver=null
-                    runCatching{app.contentResolver.unregisterContentObserver(this)}
+        }
+        val obs = object : ContentObserver(recovery) {
+            override fun onChange(selfChange: Boolean) {
+                if (SystemClock.elapsedRealtime() >= 300000) {
+                    val toUnregister = synchronized(stateLock) {
+                        if (enabledObserver === this) enabledObserver = null
+                        this
+                    }
+                    runCatching { app.contentResolver.unregisterContentObserver(toUnregister) }
                     return
                 }
                 recovery.removeCallbacks(recheck)
-                recovery.postDelayed(recheck,1500)
+                recovery.postDelayed(recheck, 1500)
             }
         }
-        runCatching{app.contentResolver.registerContentObserver(Settings.Secure.getUriFor("enabled_notification_listeners"),false,obs)}
-        if(runCatching{app.contentResolver.registerContentObserver(Settings.Secure.getUriFor(Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES),false,obs)}.isSuccess){
-            enabledObserver=obs
-            recovery.removeCallbacks(unwatchEnabled)
-            recovery.postDelayed({
-                if(enabledObserver===obs){
-                    enabledObserver=null
-                    runCatching{app.contentResolver.unregisterContentObserver(obs)}
-                }
-            },(300000L-SystemClock.elapsedRealtime()).coerceAtLeast(1000L))
+        synchronized(stateLock) {
+            if (enabledObserver != null) return
+            val registered = runCatching {
+                app.contentResolver.registerContentObserver(Settings.Secure.getUriFor("enabled_notification_listeners"), false, obs)
+                app.contentResolver.registerContentObserver(Settings.Secure.getUriFor(Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES), false, obs)
+            }.isSuccess
+            if (!registered) {
+                runCatching { app.contentResolver.unregisterContentObserver(obs) }
+                return
+            }
+            enabledObserver = obs
         }
+        recovery.postDelayed({
+            val stale = synchronized(stateLock) {
+                if (enabledObserver === obs) {
+                    enabledObserver = null
+                    obs
+                } else null
+            }
+            stale?.let { runCatching { app.contentResolver.unregisterContentObserver(it) } }
+        }, (300000L - SystemClock.elapsedRealtime()).coerceAtLeast(1000L))
     }
     private fun rescanIfMissing(context:Context){
         if(Build.VERSION.SDK_INT>22||!enabled(context)||SystemClock.elapsedRealtime()-lastRescan<60000)return
@@ -184,68 +200,94 @@ object DesktopTakeover {
             if(Settings.Global.getInt(resolver,Settings.Global.ADB_ENABLED,0)!=1)Settings.Global.putInt(resolver,Settings.Global.ADB_ENABLED,1)
         }
     }
-    private var adbObserver:ContentObserver?=null
-    private fun watchAdb(context:Context){
-        val app=context.applicationContext
-        if(!wanted(app)){
-            adbObserver?.let{runCatching{app.contentResolver.unregisterContentObserver(it)}};adbObserver=null
+    private var adbObserver: ContentObserver? = null
+    private fun watchAdb(context: Context) {
+        val app = context.applicationContext
+        if (!wanted(app)) {
+            val prev = synchronized(stateLock) { adbObserver.also { adbObserver = null } }
+            prev?.let { runCatching { app.contentResolver.unregisterContentObserver(it) } }
             return
         }
-        if(adbObserver!=null)return
-        val reopen=Runnable{reopenAdb(app)}
-        val obs=object:ContentObserver(recovery){override fun onChange(selfChange:Boolean){recovery.removeCallbacks(reopen);recovery.postDelayed(reopen,1500)}}
-        if(runCatching{app.contentResolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ADB_ENABLED),false,obs)}.isSuccess)adbObserver=obs
+        val reopen = Runnable { reopenAdb(app) }
+        val obs = object : ContentObserver(recovery) {
+            override fun onChange(selfChange: Boolean) {
+                recovery.removeCallbacks(reopen)
+                recovery.postDelayed(reopen, 1500)
+            }
+        }
+        synchronized(stateLock) {
+            if (adbObserver != null) return
+            if (runCatching { app.contentResolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ADB_ENABLED), false, obs) }.isSuccess) {
+                adbObserver = obs
+            }
+        }
     }
-    fun recover(context:Context){
-        val app=context.applicationContext
+    fun recover(context: Context) {
+        val app = context.applicationContext
         DesktopState.refresh(app)
         DeviceProfile.warm(app)
-        if(!unlocked(app)){afterUnlock(app);return}
-        reopenAdb(app);watchAdb(app)
-        if(!wanted(app))return
-        if(standbyOut)return
+        if (!unlocked(app)) { afterUnlock(app); return }
+        reopenAdb(app)
+        watchAdb(app)
+        if (!wanted(app)) return
+        if (standbyOut) return
         restoreHomeEntry(app)
-        restoreDisabledComponent(app,ComponentName(app,BootReceiver::class.java))
-        if(SystemClock.elapsedRealtime()<180000){
-            for(delay in longArrayOf(5000L,15000L)){
+        restoreDisabledComponent(app, ComponentName(app, BootReceiver::class.java))
+        if (SystemClock.elapsedRealtime() < 180000) {
+            for (delay in longArrayOf(5000L, 15000L)) {
                 recovery.postDelayed({
-                    if(wanted(app)){
+                    if (wanted(app)) {
                         restoreHomeEntry(app)
-                        restoreDisabledComponent(app,ComponentName(app,BootReceiver::class.java))
+                        restoreDisabledComponent(app, ComponentName(app, BootReceiver::class.java))
                     }
-                },delay)
+                }, delay)
             }
         }
         rescanIfMissing(app)
         watchEnabledList(app)
-        if(!ensureGuard(app)&&!enabled(app))return
+        if (!ensureGuard(app) && !enabled(app)) return
         DesktopRecovery.ensure(app)
-        if(DesktopGuardService.connected||recoveryPending)return
-        recoveryPending=true
+        val shouldSchedule = synchronized(stateLock) {
+            if (DesktopGuardService.connected || recoveryPending) false
+            else {
+                recoveryPending = true
+                true
+            }
+        }
+        if (!shouldSchedule) return
         recovery.postDelayed({
-            recoveryPending=false
+            synchronized(stateLock) { recoveryPending = false }
             rebindIfStalled(app)
-        },5000)
+        }, 5000)
     }
-    internal fun rebindIfStalled(context:Context,unresponsive:Boolean=false){
-        if(!wanted(context)||standbyOut||(!unresponsive&&DesktopGuardService.connected)||!enabled(context)||SystemClock.elapsedRealtime()-lastRebind<60000)return
-        if(androidx.core.content.ContextCompat.checkSelfPermission(context,android.Manifest.permission.WRITE_SECURE_SETTINGS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)return
-        val resolver=context.contentResolver
-        val me=ComponentName(context,DesktopGuardService::class.java)
-        fun others()=Settings.Secure.getString(resolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().split(':').filter{it.isNotBlank()&&ComponentName.unflattenFromString(it)!=me}
-        runCatching{
-            val reset=unresponsive&&Build.VERSION.SDK_INT<=23&&others().isEmpty()
-            rebinding=true
-            Settings.Secure.putString(resolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,others().joinToString(":"))
-            DesktopState.noteGuardWrite(context,false)
-            if(reset)Settings.Secure.putInt(resolver,Settings.Secure.ACCESSIBILITY_ENABLED,0)
-            lastRebind=SystemClock.elapsedRealtime()
+    internal fun rebindIfStalled(context: Context, unresponsive: Boolean = false) {
+        if (!wanted(context) || standbyOut || (!unresponsive && DesktopGuardService.connected) || !enabled(context)) return
+        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.WRITE_SECURE_SETTINGS) != android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        val now = SystemClock.elapsedRealtime()
+        synchronized(stateLock) {
+            if (now - lastRebind < 60000) return
+            lastRebind = now
+            rebinding = true
+        }
+        val resolver = context.contentResolver
+        val me = ComponentName(context, DesktopGuardService::class.java)
+        fun others() = Settings.Secure.getString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().split(':').filter { it.isNotBlank() && ComponentName.unflattenFromString(it) != me }
+        runCatching {
+            val reset = unresponsive && Build.VERSION.SDK_INT <= 23 && others().isEmpty()
+            Settings.Secure.putString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, others().joinToString(":"))
+            DesktopState.noteGuardWrite(context, false)
+            if (reset) Settings.Secure.putInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 0)
             recovery.postDelayed({
-                rebinding=false
-                if(wanted(context)&&!standbyOut)runCatching{Settings.Secure.putString(resolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,(others()+me.flattenToString()).joinToString(":"));DesktopState.noteGuardWrite(context,true)}
-                if(reset&&Settings.Secure.getString(resolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().isNotBlank())runCatching{Settings.Secure.putInt(resolver,Settings.Secure.ACCESSIBILITY_ENABLED,1)}
-            },1500)
-        }.onFailure{rebinding=false}
+                rebinding = false
+                if (wanted(context) && !standbyOut) runCatching {
+                    Settings.Secure.putString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, (others() + me.flattenToString()).joinToString(":"))
+                    DesktopState.noteGuardWrite(context, true)
+                }
+                if (reset && Settings.Secure.getString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().isNotBlank()) {
+                    runCatching { Settings.Secure.putInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1) }
+                }
+            }, 1500)
+        }.onFailure { rebinding = false }
     }
     private const val BOOT_APP_NOT_RESTORED="开机启动项仍指向 One：请连接 ADB 后再点一次「还原原桌面」，卸载前请先完成还原"
     const val ATTEMPT="com.tvbridge.app.BOOT_ATTEMPT"
@@ -486,10 +528,19 @@ object DesktopTakeover {
     private fun pending(context:Context,token:String="",step:Int=0)=PendingIntent.getBroadcast(context,REQUEST,Intent(context,BootAttemptReceiver::class.java).setAction(ATTEMPT).putExtra("token",token).putExtra("step",step),PendingIntent.FLAG_UPDATE_CURRENT or if(Build.VERSION.SDK_INT>=23)PendingIntent.FLAG_IMMUTABLE else 0)
     fun cancel(context:Context){
         (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager).cancel(pending(context));prefs(context).edit().remove("boot_token").apply()
-        if(!wanted(context)){
-            standbyOut=false;standbyWatch?.let{runCatching{context.applicationContext.unregisterReceiver(it)}};standbyWatch=null
-            enabledObserver?.let{runCatching{context.applicationContext.contentResolver.unregisterContentObserver(it)}};enabledObserver=null
-            removeGuard(context);DesktopRecovery.stop(context)
+        if (!wanted(context)) {
+            standbyOut = false
+            standbyWatch?.let { runCatching { context.applicationContext.unregisterReceiver(it) } }
+            standbyWatch = null
+            val (prevEnabled, prevAdb) = synchronized(stateLock) {
+                val e = enabledObserver; enabledObserver = null
+                val a = adbObserver; adbObserver = null
+                e to a
+            }
+            prevEnabled?.let { runCatching { context.applicationContext.contentResolver.unregisterContentObserver(it) } }
+            prevAdb?.let { runCatching { context.applicationContext.contentResolver.unregisterContentObserver(it) } }
+            removeGuard(context)
+            DesktopRecovery.stop(context)
         }
     }
     fun schedule(context:Context){

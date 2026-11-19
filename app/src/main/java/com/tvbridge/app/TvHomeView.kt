@@ -98,7 +98,32 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             springPosted=true;choreographer.postFrameCallback(this)
         }
     }
-    private fun applyScroll(){applyRowAlphas();requestLayout();invalidate()}
+    private fun applyScrollTransforms() {
+        val railOffset = -scrollY * scale
+        appRail.translationY = railOffset
+        val lift = (liftFrac / .55f).coerceIn(0f, 1f)
+        val dissolve = lift * lift * (3f - 2f * lift)
+        val swell = 28f * scale * dissolve
+        plateView.translationY = railOffset
+        plateView.scaleX = 1f + 2f * swell / plateView.measuredWidth.coerceAtLeast(1)
+        plateView.scaleY = 1f + 2f * swell / plateView.measuredHeight.coerceAtLeast(1)
+        plateView.alpha = 1f - dissolve
+    }
+    private fun applyScroll() {
+        applyRowAlphas()
+        applyScrollTransforms()
+        invalidate()
+    }
+    private fun railTopY(): Float = appRail.top + appRail.translationY
+    private fun invalidateTileShadow(tile: AppTileView) {
+        if (liftFrac <= 0.01f || moving != null) return
+        val pad = (64f * scale).toInt()
+        val l = (appRail.left + tile.left - pad).coerceAtLeast(0)
+        val t = (railTopY() + tile.top - pad).toInt().coerceAtLeast(0)
+        val r = (appRail.left + tile.right + pad).coerceAtMost(width)
+        val b = (railTopY() + tile.bottom + pad + (30f * scale).toInt()).toInt().coerceAtMost(height)
+        if (r > l && b > t) invalidate(l, t, r, b)
+    }
     /** Aerial's hiddenFrom rule: rows below the shelf are out of sight at rest and fade in
      *  as Home lifts into the grid. */
     private fun applyRowAlphas(){val a=gridAlpha();tiles.forEachIndexed{i,tile->tile.alpha=if(i<cols)1f else a;tile.plateFrac=1f-liftFrac}}
@@ -203,7 +228,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             val tile=AppTileView(context)
             tile.title=title;tile.contentDescription=title;tile.id=generateViewId()
             tile.focusHook={focus->if(focus){val key=tileKey(tile);rememberedFocus=key;lastGridFocus=key;controlButton.nextFocusDownId=tile.id;focusedTile=tile;onTileFocused(tile)}else if(focusedTile==tile)focusedTile=null;invalidate()}
-            tile.focusAnimHook={invalidate()}
+            tile.focusAnimHook = { invalidateTileShadow(tile) }
             tiles.add(tile);appRow.addView(tile)
             return tile
         }
@@ -725,113 +750,159 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         plateView.measure(MeasureSpec.makeMeasureSpec(minOf(cols*tileWidth+(cols-1)*tileGap+(80*scale).toInt(),w).coerceAtLeast(0),MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec((tileHeight+(80*scale).toInt()),MeasureSpec.EXACTLY))
         controlButton.measure(MeasureSpec.makeMeasureSpec((76*scale).toInt(),MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec((76*scale).toInt(),MeasureSpec.EXACTLY))
     }
-    override fun onLayout(changed:Boolean,l:Int,t:Int,r:Int,b:Int){
-        val railTop=(oy+(topRowY-scrollY)*scale).toInt()
-        val ax=gridMargin
-        appRail.layout(ax,railTop,ax+appRail.measuredWidth,railTop+appRail.measuredHeight)
-        val plateLeft=(gridMargin-(40*scale).toInt()).coerceAtLeast(0);val plateTop=(oy+(topRowY-40)*scale).toInt()
-        plateView.layout(plateLeft,plateTop,plateLeft+plateView.measuredWidth,plateTop+plateView.measuredHeight)
-        val lift=(liftFrac/.55f).coerceIn(0f,1f)
-        val dissolve=lift*lift*(3f-2f*lift)
-        val swell=28f*scale*dissolve
-        plateView.translationY=-scrollY*scale
-        plateView.scaleX=1f+2f*swell/plateView.measuredWidth.coerceAtLeast(1)
-        plateView.scaleY=1f+2f*swell/plateView.measuredHeight.coerceAtLeast(1)
-        plateView.alpha=1f-dissolve
-        val right=(width-96*scale).toInt();val cy=(oy+58*scale).toInt()
-        controlButton.layout(right-controlButton.measuredWidth,cy,right,cy+controlButton.measuredHeight)
-        tiles.forEach{tile->
-            val isMoving=moving==tileKey(tile)
-            tile.contentDescription=tile.title+(if(isMoving)"，移动中" else "")
-            tile.isSelected=isMoving
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        val railTop = (oy + topRowY * scale).toInt()
+        val ax = gridMargin
+        appRail.layout(ax, railTop, ax + appRail.measuredWidth, railTop + appRail.measuredHeight)
+        val plateLeft = (gridMargin - (40 * scale).toInt()).coerceAtLeast(0)
+        val plateTop = (oy + (topRowY - 40) * scale).toInt()
+        plateView.layout(plateLeft, plateTop, plateLeft + plateView.measuredWidth, plateTop + plateView.measuredHeight)
+        applyScrollTransforms()
+        val right = (width - 96 * scale).toInt()
+        val cy = (oy + 58 * scale).toInt()
+        controlButton.layout(right - controlButton.measuredWidth, cy, right, cy + controlButton.measuredHeight)
+        tiles.forEach { tile ->
+            val isMoving = moving == tileKey(tile)
+            val expectedDesc = tile.title + (if (isMoving) "，移动中" else "")
+            if (tile.contentDescription != expectedDesc) tile.contentDescription = expectedDesc
+            if (tile.isSelected != isMoving) tile.isSelected = isMoving
             // Folder tiles sit on real frosted glass (the same wallpaper frost as
             // the plate and the menus); the artwork itself only draws the minis.
-            if(tile.background==null&&(tile.tag as? String)?.startsWith("folder:")==true){
-                tile.background=GlassUi.homeGlass(tile,(tile.height/scale*0.225f).coerceAtLeast(1f))
+            if (tile.background == null && (tile.tag as? String)?.startsWith("folder:") == true) {
+                tile.background = GlassUi.homeGlass(tile, (tile.height / scale * 0.225f).coerceAtLeast(1f))
             }
         }
     }
     /** Ellipsised tile names are cached per tile: dispatchDraw runs per frame and
      *  re-measuring every name on every frame is wasted work on TV hardware. */
-    private fun tileLabel(tile:AppTileView,focused:Boolean):String{
-        val key="${tile.title}|${tile.width}|$focused|${(30f*scale).toInt()}"
-        labelCache[tile]?.let{if(it[0]==key)return it[1] as String}
-        paint.typeface=if(focused)bold else regular;paint.textSize=30f*scale
-        val label=android.text.TextUtils.ellipsize(tile.title,paint,tile.width.toFloat(),android.text.TextUtils.TruncateAt.END).toString()
-        labelCache[tile]=arrayOf(key,label)
+    private fun tileLabel(tile: AppTileView, focused: Boolean): String {
+        val key = "${tile.title}|${tile.width}|$focused|${(30f * scale).toInt()}"
+        labelCache[tile]?.let { if (it[0] == key) return it[1] as String }
+        paint.typeface = if (focused) bold else regular
+        paint.textSize = 30f * scale
+        val label = android.text.TextUtils.ellipsize(tile.title, paint, tile.width.toFloat(), android.text.TextUtils.TruncateAt.END).toString()
+        labelCache[tile] = arrayOf(key, label)
         return label
     }
-    private val shadowPaint=Paint(Paint.FILTER_BITMAP_FLAG)
-    private class BakedShadow(val bitmap:Bitmap,val ext:Int)
-    private var bakedShadow:BakedShadow?=null
-    private var bakedShadowW=0
-    private var bakedShadowH=0
+    private val shadowPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val frostRect = RectF()
+    private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    private val arrowPath = Path()
+    private var cachedClockKey = ""
+    private var cachedTimeText = ""
+    private var cachedDateText = ""
+    private class BakedShadow(val bitmap: Bitmap, val ext: Int)
+    private var bakedShadow: BakedShadow? = null
+    private var bakedShadowW = 0
+    private var bakedShadowH = 0
     /** Baked once per tile size, Aerial-style: the tile's rounded outline filled
      *  with black at 70% and blurred with a real BlurMaskFilter, so the falloff is
      *  a true soft shadow rather than stacked strokes. The bake runs on a software
      *  bitmap canvas, where the mask filter applies on every API level; drawing
      *  the result is a plain bitmap draw. */
-    private fun focusShadow(w:Int,h:Int):BakedShadow?{
-        if(w<=0||h<=0)return null
-        bakedShadow?.takeIf{bakedShadowW==w&&bakedShadowH==h}?.let{return it}
-        val blur=(26f*scale).coerceAtLeast(1f)
-        val ext=kotlin.math.ceil(blur*1.5f).toInt()
-        val bitmap=Bitmap.createBitmap(w+2*ext,h+2*ext,Bitmap.Config.ARGB_8888)
-        val bc=Canvas(bitmap)
-        bc.translate(ext.toFloat(),ext.toFloat())
-        val p=Paint(Paint.ANTI_ALIAS_FLAG)
-        p.color=0xb3000000.toInt()
-        p.maskFilter=android.graphics.BlurMaskFilter(blur,android.graphics.BlurMaskFilter.Blur.NORMAL)
-        bc.drawPath(GlassUi.SmoothCorners.smoothRect(RectF(0f,0f,w.toFloat(),h.toFloat()),h*0.225f,h*0.225f),p)
-        return BakedShadow(bitmap,ext).also{bakedShadow=it;bakedShadowW=w;bakedShadowH=h}
+    private fun focusShadow(w: Int, h: Int): BakedShadow? {
+        if (w <= 0 || h <= 0) return null
+        bakedShadow?.takeIf { bakedShadowW == w && bakedShadowH == h }?.let { return it }
+        val blur = (26f * scale).coerceAtLeast(1f)
+        val ext = kotlin.math.ceil(blur * 1.5f).toInt()
+        val bitmap = Bitmap.createBitmap(w + 2 * ext, h + 2 * ext, Bitmap.Config.ARGB_8888)
+        val bc = Canvas(bitmap)
+        bc.translate(ext.toFloat(), ext.toFloat())
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        p.color = 0xb3000000.toInt()
+        p.maskFilter = android.graphics.BlurMaskFilter(blur, android.graphics.BlurMaskFilter.Blur.NORMAL)
+        bc.drawPath(GlassUi.SmoothCorners.smoothRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), h * 0.225f, h * 0.225f), p)
+        return BakedShadow(bitmap, ext).also { bakedShadow = it; bakedShadowW = w; bakedShadowH = h }
     }
-    override fun dispatchDraw(canvas:Canvas){
+    override fun dispatchDraw(canvas: Canvas) {
         super.dispatchDraw(canvas)
+        val railY = railTopY()
         // At rest the only name is the focused tile's caption, and never on the
         // shelf row (it rests on the glass plate); from the second row down the
         // caption sits in the name room the grid pitch already reserves.
-        val focused=focusedTile
-        if(focused!=null&&moving==null&&tiles.indexOf(focused)>=cols){
-            paint.style=Paint.Style.FILL;paint.textAlign=Paint.Align.CENTER
-            paint.typeface=bold;paint.textSize=30f*scale;paint.color=ink;paint.alpha=255
-            paint.setShadowLayer(9f*scale,0f,3f*scale,if(darkHome)0x65000000.toInt() else 0x50ffffff)
-            val cx=appRail.left+focused.left+focused.width/2f
-            val bottom=appRail.top+focused.top+focused.height
-            canvas.drawText(tileLabel(focused,true),cx,bottom+36f*scale,paint)
-            paint.textAlign=Paint.Align.LEFT;paint.clearShadowLayer();paint.alpha=255
+        val focused = focusedTile
+        if (focused != null && moving == null && tiles.indexOf(focused) >= cols) {
+            paint.style = Paint.Style.FILL
+            paint.textAlign = Paint.Align.CENTER
+            paint.typeface = bold
+            paint.textSize = 30f * scale
+            paint.color = ink
+            paint.alpha = 255
+            paint.setShadowLayer(9f * scale, 0f, 3f * scale, if (darkHome) 0x65000000.toInt() else 0x50ffffff)
+            val cx = appRail.left + focused.left + focused.width / 2f
+            val bottom = railY + focused.top + focused.height
+            canvas.drawText(tileLabel(focused, true), cx, bottom + 36f * scale, paint)
+            paint.textAlign = Paint.Align.LEFT
+            paint.clearShadowLayer()
+            paint.alpha = 255
         }
 
-        // Lifted into the full grid, every tile earns its name: the names fade in
-        // with the lift itself — the same fraction that frosts the backdrop and
-        // dissolves the plate — under every tile except the one already carrying
-        // the bold focus caption. On the plate at rest, no names show at all.
-        val lift=liftFrac
-        if(lift>0.01f&&moving==null){
-            paint.style=Paint.Style.FILL;paint.textAlign=Paint.Align.CENTER
-            paint.typeface=regular;paint.textSize=30f*scale;paint.color=ink
-            tiles.forEachIndexed{i,tile->
-                if(tile===focused&&i>=cols)return@forEachIndexed
-                val a=(lift*(if(i<cols)1f else gridAlpha())*255).toInt().coerceIn(0,255)
-                if(a<=2)return@forEachIndexed
-                paint.alpha=a
-                paint.setShadowLayer(9f*scale,0f,3f*scale,if(darkHome)Color.argb((0x65*lift).toInt(),0,0,0) else Color.argb((0x50*lift).toInt(),255,255,255))
-                val cx=appRail.left+tile.left+tile.width/2f
-                val bottom=appRail.top+tile.top+tile.height
-                canvas.drawText(tileLabel(tile,false),cx,bottom+36f*scale,paint)
+        // Lifted into the full grid, every tile earns its name: set shadow layer
+        // once per frame and skip tiles scrolled out of the viewport.
+        val lift = liftFrac
+        if (lift > 0.01f && moving == null) {
+            paint.style = Paint.Style.FILL
+            paint.textAlign = Paint.Align.CENTER
+            paint.typeface = regular
+            paint.textSize = 30f * scale
+            paint.color = ink
+            paint.setShadowLayer(
+                9f * scale, 0f, 3f * scale,
+                if (darkHome) Color.argb((0x65 * lift).toInt(), 0, 0, 0) else Color.argb((0x50 * lift).toInt(), 255, 255, 255)
+            )
+            val gAlpha = gridAlpha()
+            val captionOffset = 36f * scale
+            val viewH = height.toFloat()
+            tiles.forEachIndexed { i, tile ->
+                if (tile === focused && i >= cols) return@forEachIndexed
+                val bottom = railY + tile.top + tile.height
+                val textY = bottom + captionOffset
+                if (textY < -40f * scale || textY - 40f * scale > viewH) return@forEachIndexed
+                val a = (lift * (if (i < cols) 1f else gAlpha) * 255).toInt().coerceIn(0, 255)
+                if (a <= 2) return@forEachIndexed
+                paint.alpha = a
+                val cx = appRail.left + tile.left + tile.width / 2f
+                canvas.drawText(tileLabel(tile, false), cx, textY, paint)
             }
-            paint.textAlign=Paint.Align.LEFT;paint.clearShadowLayer();paint.alpha=255
+            paint.textAlign = Paint.Align.LEFT
+            paint.clearShadowLayer()
+            paint.alpha = 255
         }
 
-        val entry=moving?:return
-        val tile=tiles.firstOrNull{tileKey(it)==entry}?:return
-        val x=appRail.left+tile.left.toFloat();val y=appRail.top+tile.top+tile.height*.5f
-        val index=tiles.indexOf(tile)
-        val arrowPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=ink;style=Paint.Style.STROKE;strokeWidth=2.5f*scale;strokeCap=Paint.Cap.ROUND;strokeJoin=Paint.Join.ROUND}
-        fun arrow(center:Float,left:Boolean,enabled:Boolean){arrowPaint.alpha=if(enabled)255 else 65;val sign=if(left)-1 else 1;val p=Path();p.moveTo(center-sign*3*scale,y-6*scale);p.lineTo(center+sign*3*scale,y);p.lineTo(center-sign*3*scale,y+6*scale);canvas.drawPath(p,arrowPaint)}
-        arrow(x+13*scale,true,index%cols>0);arrow(x+tile.width-13*scale,false,index%cols<cols-1&&index<tiles.lastIndex)
-        val cx=x+tile.width/2f
-        fun vArrow(centerY:Float,up:Boolean,enabled:Boolean){arrowPaint.alpha=if(enabled)255 else 65;val sign=if(up)-1 else 1;val p=Path();p.moveTo(cx-6*scale,centerY-sign*3*scale);p.lineTo(cx,centerY+sign*3*scale);p.lineTo(cx+6*scale,centerY-sign*3*scale);canvas.drawPath(p,arrowPaint)}
-        vArrow(appRail.top+tile.top+13*scale,true,index>=cols);vArrow(appRail.top+tile.top+tile.height-13*scale,false,index/cols+1<rows)
+        val entry = moving ?: return
+        val tile = tiles.firstOrNull { tileKey(it) == entry } ?: return
+        val x = appRail.left + tile.left.toFloat()
+        val y = railY + tile.top + tile.height * .5f
+        val index = tiles.indexOf(tile)
+        arrowPaint.color = ink
+        arrowPaint.strokeWidth = 2.5f * scale
+        fun arrow(center: Float, left: Boolean, enabled: Boolean) {
+            arrowPaint.alpha = if (enabled) 255 else 65
+            val sign = if (left) -1 else 1
+            arrowPath.reset()
+            arrowPath.moveTo(center - sign * 3 * scale, y - 6 * scale)
+            arrowPath.lineTo(center + sign * 3 * scale, y)
+            arrowPath.lineTo(center - sign * 3 * scale, y + 6 * scale)
+            canvas.drawPath(arrowPath, arrowPaint)
+        }
+        arrow(x + 13 * scale, true, index % cols > 0)
+        arrow(x + tile.width - 13 * scale, false, index % cols < cols - 1 && index < tiles.lastIndex)
+        val cx = x + tile.width / 2f
+        fun vArrow(centerY: Float, up: Boolean, enabled: Boolean) {
+            arrowPaint.alpha = if (enabled) 255 else 65
+            val sign = if (up) -1 else 1
+            arrowPath.reset()
+            arrowPath.moveTo(cx - 6 * scale, centerY - sign * 3 * scale)
+            arrowPath.lineTo(cx, centerY + sign * 3 * scale)
+            arrowPath.lineTo(cx + 6 * scale, centerY - sign * 3 * scale)
+            canvas.drawPath(arrowPath, arrowPaint)
+        }
+        vArrow(railY + tile.top + 13 * scale, true, index >= cols)
+        vArrow(railY + tile.top + tile.height - 13 * scale, false, index / cols + 1 < rows)
     }
     fun update(base:String,pin:String,invite:String,count:Int,message:String){
         val minute=System.currentTimeMillis()/60000
@@ -853,63 +924,80 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         (target?:tiles.firstOrNull())?.requestFocus()
     }
     private fun text(c:Canvas,value:String,x:Float,y:Float,size:Float,color:Int=ink,strong:Boolean=false){paint.shader=null;paint.color=color;paint.textSize=size;paint.typeface=if(strong)bold else regular;c.drawText(value,x,y,paint)}
-    override fun onDraw(c:Canvas){
+    private fun ensureClockStrings() {
+        val nowMs = System.currentTimeMillis()
+        val zone = java.util.TimeZone.getDefault()
+        val key = "${nowMs / 60000}:${zone.id}"
+        if (cachedClockKey == key) return
+        cachedClockKey = key
+        timeFormat.timeZone = zone
+        dateFormat.timeZone = zone
+        val date = java.util.Date(nowMs)
+        cachedTimeText = timeFormat.format(date)
+        cachedDateText = dateFormat.format(date)
+    }
+    override fun onDraw(c: Canvas) {
         super.onDraw(c)
-        paint.shader=null;paint.isFilterBitmap=true
-        if(drawsBackdrop)HomeAppearance.drawBackdrop(context,c,width,height,darkHome,paint)
+        paint.shader = null
+        paint.isFilterBitmap = true
+        if (drawsBackdrop) HomeAppearance.drawBackdrop(context, c, width, height, darkHome, paint)
         // Pulling the grid up frosts the whole backdrop (Aerial's lifted grid):
         // the wallpaper frost under a shade of black, fading in with the lift so
         // the tiles read against glass instead of a sharp photo.
-        val lift=liftFrac
-        if(lift>0.01f){
-            GlassUi.snapshot(context)?.let{frost->
-                paint.alpha=(lift*255).toInt().coerceIn(0,255)
-                c.drawBitmap(frost.bitmap,null,RectF(0f,0f,width.toFloat(),height.toFloat()),paint)
-                paint.style=Paint.Style.FILL;paint.color=Color.BLACK
-                paint.alpha=(lift*96).toInt().coerceIn(0,96)
-                c.drawRect(0f,0f,width.toFloat(),height.toFloat(),paint)
-                paint.alpha=255
+        val lift = liftFrac
+        if (lift > 0.01f) {
+            GlassUi.snapshot(context)?.let { frost ->
+                frostRect.set(0f, 0f, width.toFloat(), height.toFloat())
+                paint.alpha = (lift * 255).toInt().coerceIn(0, 255)
+                c.drawBitmap(frost.bitmap, null, frostRect, paint)
+                paint.style = Paint.Style.FILL
+                paint.color = Color.BLACK
+                paint.alpha = (lift * 96).toInt().coerceIn(0, 96)
+                c.drawRect(frostRect, paint)
+                paint.alpha = 255
             }
         }
         // The focused tile's soft shadow, under the tiles: a bitmap baked once per
-        // tile size (the outline filled black and blurred for real), drawn dropped
-        // and faded by the tile's own focus fraction. One bitmap draw per frame.
-        val ft=focusedTile
-        if(ft!=null&&moving==null){
-            val frac=ft.focusFraction
-            if(frac>0.01f){
-                focusShadow(ft.width,ft.height)?.let{shadow->
-                    val cx=appRail.left+ft.left+ft.width/2f;val cy=appRail.top+ft.top+ft.height/2f
-                    val grow=1f+0.05f*frac
-                    // The shadow belongs to the lifted grid: on the plate the tile
-                    // answers focus with its lit rim instead (see AppTileView).
-                    shadowPaint.alpha=(frac*lift*255).toInt().coerceIn(0,255)
+        // tile size, drawn dropped and faded by the tile's own focus fraction.
+        val ft = focusedTile
+        if (ft != null && moving == null && lift > 0.01f) {
+            val frac = ft.focusFraction
+            if (frac > 0.01f) {
+                focusShadow(ft.width, ft.height)?.let { shadow ->
+                    val railY = railTopY()
+                    val cx = appRail.left + ft.left + ft.width / 2f
+                    val cy = railY + ft.top + ft.height / 2f
+                    val grow = 1f + 0.05f * frac
+                    shadowPaint.alpha = (frac * lift * 255).toInt().coerceIn(0, 255)
                     c.save()
-                    c.translate(cx,cy+(24f*scale)*frac);c.scale(grow,grow);c.translate(-cx,-cy)
-                    c.drawBitmap(shadow.bitmap,cx-ft.width/2f-shadow.ext,cy-ft.height/2f-shadow.ext,shadowPaint)
+                    c.translate(cx, cy + (24f * scale) * frac)
+                    c.scale(grow, grow)
+                    c.translate(-cx, -cy)
+                    c.drawBitmap(shadow.bitmap, cx - ft.width / 2f - shadow.ext, cy - ft.height / 2f - shadow.ext, shadowPaint)
                     c.restore()
-                    shadowPaint.alpha=255
+                    shadowPaint.alpha = 255
                 }
             }
         }
-        c.save();c.translate(0f,oy);c.scale(scale,scale)
-        val now=java.util.Date();val zone=java.util.TimeZone.getDefault();timeFormat.timeZone=zone;dateFormat.timeZone=zone
-        val time=timeFormat.format(now)
-        val fade=shelfAlpha()
-        if(fade>0f){
-            fun faded(color:Int)=Color.argb((Color.alpha(color)*fade).toInt(),Color.red(color),Color.green(color),Color.blue(color))
-            paint.style=Paint.Style.FILL
-            val foreground=if(darkHome)Color.WHITE else 0xff162638.toInt()
-            paint.setShadowLayer(9f,0f,3f,faded(if(darkHome)0x65000000 else 0x50ffffff))
-            text(c,dateFormat.format(now),120f,364f,43f,color=faded(foreground),strong=true)
-            paint.shader=null
-            paint.typeface=clockFont
-            paint.textSize=168f
-            paint.color=faded(foreground)
-            c.drawText(time,120f,297f,paint)
+        val fade = shelfAlpha()
+        if (fade > 0f) {
+            ensureClockStrings()
+            c.save()
+            c.translate(0f, oy)
+            c.scale(scale, scale)
+            fun faded(color: Int) = Color.argb((Color.alpha(color) * fade).toInt(), Color.red(color), Color.green(color), Color.blue(color))
+            paint.style = Paint.Style.FILL
+            val foreground = if (darkHome) Color.WHITE else 0xff162638.toInt()
+            paint.setShadowLayer(9f, 0f, 3f, faded(if (darkHome) 0x65000000 else 0x50ffffff))
+            text(c, cachedDateText, 120f, 364f, 43f, color = faded(foreground), strong = true)
+            paint.shader = null
+            paint.typeface = clockFont
+            paint.textSize = 168f
+            paint.color = faded(foreground)
+            c.drawText(cachedTimeText, 120f, 297f, paint)
             paint.clearShadowLayer()
+            c.restore()
         }
-        c.restore()
     }
     private fun connectionSummary()=listOf(if(connected>0)"手机已连接" else "扫码连接",address.ifEmpty{"请先联网"},if(code.isNotEmpty())"配对码  $code" else "").filter{it.isNotEmpty()}.joinToString("\n")
     private fun connectionLine()=listOf(address.ifEmpty{"请先联网"},if(code.isNotEmpty())"配对码  $code" else "").filter{it.isNotEmpty()}.joinToString("    ")
