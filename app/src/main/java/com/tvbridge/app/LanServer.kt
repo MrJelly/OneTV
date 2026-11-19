@@ -118,90 +118,285 @@ class LanServer(base:File,html:InputStream,private val onFatal: ((LanServer) -> 
         val out=ByteArrayOutputStream()
         while(true){val c=input.read();if(c<0)throw EOFException();if(c==10)return out.toString("US-ASCII").replace("\r","");if(out.size()>=8192)throw IOException("Header too long");out.write(c)}
     }
-    private fun handle(socket:Socket){
-        try{socket.use{s->
-            try{
-            val input=BufferedInputStream(s.getInputStream());val out=s.getOutputStream()
-            val first=line(input).split(' ');if(first.size!=3){reply(out,400,"Bad request");return}
-            val headers=HashMap<String,String>();var total=0
-            while(true){val value=line(input);total+=value.length;if(total>16384){reply(out,431,"Headers too large");return};if(value.isEmpty())break;val colon=value.indexOf(':');if(colon<=0){reply(out,400,"Bad header");return};if(headers.put(value.substring(0,colon).lowercase(Locale.ROOT),value.substring(colon+1).trim())!=null){reply(out,400,"Duplicate header");return}}
-            if(headers.containsKey("transfer-encoding")){reply(out,411,"Content-Length required");return}
-            val method=first[0];val path=first[1]
-            val pagePath=path.substringBefore('?').substringBefore('#')
-            if(method=="GET"&&pagePath in setOf("/","/index.html","/remote","/remote.html")){response(out,200,"text/html; charset=utf-8",page);return}
-            if(method!="POST"){reply(out,405,"请通过手机控制页操作，或重新扫描电视二维码。");return}
-            fun reject(code:Int,message:String){
-                val bytes=headers["content-length"]?.toLongOrNull()?:0
-                if(bytes in 1..8192)read(input,bytes.toInt())
-                reply(out,code,message)
-            }
-            val origin=headers["origin"];if(origin!=null&&origin!="http://${headers["host"]}"){reject(403,"Origin rejected");return}
-            if(headers["sec-fetch-site"]?.let{it!="same-origin"}==true){reject(403,"Same origin required");return}
-            val length=headers["content-length"]?.toLongOrNull()?:-1
-            if(length<0){reply(out,411,"Content-Length required");return}
-            if(path=="/pair"){
-                if(length>64){reply(out,413,"Too large");return};val token=pair(read(input,length.toInt()),headers["x-tv-token"].orEmpty())
-                reply(out,if(token==null)403 else 200,token?:"配对失败：请刷新电视二维码后重扫，连续失败请等待一分钟。");return
-            }
-            if(!sessions.containsKey(headers["x-tv-token"].orEmpty())){reject(401,"请重新配对");return}
-            when(path){
-                "/status"->{response(out,200,"application/json; charset=utf-8",capabilities.get().toByteArray());return}
-                "/live"->{
-                    if(length>32){reject(413,"直播版本无效");return}
-                    response(out,200,"application/json; charset=utf-8",liveData(read(input,length.toInt())).toByteArray())
-                    return
-                }
-                "/playback"->{response(out,200,"application/json; charset=utf-8",playbackData.get().toByteArray());return}
-                "/appArtwork"->{
-                    if(length !in 1..1024){reject(400,"无效应用");return}
-                    val bytes=appArtwork(read(input,length.toInt()))
-                    if(bytes==null)reject(404,"应用图标不存在") else response(out,200,"image/webp",bytes)
-                    return
-                }
-                "/apps"->{
-                    if(length>32){reject(413,"应用版本无效");return}
-                    response(out,200,"application/json; charset=utf-8",appsData(read(input,length.toInt())).toByteArray())
-                    return
-                }
-                "/files"->{val files=directory.listFiles{f->!f.name.endsWith(".part")}.orEmpty().sortedByDescending{it.lastModified()}.take(100);val json=files.joinToString(",","[","]"){"{\"name\":${quote(it.name)},\"size\":${it.length()}}"};response(out,200,"application/json; charset=utf-8",json.toByteArray());return}
-                "/files/delete"->{
-                    if(length !in 1..1024){reject(400,"无效文件名");return}
-                    val name=read(input,length.toInt())
-                    if(name.any{it=='\\'||it.isISOControl()}){reply(out,400,"无效文件名");return}
-                    val file=File(directory,name)
-                    val canonical=file.canonicalFile
-                    if(file.name!=name||name.endsWith(".part")||canonical.parentFile!=directory.canonicalFile||canonical.name!=name){
-                        reply(out,400,"无效文件名");return
+    private fun handle(socket: Socket) {
+        try {
+            socket.use { s ->
+                s.soTimeout = 15_000
+                val input = BufferedInputStream(s.getInputStream())
+                val out = s.getOutputStream()
+                var handled = 0
+                while (!closed && handled < 64) {
+                    val requestLine = try {
+                        line(input)
+                    } catch (_: EOFException) {
+                        return
+                    } catch (_: SocketTimeoutException) {
+                        return
                     }
-                    if(!file.isFile){reply(out,404,"文件已不存在");return}
-                    val deleted=file.delete()
-                    reply(out,if(deleted)200 else 409,if(deleted)"已删除文件" else "无法删除文件")
-                    return
+                    if (requestLine.isEmpty()) continue
+                    handled++
+                    if (!handleOne(requestLine, input, out, handled < 64)) return
                 }
-                "/live/import","/live/subscribe"->{if(length>if(path.endsWith("import"))20*1024*1024 else 8192){reply(out,413,"节目单超过大小限制");return};val ok=commands.run(if(path.endsWith("import"))"liveImport" else "liveSubscribe",read(input,length.toInt()));reply(out,if(ok)200 else 409,liveMessage.get());return}
-                "/command"->{if(length>8192){reply(out,413,"输入过长");return};val body=read(input,length.toInt());val split=body.indexOf('\n');val cmd=if(split<0)body else body.substring(0,split);val value=if(split<0)"" else body.substring(split+1);val ok=commands.run(cmd,value);reply(out,if(ok)200 else 409,if(cmd=="inputText")textMessage.get()else if(ok)"已执行" else "操作未完成，请检查电视连接。");return}
             }
-            if(path.startsWith("/upload?name=")){upload(input,out,path,length);return}
-            reply(out,404,"Not found")
-            }catch(t:Throwable){android.util.Log.w("LanServer","handle failed: ${t.javaClass.simpleName} ${t.message}");try{reply(s.getOutputStream(),500,"服务器内部错误")}catch(_:Throwable){}}
-        }}catch(_:Exception){ }finally{connections.remove(socket)}
+        } catch (_: Exception) {
+        } finally {
+            connections.remove(socket)
+        }
     }
-    private fun upload(input:InputStream,out:OutputStream,path:String,length:Long){
-        if(length>1073741824){reply(out,413,"单个文件最大 1 GB");return}
-        if(!uploads.tryAcquire()){reply(out,409,"另一文件正在上传");return}
-        var partial:File?=null
-        try{
-            if(length+67108864>directory.usableSpace){reply(out,507,"电视存储空间不足");return}
-            val name=URLDecoder.decode(path.substringAfter("/upload?name="),"UTF-8").replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"),"_").takeLast(120)
-            if(name.isBlank()||name=="."||name==".."){reply(out,400,"无效文件名");return}
-            val id=UUID.randomUUID().toString();partial=File(directory,"$id.part")
-            partial.outputStream().buffered().use{file->val buffer=ByteArray(65536);var remaining=length;while(remaining>0){val n=input.read(buffer,0,minOf(buffer.size.toLong(),remaining).toInt());if(n<0)throw EOFException();file.write(buffer,0,n);remaining-=n}}
-            val target=File(directory,id.take(8)+"_"+name);check(partial.renameTo(target)){"保存失败"};try{cleanupReceived()}catch(_:Throwable){};lastAction="已接收：$name";reply(out,200,"已保存：${target.name}")
-        }finally{partial?.takeIf{it.exists()}?.delete();uploads.release()}
+
+    /** Processes a single HTTP request and returns `true` if the TCP connection can be kept alive. */
+    private fun handleOne(requestLine: String, input: InputStream, out: OutputStream, allowKeepAlive: Boolean): Boolean {
+        try {
+            val first = requestLine.split(' ')
+            if (first.size != 3) {
+                reply(out, 400, "Bad request", keepAlive = false)
+                return false
+            }
+            val headers = HashMap<String, String>()
+            var total = 0
+            while (true) {
+                val value = line(input)
+                total += value.length
+                if (total > 16384) {
+                    reply(out, 431, "Headers too large", keepAlive = false)
+                    return false
+                }
+                if (value.isEmpty()) break
+                val colon = value.indexOf(':')
+                if (colon <= 0) {
+                    reply(out, 400, "Bad header", keepAlive = false)
+                    return false
+                }
+                if (headers.put(value.substring(0, colon).lowercase(Locale.ROOT), value.substring(colon + 1).trim()) != null) {
+                    reply(out, 400, "Duplicate header", keepAlive = false)
+                    return false
+                }
+            }
+            if (headers.containsKey("transfer-encoding")) {
+                reply(out, 411, "Content-Length required", keepAlive = false)
+                return false
+            }
+            val clientClose = headers["connection"]?.lowercase(Locale.ROOT)?.contains("close") == true
+            val keepAlive = allowKeepAlive && !clientClose && first[2].equals("HTTP/1.1", ignoreCase = true)
+            val method = first[0]
+            val path = first[1]
+            val pagePath = path.substringBefore('?').substringBefore('#')
+            if (method == "GET" && pagePath in setOf("/", "/index.html", "/remote", "/remote.html")) {
+                response(out, 200, "text/html; charset=utf-8", page, keepAlive)
+                return keepAlive
+            }
+            if (method != "POST") {
+                reply(out, 405, "请通过手机控制页操作，或重新扫描电视二维码。", keepAlive = false)
+                return false
+            }
+            fun reject(code: Int, message: String): Boolean {
+                val bytes = headers["content-length"]?.toLongOrNull() ?: 0
+                if (bytes in 1..8192) read(input, bytes.toInt())
+                reply(out, code, message, keepAlive = false)
+                return false
+            }
+            val origin = headers["origin"]
+            if (origin != null && origin != "http://${headers["host"]}") return reject(403, "Origin rejected")
+            if (headers["sec-fetch-site"]?.let { it != "same-origin" } == true) return reject(403, "Same origin required")
+            val length = headers["content-length"]?.toLongOrNull() ?: -1
+            if (length < 0) {
+                reply(out, 411, "Content-Length required", keepAlive = false)
+                return false
+            }
+            if (path == "/pair") {
+                if (length > 64) {
+                    reply(out, 413, "Too large", keepAlive = false)
+                    return false
+                }
+                val token = pair(read(input, length.toInt()), headers["x-tv-token"].orEmpty())
+                reply(out, if (token == null) 403 else 200, token ?: "配对失败：请刷新电视二维码后重扫，连续失败请等待一分钟。", keepAlive)
+                return keepAlive
+            }
+            if (!sessions.containsKey(headers["x-tv-token"].orEmpty())) return reject(401, "请重新配对")
+            when (path) {
+                "/status" -> {
+                    if (length in 1..8192) read(input, length.toInt())
+                    response(out, 200, "application/json; charset=utf-8", capabilities.get().toByteArray(), keepAlive)
+                    return keepAlive
+                }
+                "/live" -> {
+                    if (length > 32) return reject(413, "直播版本无效")
+                    response(out, 200, "application/json; charset=utf-8", liveData(read(input, length.toInt())).toByteArray(), keepAlive)
+                    return keepAlive
+                }
+                "/playback" -> {
+                    if (length in 1..8192) read(input, length.toInt())
+                    response(out, 200, "application/json; charset=utf-8", playbackData.get().toByteArray(), keepAlive)
+                    return keepAlive
+                }
+                "/appArtwork" -> {
+                    if (length !in 1..1024) return reject(400, "无效应用")
+                    val bytes = appArtwork(read(input, length.toInt()))
+                    if (bytes == null) reply(out, 404, "应用图标不存在", keepAlive)
+                    else response(out, 200, "image/webp", bytes, keepAlive)
+                    return keepAlive
+                }
+                "/apps" -> {
+                    if (length > 32) return reject(413, "应用版本无效")
+                    response(out, 200, "application/json; charset=utf-8", appsData(read(input, length.toInt())).toByteArray(), keepAlive)
+                    return keepAlive
+                }
+                "/files" -> {
+                    if (length in 1..8192) read(input, length.toInt())
+                    val files = directory.listFiles { f -> !f.name.endsWith(".part") }.orEmpty().sortedByDescending { it.lastModified() }.take(100)
+                    val json = files.joinToString(",", "[", "]") { "{\"name\":${quote(it.name)},\"size\":${it.length()}}" }
+                    response(out, 200, "application/json; charset=utf-8", json.toByteArray(), keepAlive)
+                    return keepAlive
+                }
+                "/files/delete" -> {
+                    if (length !in 1..1024) return reject(400, "无效文件名")
+                    val name = read(input, length.toInt())
+                    if (name.any { it == '\\' || it.isISOControl() }) {
+                        reply(out, 400, "无效文件名", keepAlive)
+                        return keepAlive
+                    }
+                    val file = File(directory, name)
+                    val canonical = file.canonicalFile
+                    if (file.name != name || name.endsWith(".part") || canonical.parentFile != directory.canonicalFile || canonical.name != name) {
+                        reply(out, 400, "无效文件名", keepAlive)
+                        return keepAlive
+                    }
+                    if (!file.isFile) {
+                        reply(out, 404, "文件已不存在", keepAlive)
+                        return keepAlive
+                    }
+                    val deleted = file.delete()
+                    reply(out, if (deleted) 200 else 409, if (deleted) "已删除文件" else "无法删除文件", keepAlive)
+                    return keepAlive
+                }
+                "/live/import", "/live/subscribe" -> {
+                    if (length > if (path.endsWith("import")) 20 * 1024 * 1024 else 8192) {
+                        reply(out, 413, "节目单超过大小限制", keepAlive = false)
+                        return false
+                    }
+                    val ok = commands.run(if (path.endsWith("import")) "liveImport" else "liveSubscribe", read(input, length.toInt()))
+                    reply(out, if (ok) 200 else 409, liveMessage.get(), keepAlive)
+                    return keepAlive
+                }
+                "/command" -> {
+                    if (length > 8192) {
+                        reply(out, 413, "输入过长", keepAlive = false)
+                        return false
+                    }
+                    val body = read(input, length.toInt())
+                    val split = body.indexOf('\n')
+                    val cmd = if (split < 0) body else body.substring(0, split)
+                    val value = if (split < 0) "" else body.substring(split + 1)
+                    val ok = commands.run(cmd, value)
+                    reply(
+                        out,
+                        if (ok) 200 else 409,
+                        if (cmd == "inputText") textMessage.get() else if (ok) "已执行" else "操作未完成，请检查电视连接。",
+                        keepAlive
+                    )
+                    return keepAlive
+                }
+            }
+            if (path.startsWith("/upload?name=")) {
+                upload(input, out, path, length)
+                return false
+            }
+            if (length in 1..8192) read(input, length.toInt())
+            reply(out, 404, "Not found", keepAlive)
+            return keepAlive
+        } catch (t: Throwable) {
+            android.util.Log.w("LanServer", "handle failed: ${t.javaClass.simpleName} ${t.message}")
+            try {
+                reply(out, 500, "服务器内部错误", keepAlive = false)
+            } catch (_: Throwable) {
+            }
+            return false
+        }
     }
-    private fun read(input:InputStream,count:Int):String {val bytes=ByteArray(count);var pos=0;while(pos<count){val n=input.read(bytes,pos,count-pos);if(n<0)throw EOFException();pos+=n};return bytes.toString(Charsets.UTF_8)}
-    private fun quote(value:String)=buildString{append('"');for(c in value){if(c=='"'||c=='\\')append('\\');if(c<' ')append(String.format(Locale.US,"\\u%04x",c.code))else append(c)};append('"')}
-    private fun reply(out:OutputStream,status:Int,text:String)=response(out,status,"text/plain; charset=utf-8",text.toByteArray())
-    private fun response(out:OutputStream,status:Int,type:String,bytes:ByteArray){val headers="HTTP/1.1 $status Response\r\nContent-Type: $type\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'\r\n\r\n";out.write(headers.toByteArray(Charsets.US_ASCII));out.write(bytes);out.flush()}
-    override fun close(){closed=true;try{listener?.close()}catch(_:IOException){};connections.forEach{try{it.close()}catch(_:IOException){}};pool.shutdownNow()}
+
+    private fun upload(input: InputStream, out: OutputStream, path: String, length: Long) {
+        if (length > 1073741824) {
+            reply(out, 413, "单个文件最大 1 GB", keepAlive = false)
+            return
+        }
+        if (!uploads.tryAcquire()) {
+            reply(out, 409, "另一文件正在上传", keepAlive = false)
+            return
+        }
+        var partial: File? = null
+        try {
+            if (length + 67108864 > directory.usableSpace) {
+                reply(out, 507, "电视存储空间不足", keepAlive = false)
+                return
+            }
+            val name = URLDecoder.decode(path.substringAfter("/upload?name="), "UTF-8")
+                .replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_")
+                .takeLast(120)
+            if (name.isBlank() || name == "." || name == "..") {
+                reply(out, 400, "无效文件名", keepAlive = false)
+                return
+            }
+            val id = UUID.randomUUID().toString()
+            partial = File(directory, "$id.part")
+            partial.outputStream().buffered().use { file ->
+                val buffer = ByteArray(65536)
+                var remaining = length
+                while (remaining > 0) {
+                    val n = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                    if (n < 0) throw EOFException()
+                    file.write(buffer, 0, n)
+                    remaining -= n
+                }
+            }
+            val target = File(directory, id.take(8) + "_" + name)
+            check(partial.renameTo(target)) { "保存失败" }
+            try {
+                cleanupReceived()
+            } catch (_: Throwable) {
+            }
+            lastAction = "已接收：$name"
+            reply(out, 200, "已保存：${target.name}", keepAlive = false)
+        } finally {
+            partial?.takeIf { it.exists() }?.delete()
+            uploads.release()
+        }
+    }
+
+    private fun read(input: InputStream, count: Int): String {
+        val bytes = ByteArray(count)
+        var pos = 0
+        while (pos < count) {
+            val n = input.read(bytes, pos, count - pos)
+            if (n < 0) throw EOFException()
+            pos += n
+        }
+        return bytes.toString(Charsets.UTF_8)
+    }
+
+    private fun quote(value: String) = buildString {
+        append('"')
+        for (c in value) {
+            if (c == '"' || c == '\\') append('\\')
+            if (c < ' ') append(String.format(Locale.US, "\\u%04x", c.code)) else append(c)
+        }
+        append('"')
+    }
+
+    private fun reply(out: OutputStream, status: Int, text: String, keepAlive: Boolean = false) =
+        response(out, status, "text/plain; charset=utf-8", text.toByteArray(), keepAlive)
+
+    private fun response(out: OutputStream, status: Int, type: String, bytes: ByteArray, keepAlive: Boolean = false) {
+        val conn = if (keepAlive) "keep-alive\r\nKeep-Alive: timeout=15, max=64" else "close"
+        val headers = "HTTP/1.1 $status Response\r\nContent-Type: $type\r\nContent-Length: ${bytes.size}\r\nConnection: $conn\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'\r\n\r\n"
+        out.write(headers.toByteArray(Charsets.US_ASCII))
+        out.write(bytes)
+        out.flush()
+    }
+
+    override fun close() {
+        closed = true
+        try { listener?.close() } catch (_: IOException) {}
+        connections.forEach { try { it.close() } catch (_: IOException) {} }
+        pool.shutdownNow()
+    }
 }

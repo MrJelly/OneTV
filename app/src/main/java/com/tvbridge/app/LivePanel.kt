@@ -43,9 +43,23 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             return created
         }
         set(value){nativePlayer=value}
-    private var softwarePlayer=0
+    private val livePrefs = context.getSharedPreferences("live-prefs", Context.MODE_PRIVATE)
+    private var softwarePlayer = 0
+    private var manualSoftwareDecode = livePrefs.getBoolean("software_decode", false)
+    // 0 = 自适应 (FIT), 1 = 16:9, 2 = 满屏 (FILL)
+    private var aspectMode = livePrefs.getInt("aspect_mode", 0).coerceIn(0, 2)
     private var multicast:android.net.wifi.WifiManager.MulticastLock?=null
-    private val playerView=PlayerView(context).apply{useController=false;setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER);setShutterBackgroundColor(Color.BLACK);setBackgroundColor(Color.BLACK);isFocusable=false}
+    private val playerView=PlayerView(context).apply{
+        useController=false
+        setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+        setShutterBackgroundColor(Color.BLACK)
+        setBackgroundColor(Color.BLACK)
+        isFocusable=false
+        resizeMode = when (aspectMode) {
+            2 -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
+            else -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
+    }
     private val videoSurface=FrameLayout(context).apply{background=GradientDrawable().apply{setColor(0xff292d32.toInt())};if(android.os.Build.VERSION.SDK_INT>=21)clipToOutline=true;addView(playerView,LayoutParams(-1,-1))}
     private var lastSource=""
     private val autoRefreshTried=java.util.concurrent.atomic.AtomicBoolean(false)
@@ -57,6 +71,8 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     private val controls=LinearLayout(context).apply{gravity=Gravity.CENTER}
     private var favoriteAction:Button?=null
     private var lineAction:Button?=null
+    private var decoderAction:Button?=null
+    private var aspectAction:Button?=null
     private val drawer=LinearLayout(context).apply{orientation=LinearLayout.VERTICAL;visibility=View.GONE;isClickable=true}
     private val drawerList=ListView(context).apply{divider=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT);dividerHeight=dp(4);isVerticalScrollBarEnabled=false}
 
@@ -64,6 +80,86 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     private lateinit var sourceButton:Button
     private var all=emptyList<LiveChannel>()
     private var shown=emptyList<LiveChannel>()
+    private val shownItems=mutableListOf<LiveChannel>()
+    private val focusColorWhite by lazy { liveFocusColors(Color.WHITE) }
+    private val starFavDrawable by lazy { AppIcons.Vector("star") { 0xffffc233.toInt() } }
+    private val starDimDrawable by lazy { AppIcons.Vector("star") { 0x59ffffff } }
+    private class ChannelRowHolder(
+        val badge: TextView,
+        val name: TextView,
+        val star: View,
+        val starHit: View,
+        var marked: Boolean = false
+    )
+    private val channelAdapter by lazy {
+        object : ArrayAdapter<LiveChannel>(context, android.R.layout.simple_list_item_1, shownItems) {
+            override fun getView(position: Int, convert: View?, parent: ViewGroup): View {
+                val item = getItem(position)!!
+                val row: LinearLayout
+                val holder: ChannelRowHolder
+                if (convert is LinearLayout && convert.tag is ChannelRowHolder) {
+                    row = convert
+                    holder = convert.tag as ChannelRowHolder
+                } else {
+                    row = LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(dp(8), 0, dp(6), 0)
+                        minimumHeight = dp(if (touchDevice) 42 else 36)
+                        val badge = TextView(context).apply {
+                            gravity = Gravity.CENTER
+                            includeFontPadding = false
+                            background = GradientDrawable().apply {
+                                setColor(0x2effffff)
+                                cornerRadius = dp(4).toFloat()
+                                setStroke(NativeUi.scale(context).toInt().coerceAtLeast(1), 0x59ffffff)
+                            }
+                            minWidth = dp(22)
+                            maxLines = 1
+                            setPadding(dp(3), 0, dp(3), 0)
+                            NativeUi.textSize(this, 20f)
+                        }
+                        addView(badge, LinearLayout.LayoutParams(-2, dp(22)))
+                        val name = TextView(context).apply {
+                            maxLines = 1
+                            ellipsize = android.text.TextUtils.TruncateAt.END
+                            NativeUi.textSize(this, 28f)
+                            setTextColor(focusColorWhite)
+                        }
+                        addView(name, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(8) })
+                        val starHit = FrameLayout(context).apply { contentDescription = "收藏" }
+                        val star = View(context)
+                        starHit.addView(star, FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER))
+                        addView(starHit, LinearLayout.LayoutParams(dp(32), -1).apply { marginStart = dp(2) })
+                        background = GlassUi.surface(this, GlassUi.CHIP_RADIUS, video = true, dark = true, faint = true, plain = true, marked = false)
+                        tag = ChannelRowHolder(badge, name, star, starHit, marked = false)
+                    }
+                    holder = row.tag as ChannelRowHolder
+                }
+                val favorite = repo.favorite(item.id)
+                val playing = item.id == current?.id
+                row.isSelected = (parent as? AbsListView)?.selectedItemPosition == position || playing
+                if (holder.marked != playing) {
+                    holder.marked = playing
+                    row.background = GlassUi.surface(row, GlassUi.CHIP_RADIUS, video = true, dark = true, faint = true, plain = true, marked = playing)
+                }
+                holder.badge.text = (position + 1).toString()
+                (holder.badge.background as? GradientDrawable)?.setColor(if (playing) 0xd9ffffff.toInt() else 0x2effffff)
+                holder.badge.setTextColor(if (playing) 0xff292f32.toInt() else 0xffc8d0d8.toInt())
+                holder.name.text = item.name
+                holder.name.setTypeface(null, if (playing) Typeface.BOLD else Typeface.NORMAL)
+                holder.star.background = if (favorite) starFavDrawable else starDimDrawable
+                holder.starHit.setOnClickListener {
+                    val pos = drawerList.firstVisiblePosition
+                    val top = drawerList.getChildAt(0)?.top ?: 0
+                    repo.toggleFavorite(item.id)
+                    refresh()
+                    drawerList.setSelectionFromTop(pos, top)
+                }
+                return row
+            }
+        }
+    }
     private var current:LiveChannel?=null
     private var retries=0
     private var readySince=0L
@@ -146,19 +242,57 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             multicast=wifi?.createMulticastLock("One:live").also{it?.setReferenceCounted(false);it?.acquire()}
         }catch(_:RuntimeException){ }
     }
+    private fun effectiveSoftwareTracks(): Int =
+        if (manualSoftwareDecode && NativePlayback.softwareAvailable()) 3 else attempts.softwareTracks
+
     private fun configureDecoder(){
-        if(softwarePlayer==attempts.softwareTracks)return
-        val next=try{NativePlayback.player(context,attempts.softwareTracks,live=true)}catch(t:Throwable){android.util.Log.w("TVBridgePlayer","configureDecoder failed: ${t.javaClass.simpleName} ${t.message}");return}
+        val target = effectiveSoftwareTracks()
+        if(softwarePlayer==target)return
+        val next=try{NativePlayback.player(context,target,live=true)}catch(t:Throwable){android.util.Log.w("TVBridgePlayer","configureDecoder failed: ${t.javaClass.simpleName} ${t.message}");return}
         val previous=nativePlayer;playerView.player=null
-        softwarePlayer=attempts.softwareTracks;player=next
+        softwarePlayer=target;player=next
         bindPlayer();playerView.player=player
         previous?.let{try{it.release()}catch(_:Throwable){}}
+    }
+    private fun aspectLabel(): String = when (aspectMode) {
+        1 -> "16:9"
+        2 -> "满屏"
+        else -> "自适应"
+    }
+    private fun cycleAspectMode() {
+        aspectMode = (aspectMode + 1) % 3
+        livePrefs.edit().putInt("aspect_mode", aspectMode).apply()
+        playerView.resizeMode = when (aspectMode) {
+            2 -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
+            else -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
+        aspectAction?.text = "画面:${aspectLabel()}"
+        requestLayout()
+        NativeUi.notice(context, "画面比例：${aspectLabel()}")
+    }
+    private fun toggleManualDecoder() {
+        if (!NativePlayback.softwareAvailable()) {
+            NativeUi.notice(context, "当前设备不支持软解")
+            return
+        }
+        manualSoftwareDecode = !manualSoftwareDecode
+        livePrefs.edit().putBoolean("software_decode", manualSoftwareDecode).apply()
+        decoderAction?.text = if (manualSoftwareDecode) "软解" else "硬解"
+        NativeUi.notice(context, if (manualSoftwareDecode) "已切换为软解播放" else "已切换为硬解播放")
+        if (current != null) startLine()
     }
     private fun dp(value:Int)=(value*2*NativeUi.scale(context)).toInt()
     override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int){
         super.onMeasure(widthMeasureSpec,heightMeasureSpec)
-        val w=minOf(measuredWidth,(measuredHeight*16f/9).toInt()).coerceAtLeast(1)
-        val h=(w*9f/16).toInt().coerceAtLeast(1)
+        val w: Int
+        val h: Int
+        if (aspectMode == 1) {
+            w = minOf(measuredWidth, (measuredHeight * 16f / 9).toInt()).coerceAtLeast(1)
+            h = (w * 9f / 16).toInt().coerceAtLeast(1)
+        } else {
+            w = measuredWidth.coerceAtLeast(1)
+            h = measuredHeight.coerceAtLeast(1)
+        }
         videoSurface.measure(MeasureSpec.makeMeasureSpec(w,MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec(h,MeasureSpec.EXACTLY))
         val coverWidth=measuredWidth
         val coverHeight=measuredHeight
@@ -247,7 +381,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     }
     private fun touchVideo(){if(!touchDevice)return;if(drawer.visibility==View.VISIBLE){drawer.visibility=View.GONE;hideControls()}else if(overlay.visibility==View.VISIBLE)hideControls()else showControls()}
     private fun buildControls(cast:Boolean){
-        controls.removeAllViews();favoriteAction=null;lineAction=null
+        controls.removeAllViews();favoriteAction=null;lineAction=null;decoderAction=null;aspectAction=null
         if(cast){
             action(controls,"后退 10 秒",true){command("videoBack","")}
             action(controls,"播放 / 暂停",true){command("videoToggle","")}
@@ -257,6 +391,10 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             action(controls,"频道列表",true){showDrawer()}
             favoriteAction=action(controls,"收藏",true){current?.let{repo.toggleFavorite(it.id);refreshTitle();refresh()}}
             lineAction=action(controls,"切换线路",true){nextLine()}
+            if(NativePlayback.softwareAvailable()){
+                decoderAction=action(controls,if(manualSoftwareDecode)"软解" else "硬解",true){toggleManualDecoder()}
+            }
+            aspectAction=action(controls,"画面:${aspectLabel()}",true){cycleAspectMode()}
             if(touchDevice)action(controls,"下一台",true){stepChannel(1)}
         }
         if(touchDevice)action(controls,"返回",true){exit()}
@@ -328,35 +466,13 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         if(current!=null&&current?.id!="cast"&&repo.findChannel(current!!.id)==null){cancelRecovery();nativePlayer?.stop();current=null;ui.removeCallbacks(timeout);showEmptyCover()}
         shown=if(favoritesOnly)repo.favoriteChannels()else all.filter{it.group==category}
         if(rebuildFilters)renderRail()else for(i in 0 until rail.childCount){val railItem=rail.getChildAt(i);railItem.isSelected=when(railItem.tag){"收藏频道"->favoritesOnly;else->!favoritesOnly&&railItem.tag==category}}
-        fun adapter()=object:ArrayAdapter<LiveChannel>(context,android.R.layout.simple_list_item_1,shown){override fun getView(position:Int,convert:View?,parent:ViewGroup):View{
-            val item=getItem(position)!!
-            val row=(convert as? LinearLayout)?:LinearLayout(context).apply{
-                orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
-                val badge=TextView(context);badge.tag="badge";badge.gravity=Gravity.CENTER;badge.includeFontPadding=false
-                badge.background=GradientDrawable().apply{setColor(0x2effffff);cornerRadius=dp(4).toFloat();setStroke((NativeUi.scale(context)).toInt().coerceAtLeast(1),0x59ffffff)}
-                badge.minWidth=dp(22);badge.maxLines=1;badge.setPadding(dp(3),0,dp(3),0)
-                addView(badge,LinearLayout.LayoutParams(-2,dp(22)))
-                val name=TextView(context);name.tag="name";name.maxLines=1;name.ellipsize=android.text.TextUtils.TruncateAt.END
-                addView(name,LinearLayout.LayoutParams(0,-2,1f).apply{marginStart=dp(8)})
-                val starHit=FrameLayout(context);starHit.tag="starHit"
-                val star=View(context);star.tag="star";starHit.addView(star,FrameLayout.LayoutParams(dp(19),dp(19),Gravity.CENTER))
-                addView(starHit,LinearLayout.LayoutParams(dp(32),-1).apply{marginStart=dp(2)})
-            }
-            val badge=row.findViewWithTag<TextView>("badge");val name=row.findViewWithTag<TextView>("name");val star=row.findViewWithTag<View>("star")
-            val favorite=repo.favorite(item.id)
-            val playing=item.id==current?.id
-            row.isSelected=(parent as? AbsListView)?.selectedItemPosition==position||playing
-            row.background=GlassUi.surface(row,GlassUi.CHIP_RADIUS,video=true,dark=true,faint=true,plain=true,marked=playing)
-            row.setPadding(dp(8),0,dp(6),0);row.minimumHeight=dp(if(touchDevice)42 else 36)
-            badge.text=(position+1).toString();NativeUi.textSize(badge,20f)
-            (badge.background as? GradientDrawable)?.setColor(if(playing)0xd9ffffff.toInt() else 0x2effffff)
-            badge.setTextColor(if(playing)0xff292f32.toInt() else 0xffc8d0d8.toInt())
-            name.text=item.name;NativeUi.textSize(name,28f);name.setTextColor(liveFocusColors());name.setTypeface(null,if(playing)Typeface.BOLD else Typeface.NORMAL)
-            star.background=AppIcons.Vector("star"){if(favorite)0xffffc233.toInt() else 0x59ffffff}
-            val starHit=row.findViewWithTag<View>("starHit");starHit.contentDescription="收藏";starHit.setOnClickListener{val pos=drawerList.firstVisiblePosition;val top=drawerList.getChildAt(0)?.top?:0;repo.toggleFavorite(item.id);refresh();drawerList.setSelectionFromTop(pos,top)}
-            return row
-        }}
-        drawerList.adapter=adapter()
+        shownItems.clear()
+        shownItems.addAll(shown)
+        if (drawerList.adapter !== channelAdapter) {
+            drawerList.adapter = channelAdapter
+        } else {
+            channelAdapter.notifyDataSetChanged()
+        }
         val playingIndex=shown.indexOfFirst{it.id==current?.id}
         if(playingIndex>=0)drawerList.setSelectionFromTop(playingIndex,dp(6))
         if(current!=null)refreshTitle()

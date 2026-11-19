@@ -104,7 +104,27 @@ object GlassUi {
         }
     }
 
-    @Synchronized
+    private data class CachedWallpaperFrost(val key: String, val frost: Frost)
+    @Volatile private var cachedWallpaperFrost: CachedWallpaperFrost? = null
+
+    /** Pre-blurs the 320px wallpaper frost on a background thread so the first UI onDraw never stalls. */
+    fun prewarmWallpaperFrost(context: Context) {
+        val app = context.applicationContext
+        val size = app.resources.displayMetrics
+        val w = size.widthPixels.coerceAtLeast(1)
+        val h = size.heightPixels.coerceAtLeast(1)
+        val key = "${HomeAppearance.key(app)}:$w:$h:0:0"
+        if (cachedWallpaperFrost?.key == key) return
+        val targetH = (h * 320f / w).toInt().coerceAtLeast(1)
+        val image = HomeAppearance.backdrop(app, 320, targetH, HomeAppearance.dark(app))
+        val blurred = Frost(frost(image), w, h, 0, 0)
+        synchronized(this) {
+            wallpaperFrost = blurred
+            frostKey = key
+            cachedWallpaperFrost = CachedWallpaperFrost(key, blurred)
+        }
+    }
+
     private fun wallpaper(context: Context): Frost {
         val size = context.resources.displayMetrics
         val root = activity(context)?.window?.decorView
@@ -113,13 +133,17 @@ object GlassUi {
         val point = IntArray(2)
         root?.getLocationOnScreen(point)
         val key = "${HomeAppearance.key(context)}:$w:$h:${point[0]}:${point[1]}"
-        if (key != frostKey || wallpaperFrost == null) {
-            val targetH = (h * 320f / w).toInt().coerceAtLeast(1)
-            val image = HomeAppearance.backdrop(context, 320, targetH, HomeAppearance.dark(context))
-            wallpaperFrost = Frost(frost(image), w, h, point[0], point[1])
+        cachedWallpaperFrost?.let { if (it.key == key) return it.frost }
+        val targetH = (h * 320f / w).toInt().coerceAtLeast(1)
+        val image = HomeAppearance.backdrop(context, 320, targetH, HomeAppearance.dark(context))
+        val blurred = Frost(frost(image), w, h, point[0], point[1])
+        synchronized(this) {
+            if (key == frostKey && wallpaperFrost != null) return wallpaperFrost!!
+            wallpaperFrost = blurred
             frostKey = key
+            cachedWallpaperFrost = CachedWallpaperFrost(key, blurred)
+            return blurred
         }
-        return wallpaperFrost!!
     }
 
     private var staticFrostBitmap: Bitmap? = null

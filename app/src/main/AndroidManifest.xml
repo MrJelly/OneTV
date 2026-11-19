@@ -53,7 +53,7 @@
         <intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LEANBACK_LAUNCHER"/></intent>
         <intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.APPSTORE_LAUNCHER"/></intent>
     </queries>
-    <application android:name="androidx.multidex.MultiDexApplication" android:label="One" android:theme="@style/AppTheme" android:banner="@drawable/launcher_display" android:icon="@drawable/one_adaptive" android:roundIcon="@drawable/one_adaptive" android:allowBackup="false" android:usesCleartextTraffic="true" android:supportsRtl="true">
+    <application android:name=".OneApplication" android:label="One" android:theme="@style/AppTheme" android:banner="@drawable/launcher_display" android:icon="@drawable/one_adaptive" android:roundIcon="@drawable/one_adaptive" android:allowBackup="false" android:usesCleartextTraffic="true" android:supportsRtl="true">
         <receiver android:name=".BootReceiver" android:exported="false" android:directBootAware="true">
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /><action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" /><action android:name="android.intent.action.USER_UNLOCKED" /><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter>
         </receiver>

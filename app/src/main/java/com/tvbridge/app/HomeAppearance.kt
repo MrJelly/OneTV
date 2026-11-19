@@ -153,6 +153,7 @@ object HomeAppearance {
                 val dark=dark(appContext)
                 val glassH=(h*320f/w).toInt().coerceAtLeast(1)
                 backdrop(appContext,320,glassH,dark)
+                GlassUi.prewarmWallpaperFrost(appContext)
                 val cappedH=(h*1280f/w).toInt().coerceAtLeast(1)
                 backdrop(appContext,1280,cappedH,dark)
                 if(mode(appContext)=="custom")backdrop(appContext,w,h,dark)

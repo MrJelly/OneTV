@@ -157,6 +157,16 @@ class LauncherApps(private val context:Context){
         return android.graphics.drawable.BitmapDrawable(context.resources, out)
     }
 
+    /** Returns cached WebP bytes for [entry] directly from disk when available, avoiding redundant re-encoding. */
+    fun squareIconWebp(entry: AppEntry): ByteArray? {
+        val key = "${entry.component.flattenToString()}:${entry.updated}"
+        val file = squareCacheFile(context, key)
+        if (file != null && file.isFile) {
+            runCatching { file.readBytes() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
+        }
+        return null
+    }
+
     /** Alpha-only probe: does this artwork paint (nearly) the whole square by itself? */
     private fun isOpaque(bitmap: android.graphics.Bitmap): Boolean {
         val stepX = maxOf(1, bitmap.width / 16)

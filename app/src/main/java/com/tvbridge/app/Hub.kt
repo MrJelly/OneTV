@@ -39,6 +39,10 @@ object Hub {
             val entry=repository.installed().firstOrNull{it.component.flattenToString()==id}?:return null
             val versioned="$key:${entry.updated}"
             artworkCache.get(versioned)?.let{return it}
+            repository.squareIconWebp(entry)?.let { cached ->
+                artworkCache.put(versioned, cached)
+                return cached
+            }
             return runCatching{webp(repository.squareIcon(entry)).also{artworkCache.put(versioned,it)}}.getOrNull()
         }
         fun appsSnapshot(known:String):String{

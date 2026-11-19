@@ -42,19 +42,16 @@ class MainActivity:Activity() {
     }
     override fun onCreate(state:Bundle?) {
         super.onCreate(state)
-        // Keep the last crash's stack on disk and surface it once at the next
-        // start: on a TV there is no logcat to read, and a bare "it crashed"
-        // report cannot be pinpointed without one.
-        val crashFile=java.io.File(filesDir,"last-crash.txt")
-        val previousHandler=Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler{thread,error->
-            try{crashFile.writeText("Thread: ${thread.name}\n"+android.util.Log.getStackTraceString(error))}catch(_:Throwable){}
-            previousHandler?.uncaughtException(thread,error)
-        }
-        if(crashFile.isFile){
-            val crashText=try{crashFile.readText()}catch(_:Throwable){""}
-            crashFile.delete()
-            if(crashText.isNotBlank())handler.postDelayed({if(visible)NativeUi.show(AlertDialog.Builder(this).setTitle("上次崩溃记录").setMessage(crashText.take(3000)).setPositiveButton("知道了",null))},1500)
+        OneApplication.installCrashRecorder(this)
+        OneApplication.consumeLastCrash(this)?.let { crashText ->
+            handler.postDelayed({
+                if (visible) NativeUi.show(
+                    AlertDialog.Builder(this)
+                        .setTitle("上次崩溃记录")
+                        .setMessage(crashText.take(3000))
+                        .setPositiveButton("知道了", null)
+                )
+            }, 1500)
         }
         if(intent.getBooleanExtra("from_boot",false))BootReceiver.markArrived(this)
         apkInstaller=ApkInstaller(this);apkInstaller.restore(state);fileExporter=FileExporter(this)
