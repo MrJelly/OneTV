@@ -138,7 +138,7 @@ input::placeholder{font-size:var(--control-text)}
 input:not([type=file]):not([type=range]),textarea{font-size:16px}
 select,input:not([type=file]):not([type=range]){min-height:var(--control-height);padding-block:6px}
 #customLiveTools button,#remoteTextDialog #sendRemoteText,
-.browser-nav{margin-top:8px;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
+.browser-nav{margin-top:8px;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px}
 #browserControls .browser-search-row{gap:8px}
 select,.channel-filters select{height:var(--control-height);min-height:var(--control-height);padding-block:0;font-size:var(--control-text);line-height:16px}
 #channelSearch{height:var(--control-height);padding-block:0}
@@ -149,14 +149,17 @@ select,.channel-filters select{height:var(--control-height);min-height:var(--con
 #browserMediaState{color:var(--muted);font-size:14px;white-space:nowrap}
 #browserPlayer #browserProgress{border:0;background:transparent;box-shadow:none;outline:0;height:18px;padding:0;margin:8px 0 0;accent-color:var(--accent)}
 #browserTime{text-align:right;line-height:18px;min-height:18px;font-variant-numeric:tabular-nums}
-#browserPlay{position:fixed;right:calc(20px + env(safe-area-inset-right,0px));bottom:calc(88px + env(safe-area-inset-bottom,0px));width:var(--control-height);height:var(--control-height);padding:0;z-index:18}
-#browserPlay:not([hidden]){display:grid;place-items:center}
-#browserPlay svg{display:block;width:24px;height:24px}
 #browserSpeedChoice{background:var(--surface);display:block;margin:0;height:var(--control-height);min-height:var(--control-height);padding:0 8px}
 #browserEngine,#browserSpeedChoice{color:#526571;-webkit-text-fill-color:currentColor}
 #browserSpeedChoice:focus{border-color:transparent;outline:0;box-shadow:none}
 #browserPlayer [aria-pressed=true]{background:var(--primary);color:var(--selection-ink)}
-#browserPlayer .remote-action-grid:last-of-type{grid-template-columns:repeat(3,minmax(0,1fr))}
+.browser-history-item{display:flex;gap:8px;margin-top:8px}
+.browser-history-item .open{display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:0;flex:1;min-width:0;text-align:left;height:var(--control-height);min-height:var(--control-height);padding:2px 12px;line-height:16px}
+.browser-history-item .open .history-title{display:block;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.browser-history-item .open .history-url{display:block;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:14px;color:var(--muted);margin-top:0}
+.browser-history-item .del{flex:none;align-self:center;width:var(--control-height);height:var(--control-height);min-height:var(--control-height);padding:0;font-size:21px;line-height:1}
+.browser-history-empty{padding:20px 0 10px;text-align:center;color:var(--muted);font-size:14px}
+#browserHistoryClear{display:block;width:100%;min-width:0;height:var(--control-height);min-height:var(--control-height);margin:12px 0 0;padding:0 12px}
 body button:not(.dpad button),
 #customLiveTools button,#remoteTextDialog #sendRemoteText{
   height:var(--control-height);min-height:var(--control-height);padding-block:0;font-size:var(--control-text);line-height:16px;white-space:nowrap
@@ -216,7 +219,10 @@ body .live-actions{left:0;right:0;width:100%;transform:none;bottom:var(--nav-hei
 }
 #panel-apps>.section{background:none;border:0;box-shadow:none;padding:0;backdrop-filter:none;-webkit-backdrop-filter:none}
 #appList{padding:8px 7px 10px;gap:14px 7px}
-.home-app-face{background:var(--input)}
+.home-app-face{background-color:transparent;background-image:var(--app-glass,linear-gradient(135deg,#b5b5b599,#82828270));background-size:cover;overflow:hidden}
+.home-app:focus-visible{outline:0}
+.home-app:focus-visible .home-app-face,.home-app:active .home-app-face,.home-app[data-dragging=true] .home-app-face{box-shadow:0 0 0 1px #fff,0 5px 14px #25354a40;transform:scale(1.05)}
+.home-app:focus-visible .home-app-label{font-weight:700}
 #appHiddenSection h2{margin:18px 5px 6px;color:var(--muted);font-weight:500;font-size:14px}
 #appHiddenList{border-radius:12px;overflow:hidden}
 .app-hidden-row{display:grid;grid-template-columns:64px 1fr auto;align-items:center;gap:10px;padding:10px 12px;min-height:55px}
@@ -285,6 +291,20 @@ body .app-name-form input:not([type=file]){background:transparent;border:0;box-s
 #appEditDialog[data-mode=folder] #closeAppEdit{margin-top:6px}
 @keyframes app-dialog-in{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:none}}
 
+.browser-setting{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;min-height:48px;padding:12px 0;background:transparent;border:0;border-bottom:1px solid var(--border);color:var(--text);text-align:left;font-size:15px}
+.browser-setting-value{padding:4px 10px;border-radius:6px;background:var(--input);color:var(--muted);font-size:13px;white-space:nowrap}
+.browser-setting[aria-pressed=true] .browser-setting-value{background:var(--primary);color:var(--selection-ink)}
+.browser-scale-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px}
+.browser-choice-section{margin-top:16px}.browser-choice-section:first-child{margin-top:8px}
+.browser-choice-section h3{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 10px;font-size:14px;font-weight:600}
+.browser-choice-section h3 span{font-size:12px;font-weight:400;color:var(--muted)}
+.browser-choice-navigation{display:flex;gap:8px;margin-bottom:8px}.browser-choice-navigation:empty{display:none}
+.browser-choice-navigation button{flex:1}
+.browser-choice-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.browser-choice-grid button{min-width:0;height:48px;margin:0;padding:6px;font-size:13px;line-height:1.3;display:flex;align-items:center;justify-content:center;text-align:center;overflow:hidden;white-space:normal;word-break:break-all}
+.browser-video-list{display:grid;gap:8px}.browser-video-list button{display:flex;flex-direction:column;align-items:flex-start;gap:5px;width:100%;padding:12px;text-align:left}
+.browser-video-detail{font-size:12px;font-weight:400;color:var(--muted)}
+.browser-choice-section button[aria-pressed=true]{background:var(--primary);color:var(--selection-ink);box-shadow:inset 0 0 0 1px #648fa65c}
 </style></head><body data-page="remote">
 <svg class="symbols" xmlns="http://www.w3.org/2000/svg"><defs>
 <symbol id="tabRemoteGlyph" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="12" cy="9" r="3"/><path d="M8 16h2m4 0h2"/></symbol>
@@ -296,7 +316,9 @@ body .app-name-form input:not([type=file]){background:transparent;border:0;box-s
 <symbol id="menuIcon" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h14"/></symbol>
 <symbol id="keyboard" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 9h1m3 0h1m3 0h1M7 12h1m3 0h1m3 0h1M8 16h8"/></symbol>
 <symbol id="muteIcon" viewBox="0 0 24 24"><path d="M11 4 5 9H2v6h3l6 5ZM15 9l6 6m0-6-6 6"/></symbol>
-<symbol id="reloadIcon" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2 6m2-12v6h-6"/></symbol>
+<symbol id="reloadIcon" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+<symbol id="historyIcon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3.5 2"/></symbol>
+<symbol id="listIcon" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.3" fill="currentColor" stroke="none"/></symbol>
 <symbol id="playIcon" viewBox="0 0 24 24"><path d="m8 5 12 7-12 7z"/></symbol>
 <symbol id="searchIcon" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m14.5 14.5 5 5"/></symbol>
 <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
@@ -339,9 +361,11 @@ body .app-name-form input:not([type=file]){background:transparent;border:0;box-s
 <button class="secondary compact" data-browser="browserBack" aria-label="后退"><svg aria-hidden="true"><use href="#left"/></svg></button>
 <button class="secondary compact" data-browser="browserForward" aria-label="前进"><svg aria-hidden="true"><use href="#right"/></svg></button>
 <button class="secondary compact" data-browser="browserReload" aria-label="刷新"><svg aria-hidden="true"><use href="#reloadIcon"/></svg></button>
+<button class="secondary compact" id="browserPlay" aria-label="播放"><svg aria-hidden="true"><use href="#playIcon"/></svg></button>
 <button class="secondary compact" data-browser="browserBookmark" aria-label="收藏"><svg aria-hidden="true"><use href="#star"/></svg></button>
-<button class="secondary compact" data-browser="browserDesktopUa" aria-label="电脑版"><svg aria-hidden="true"><use href="#monitor"/></svg></button>
-</div><button class="primary compact" id="browserPlay" aria-label="播放"><svg aria-hidden="true"><use href="#playIcon"/></svg></button>
+<button class="secondary compact" id="browserHistory" aria-label="历史记录"><svg aria-hidden="true"><use href="#historyIcon"/></svg></button>
+<button class="secondary compact" id="browserPreferences" aria-label="网页设置"><svg aria-hidden="true"><use href="#listIcon"/></svg></button>
+</div>
 <section id="browserPlayer" class="glass section" hidden>
 <div class="browser-player-heading"><strong id="browserMediaTitle"></strong><span id="browserMediaState" role="status"></span></div>
 <input id="browserProgress" type="range" min="0" max="1" value="0" aria-label="播放进度" disabled>
@@ -349,7 +373,7 @@ body .app-name-form input:not([type=file]){background:transparent;border:0;box-s
 <div class="remote-action-grid">
 <button class="secondary compact" data-browser="browserRewind" aria-label="快退 10 秒">快退</button><button class="secondary compact" id="browserToggle" aria-label="暂停">暂停</button><button class="secondary compact" data-browser="browserFastForward" aria-label="快进 10 秒">快进</button><button class="secondary compact" data-browser="browserStop" aria-label="退出播放">退出播放</button>
 </div>
-<div class="remote-action-grid"><button class="secondary compact" data-browser="browserFullscreen" aria-label="全屏">全屏</button><select id="browserSpeedChoice" class="secondary compact" aria-label="播放倍速"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select><button class="secondary compact" data-browser="browserLoop" aria-label="循环播放">循环播放</button></div><label id="browserSources" hidden>视频源<select id="browserSourceChoice"></select></label>
+<div class="remote-action-grid"><button class="secondary compact" data-browser="browserFullscreen" aria-label="全屏">全屏</button><select id="browserSpeedChoice" class="secondary compact" aria-label="播放倍速"><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select><button class="secondary compact" data-browser="browserLoop" aria-label="循环播放">循环播放</button><button class="secondary compact" id="browserPlaylist" aria-label="频道／选集">选集</button></div><label id="browserSources" hidden>视频源<select id="browserSourceChoice"></select></label>
 </section>
 <div id="browserPadSlot"></div>
 </div>
@@ -363,6 +387,9 @@ body .app-name-form input:not([type=file]){background:transparent;border:0;box-s
 <dialog id="powerDialog"><div class="dialog-header"><h2>电视电源菜单</h2><button class="dialog-close" data-close="powerDialog" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body"><p>请在电视上确认关机。</p><button class="primary" id="confirmPower">打开电源菜单</button><button class="secondary" data-close="powerDialog">取消</button></div></dialog>
 <dialog id="remoteTextDialog" class="input-dialog"><div class="dialog-header"><h2>发送文字</h2><button class="dialog-close" data-close="remoteTextDialog" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body"><form id="remoteTextForm" class="remote-text"><label for="remoteText" hidden>文字输入</label><div class="split"><input id="remoteText" type="text" maxlength="2000" placeholder="先选中电视输入框" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="send"><button id="sendRemoteText" class="primary compact">发送</button></div></form></div></dialog>
 <dialog id="liveDialog" class="input-dialog"><div class="dialog-header"><h2>添加频道</h2><button class="dialog-close" data-close="liveDialog" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body"><form id="subscriptionForm"><label for="subscription">节目单订阅链接</label><input id="subscription" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="HTTPS / HTTP / GitHub 链接" required><button class="primary">保存订阅到电视</button></form><div class="heading-row"><h2>从文件导入</h2></div><label class="drop" style="min-height:86px">选择节目单文件<span>M3U、TXT、JSON、PLS、CSV、XSPF · 最大 20 MB</span><input class="file-input" id="playlistFile" type="file" accept=".m3u,.m3u8,.txt,.json,.pls,.csv,.xspf"></label><form id="pasteForm" style="margin-top:18px"><label for="playlistText">或粘贴节目单内容</label><textarea id="playlistText" placeholder="频道名称,http://直播地址" required></textarea><button class="secondary">导入节目单</button></form><form id="directForm" style="margin-top:24px"><label for="directUrl">单个直播直链</label><input id="directUrl" inputmode="url" autocapitalize="off" placeholder="HTTP / HTTPS / RTSP / UDP 地址" required><label for="directName">频道名称</label><input id="directName" placeholder="自定义直播" maxlength="100"><button class="secondary">添加直链</button></form></div></dialog>
+<dialog id="browserChoices"><div class="dialog-header"><h2 id="browserChoicesTitle">频道／选集</h2><button class="dialog-close" data-close="browserChoices" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body" id="browserChoicesBody"></div></dialog>
+<dialog id="browserPreferencesDialog"><div class="dialog-header"><h2>网页设置</h2><button class="dialog-close" data-close="browserPreferencesDialog" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body"><button class="browser-setting" id="browserAutoFullscreen" aria-pressed="false"><span>自动全屏播放</span><span class="browser-setting-value">关闭</span></button><button class="browser-setting" id="browserDesktopMode" aria-pressed="false"><span>桌面网页</span><span class="browser-setting-value">关闭</span></button><p class="small-note">自动全屏：页面视频开始播放时自动全屏。桌面网页：以电脑版网页打开。</p><div class="browser-scale-actions"><button class="secondary compact" data-browser="browserFit">适配宽度</button><button class="secondary compact" data-browser="browserOriginal">原始比例</button></div></div></dialog>
+<dialog id="browserHistoryDialog"><div class="dialog-header"><h2>历史记录</h2><button class="dialog-close" data-close="browserHistoryDialog" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body"><div id="browserHistoryBody"></div><button class="secondary compact" id="browserHistoryClear">清空全部</button></div></dialog>
 <dialog id="sourceDialog"><div class="dialog-header"><h2>直播源</h2><button class="dialog-close" data-close="sourceDialog" aria-label="关闭"><svg><use href="#close"/></svg></button></div><div class="dialog-body"><div id="sourceList"></div><button class="secondary" id="addSource">添加频道</button></div></dialog>
 <script>
 'use strict';
@@ -411,7 +438,7 @@ async function check(){
    try{status=JSON.parse(await post('/status','',5000))}
    catch(e){padReady=false;connection('offline','连接中断');if(!token)say(e.message,true);return false}
    connection('online','已连接');
-   if(browserMode)renderBrowser(status.browser);
+   if(browserMode)renderBrowser({...status.browser,settings:status.browserSettings||status.browser?.settings});
    padReady=!!status.pointerReady;
    refreshPadSetup();
    return true;
@@ -495,8 +522,7 @@ const engines={
   baidu:'https://www.baidu.com/s?wd=',
   google:'https://www.google.com/search?q='
 };
-try{const engine=localStorage.getItem('browser-engine');if(engines[engine])$('browserEngine').value=engine}catch{}
-$('browserEngine').onchange=()=>{try{localStorage.setItem('browser-engine',$('browserEngine').value)}catch{}};
+$('browserEngine').onchange=async()=>{await command('browserSearchEngine',$('browserEngine').value,true);await check()};
 const browserQuery=$('browserQuery'),browserClear=$('browserClear');
 browserQuery.addEventListener('input',()=>{browserClear.hidden=!browserQuery.value});
 browserClear.onclick=()=>{browserQuery.value='';browserClear.hidden=true;browserQuery.focus()};
@@ -504,13 +530,17 @@ $('browserSearchForm').onsubmit=async event=>{
   event.preventDefault();
   const input=$('browserQuery'),value=input.value.trim();
   if(!value)return;
-  const direct=/^https?:\/\//i.test(value)?value:/^[^\s/]+\.[^\s]+$/.test(value)?'https://'+value:null;
-  if(await command('browserNavigate',direct||engines[$('browserEngine').value]+encodeURIComponent(value),true))input.blur();
+  if(await command('browserNavigate',value,true))input.blur();
 };
-let browserCommandPending=false,browserDragging=false;
+let browserCommandPending=false,browserDragging=false,lastBrowserState={},browserChoiceRequest=0;
 const browserLabels={searching:'正在查找视频',loading:'正在加载',playing:'正在播放',paused:'已暂停',ended:'播放结束',failed:'视频无法播放'};
 const browserTime=ms=>{const seconds=Math.floor((ms||0)/1000);return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0')};
 function renderBrowser(state={}){
+  lastBrowserState=state;
+  const settings=state.settings||{};
+  if(engines[settings.searchEngine]&&document.activeElement!==$('browserEngine'))$('browserEngine').value=settings.searchEngine;
+  $('browserAutoFullscreen').querySelector('.browser-setting-value').textContent=settings.autoFullscreen?'开启':'关闭';
+  $('browserAutoFullscreen').setAttribute('aria-pressed',String(!!settings.autoFullscreen));
   const phase=state.phase||'idle',session=phase!=='idle';
   const playing=phase==='playing';
   $('browserPlayer').hidden=!session;
@@ -522,7 +552,6 @@ function renderBrowser(state={}){
     sources.dataset.key=sourceKey;
   }
   sources.value=String(state.sourceIndex||0);
-  $('browserPlay').hidden=session&&phase!=='failed';
   $('browserMediaTitle').textContent=state.title||'网页视频';
   $('browserMediaState').textContent=browserLabels[phase]||'';
   $('browserToggle').setAttribute('aria-label',playing?'暂停':'播放');
@@ -538,7 +567,30 @@ function renderBrowser(state={}){
   const fullscreen=document.querySelector('[data-browser=browserFullscreen]');
   fullscreen.textContent=state.fullscreen?'退出全屏':'全屏';
   fullscreen.setAttribute('aria-label',fullscreen.textContent);
-  document.querySelector('[data-browser=browserDesktopUa]').setAttribute('aria-label',state.desktop===false?'切换到电脑版':'切换到手机版');
+  $('browserDesktopMode').querySelector('.browser-setting-value').textContent=state.desktop?'开启':'关闭';
+  $('browserDesktopMode').setAttribute('aria-pressed',String(!!state.desktop));
+  if($('browserHistoryDialog').open)renderHistory(Array.isArray(state.history)?state.history:[]);
+}
+let lastHistorySignature=null;
+function renderHistory(entries){
+  const body=$('browserHistoryBody');
+  const signature=entries.map(entry=>entry.url).join('\n');
+  if(signature===lastHistorySignature&&body.childElementCount)return;
+  lastHistorySignature=signature;
+  body.replaceChildren();
+  if(!entries.length){
+    const empty=document.createElement('div');empty.className='browser-history-empty';empty.textContent='暂无历史记录';body.append(empty);return;
+  }
+  entries.forEach(entry=>{
+    const row=document.createElement('div');row.className='browser-history-item';
+    const open=document.createElement('button');open.type='button';open.className='secondary compact open';open.title=entry.url;
+    const title=document.createElement('span');title.className='history-title';title.textContent=entry.title||entry.url;open.append(title);
+    if(entry.title&&entry.title!==entry.url){const url=document.createElement('span');url.className='history-url';url.textContent=entry.url;open.append(url)}
+    open.onclick=async()=>{if(await sendBrowser('browserNavigate',entry.url))$('browserHistoryDialog').close()};
+    const del=document.createElement('button');del.type='button';del.className='secondary compact del';del.textContent='×';del.title='删除';del.setAttribute('aria-label','删除');
+    del.onclick=()=>sendBrowser('browserHistoryDelete',entry.url);
+    row.append(open,del);body.append(row);
+  });
 }
 async function sendBrowser(cmd,value='',hint=''){
   if(browserCommandPending)return;
@@ -546,13 +598,54 @@ async function sendBrowser(cmd,value='',hint=''){
   try{
     await post('/command',cmd+'\n'+value);
     await check();
+    return true;
   }catch(error){
     say(cmd==='browserPlay'&&error.status===409?'请先打开电视浏览器中的视频页面。':error.message,true);
+    return false;
   }finally{browserCommandPending=false}
 }
 document.querySelectorAll('[data-browser]').forEach(button=>button.onclick=()=>sendBrowser(button.dataset.browser,'',button.getAttribute('aria-label')));
-$('browserPlay').onclick=()=>sendBrowser('browserPlay','','播放');
-$('browserToggle').onclick=()=>sendBrowser('browserPlay','', browserToggle.getAttribute('aria-label'));
+$('browserPlay').onclick=()=>sendBrowser('browserPlay');
+$('browserPlaylist').onclick=()=>openBrowserChoices();
+$('browserPreferences').onclick=()=>{openDialog('browserPreferencesDialog');check()};
+$('browserAutoFullscreen').onclick=()=>sendBrowser('browserAutoFullscreen',String(!lastBrowserState.settings?.autoFullscreen));
+$('browserDesktopMode').onclick=()=>sendBrowser('browserDesktopUa');
+$('browserHistory').onclick=()=>{openDialog('browserHistoryDialog');check()};
+$('browserHistoryClear').onclick=()=>sendBrowser('browserHistoryClear');
+document.querySelector('[data-browser=browserFullscreen]').onclick=()=>sendBrowser('browserFullscreen');
+async function openBrowserChoices(){
+  const ticket=++browserChoiceRequest,body=$('browserChoicesBody');
+  body.replaceChildren(document.createTextNode('正在读取网页…'));openDialog('browserChoices');
+  if(!await command('browserInspect','',true)){body.textContent='无法读取，请先在电视打开网页';return}
+  try{
+    let data;
+    for(let i=0;i<12;i++){
+      if(ticket!==browserChoiceRequest||!$('browserChoices').open)return;
+      const status=JSON.parse(await post('/status','',5000));data=status.browser?.discovery;
+      if(data&&!data.loading&&(Array.isArray(data.groups)||data.error))break;
+      await new Promise(resolve=>setTimeout(resolve,250));
+    }
+    if(ticket!==browserChoiceRequest||!$('browserChoices').open)return;
+    body.replaceChildren();
+    if(!data||data.loading||data.error){body.textContent=data?.error||'请先在电视打开视频网页，再重试';return}
+    const groups=data.groups||[];
+    if(!groups.some(g=>g.items?.length)){body.textContent='未识别到列表，请在原网页展开频道或选集后重试';return}
+    groups.forEach(group=>{
+      const section=document.createElement('section');section.className='browser-choice-section';body.append(section);
+      const title=document.createElement('h3');title.textContent=group.label;const count=document.createElement('span');count.textContent=group.items.length+' 项';title.append(count);section.append(title);
+      const navigation=document.createElement('div');navigation.className='browser-choice-navigation';section.append(navigation);
+      const items=document.createElement('div');items.className='browser-choice-grid';section.append(items);
+      const current=group.items.findIndex(row=>row.selected);
+      const choose=async row=>{if(await sendBrowser('browserChooseItem',JSON.stringify({id:row.id,label:row.label,revision:data.revision})))$('browserChoices').close()};
+      const button=(parent,label,run)=>{const b=document.createElement('button');b.type='button';b.className='secondary compact';b.textContent=label;b.onclick=run;parent.append(b);return b};
+      if(current>0)button(navigation,'上一个',()=>choose(group.items[current-1]));
+      if(current>=0&&current<group.items.length-1)button(navigation,'下一个',()=>choose(group.items[current+1]));
+      group.items.forEach(row=>{const b=button(items,row.label,()=>choose(row));b.setAttribute('aria-pressed',String(!!row.selected));b.title=row.label});
+    });
+  }catch(e){body.textContent=e.message}
+}
+$('browserChoices').addEventListener('close',()=>{browserChoiceRequest++;$('browserChoicesBody').replaceChildren();command('browserClearSelection','',true)});
+$('browserToggle').onclick=()=>sendBrowser('browserPlay','', $('browserToggle').getAttribute('aria-label'));
 $('browserSpeedChoice').onchange=()=>sendBrowser('browserSpeed',$('browserSpeedChoice').value,'倍速 '+$('browserSpeedChoice').value+'×');
 $('browserSourceChoice').onchange=()=>sendBrowser('browserSelectSource',$('browserSourceChoice').value);
 $('browserProgress').addEventListener('input',()=>{browserDragging=true;$('browserTime').textContent=browserTime($('browserProgress').value)+' / '+browserTime($('browserProgress').max)});
@@ -617,7 +710,7 @@ $('confirmDeleteFile').onclick=async()=>{
   finally{button.disabled=false}
 };
 async function loadFiles(silent=false){try{const files=JSON.parse(await post('/files'));$('receivedFiles').replaceChildren(...files.map(file=>{const row=fileRow(file);if(/\.(jpe?g|png|webp|bmp|gif)$/i.test(file.name)){const background=document.createElement('button');background.className='secondary compact set-background';background.textContent='设为背景';background.onclick=async()=>{if(await command('wallpaperSet',file.name))say('桌面背景已更新')};row.append(background)}const remove=document.createElement('button');remove.className='channel-play';remove.textContent='删除';remove.setAttribute('aria-label','删除 '+file.name);remove.onclick=()=>{pendingDeleteFile=file.name;$('deleteFileName').textContent=file.name;openDialog('deleteFileDialog')};row.append(remove);return row}));if(!files.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='电视尚未收到文件';$('receivedFiles').append(empty);}}catch(e){if(!silent)say(e.message,true)}}
-$('refreshFiles').onclick=loadFiles;$('refreshApps').onclick=()=>loadApps(true);$('cancel').onclick=()=>activeUpload?.abort();
+$('refreshFiles').onclick=()=>loadFiles();$('refreshApps').onclick=()=>loadApps(true);$('cancel').onclick=()=>activeUpload?.abort();
 $('upload').onclick=async()=>{const files=Array.from($('files').files);if(!files.length)return;$('upload').disabled=true;$('files').disabled=true;$('cancel').hidden=false;$('progress').hidden=false;
 try{for(const file of files){if(file.size>1073741824)throw Error(file.name+' 超过 1 GB');$('progress').value=0;await new Promise((resolve,reject)=>{const x=new XMLHttpRequest();activeUpload=x;x.open('POST','/upload?name='+encodeURIComponent(file.name));x.setRequestHeader('X-TV-Token',token);x.timeout=3600000;x.upload.onprogress=e=>{if(e.lengthComputable){$('progress').value=e.loaded/e.total*100;$('uploadState').textContent='正在发送 '+file.name+' · '+Math.round(e.loaded/e.total*100)+'%';}};x.onload=()=>{if(x.status===200){$('uploadState').textContent=x.responseText;resolve();}else{if(x.status===401){token='';store.set('');render();}reject(Error(x.responseText||'上传失败'));}};x.onerror=()=>reject(Error('网络中断，请检查 Wi-Fi 后重试。'));x.onabort=()=>reject(Error('发送已取消，未完成文件会清理。'));x.ontimeout=()=>reject(Error('上传超时，请重试。'));x.send(file);});}say('文件已送达电视。');$('uploadState').textContent='全部文件发送完成。';$('files').value='';$('selectedFiles').replaceChildren();await loadFiles();}catch(e){$('uploadState').textContent=e.message;say(e.message,true);}finally{activeUpload=null;$('upload').disabled=!$('files').files.length;$('files').disabled=false;$('cancel').hidden=true;}};
 function categoryLabel(value){return {'全部频道':'全部','收藏频道':'收藏','地方卫视':'卫视'}[value]||value;}
@@ -662,6 +755,10 @@ function updateAppArtVersion(version){
   appArtVersion=version;
   for(const pending of appArt.values())pending.then(url=>{if(url)URL.revokeObjectURL(url)});
   appArt.clear();
+  const glass=fetch('/appArtwork',{method:'POST',headers:{'X-TV-Token':token,'Content-Type':'text/plain;charset=UTF-8'},body:'one:icon-glass'})
+    .then(r=>{if(!r.ok)throw Error();return r.blob()}).then(blob=>URL.createObjectURL(blob)).catch(()=>'');
+  appArt.set(version+':glass',glass);
+  glass.then(url=>{if(url&&version===appArtVersion)document.documentElement.style.setProperty('--app-glass','url("'+url+'")')});
 }
 function addAppArtwork(face,id){
   const img=document.createElement('img');img.alt='';img.draggable=false;
@@ -736,7 +833,7 @@ function renderApps(){
   list.replaceChildren(...items);
   if(items.length){
     const shelf=document.createElement('div');shelf.className='app-shelf';list.prepend(shelf);
-    shelf.style.height=(Math.max(...items.slice(0,5).map(tile=>tile.offsetTop+tile.offsetHeight))+4)+'px';
+    shelf.style.height=(Math.max(...items.slice(0,appsData.columns||6).map(tile=>tile.offsetTop+tile.offsetHeight))+4)+'px';
   }
   const hiddenList=$('appHiddenList');
   {

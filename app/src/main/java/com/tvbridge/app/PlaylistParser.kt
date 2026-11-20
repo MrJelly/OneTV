@@ -11,10 +11,32 @@ data class LiveChannel(val id:String,val name:String,val group:String,val stream
     fun json()=JSONObject().put("id",id).put("name",name).put("group",group).put("streams",JSONArray(streams))
 }
 
-/** Port of notation/src/shared/iptv/playlist.ts. No browser/relay dependency on TV. */
 object PlaylistParser {
     const val MAX_BYTES=20*1024*1024
     const val MAX_CHANNELS=20000
+    private val streamDecoration=Regex("\\$(?:[0-9]{3,4}[x×*][0-9]{3,4}|超清|高清|标清|蓝光|4K|1080P|720P).*$",RegexOption.IGNORE_CASE)
+    private val noticeGroup=Regex("更新时间|更新日期|^(说明|公告)$")
+    private val plsEntry=Regex("^(File|Title)(\\d+)=(.*)$",RegexOption.IGNORE_CASE)
+    private val infComma=Regex(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)")
+    private val groupTitle=Regex("group-title=\"([^\"]*)\"")
+    private val tvgId=Regex("tvg-id=\"([^\"]*)\"")
+    private val qualitySuffix=Regex("@(SD|HD|FHD|UHD|4K)$",RegexOption.IGNORE_CASE)
+    private val numericId=Regex("\\d+")
+    internal fun fitsUtf8Limit(value:String,limit:Int):Boolean{
+        var bytes=0;var i=0
+        while(i<value.length){
+            val c=value[i++]
+            bytes+=when{
+                c.code<0x80->1
+                c.code<0x800->2
+                c.isHighSurrogate()&&i<value.length&&value[i].isLowSurrogate()->{i++;4}
+                c.isSurrogate()->1
+                else->3
+            }
+            if(bytes>limit)return false
+        }
+        return true
+    }
     fun streamUrl(value:String):String?=try {
         val uri=URI(value.trim())
         val scheme=uri.scheme?.lowercase(Locale.ROOT)
@@ -29,18 +51,18 @@ object PlaylistParser {
     }
     fun digest(text:String)=MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).take(12).joinToString(""){"%02x".format(it)}
     @JvmStatic fun parse(input:String,scope:String="local",baseUrl:String?=streamUrl(scope)):List<LiveChannel> {
-        require(input.toByteArray(Charsets.UTF_8).size<=MAX_BYTES){"节目单超过 20 MB，请使用精简版订阅。"}
+        require(fitsUtf8Limit(input,MAX_BYTES)){"节目单超过 20 MB，请使用精简版订阅。"}
         val text=input.removePrefix("\uFEFF").trim()
         require(!Regex("#EXT-X-(TARGETDURATION|STREAM-INF|MEDIA-SEQUENCE)").containsMatchIn(text)){"这是视频流清单，请使用在线地址添加为直播直链。"}
         val channels=linkedMapOf<String,LiveChannel>()
         fun add(nameValue:String,groupValue:String,urls:List<String>,keyValue:String=nameValue) {
             val streams=urls.mapNotNull {value->
-                val clean=value.trim().replace(Regex("\\$(?:[0-9]{3,4}[x×*][0-9]{3,4}|超清|高清|标清|蓝光|4K|1080P|720P).*$",RegexOption.IGNORE_CASE),"")
+                val clean=value.trim().replace(streamDecoration,"")
                 streamUrl(clean)?:if(baseUrl!=null)try{streamUrl(URI(baseUrl).resolve(clean).toString())}catch(_:Exception){null}else null
             }.distinct().take(100)
             if(streams.isEmpty())return
             val group=groupValue.trim().take(60).ifEmpty{"未分组"}
-            if(Regex("更新时间|更新日期|^(说明|公告)$").containsMatchIn(group))return
+            if(noticeGroup.containsMatchIn(group))return
             val name=nameValue.trim().take(160).ifEmpty{"频道 ${channels.size+1}"}
             val id=digest("$scope:${keyValue.ifEmpty{name}}")
             val previous=channels[id]
@@ -69,18 +91,19 @@ object PlaylistParser {
             }
             text.startsWith("[playlist]",true)->{
                 val entries=linkedMapOf<String,Pair<String,MutableList<String>>>()
-                text.lineSequence().forEach{line->val m=Regex("^(File|Title)(\\d+)=(.*)$",RegexOption.IGNORE_CASE).find(line.trim());if(m!=null){val key=m.groupValues[2];val entry=entries.getOrPut(key){"" to mutableListOf()};if(m.groupValues[1].equals("File",true))entry.second.add(m.groupValues[3].trim())else entries[key]=m.groupValues[3].trim() to entry.second}}
+                text.lineSequence().forEach{line->val m=plsEntry.find(line.trim());if(m!=null){val key=m.groupValues[2];val entry=entries.getOrPut(key){"" to mutableListOf()};if(m.groupValues[1].equals("File",true))entry.second.add(m.groupValues[3].trim())else entries[key]=m.groupValues[3].trim() to entry.second}}
                 entries.values.forEach{add(it.first,"未分组",it.second)}
             }
             text.contains("#EXTINF:")->{
                 var name="";var group="未分组";var key=""
                 text.lineSequence().forEach {raw->val line=raw.trim()
                     if(line.startsWith("#EXTINF:")){
-                        val comma=Regex(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)").find(line)?.range?.first
+                        val comma=infComma.find(line)?.range?.first
+                            ?: line.lastIndexOf(',').takeIf{it>=0}
                         name=if(comma!=null)line.substring(comma+1).trim() else ""
-                        group=Regex("group-title=\"([^\"]*)\"").find(line)?.groupValues?.get(1)?:"未分组"
-                        key=(Regex("tvg-id=\"([^\"]*)\"").find(line)?.groupValues?.get(1)?:name).replace(Regex("@(SD|HD|FHD|UHD|4K)$",RegexOption.IGNORE_CASE),"")
-                        if(key.matches(Regex("\\d+")))key=name
+                        group=groupTitle.find(line)?.groupValues?.get(1)?:"未分组"
+                        key=(tvgId.find(line)?.groupValues?.get(1)?:name).replace(qualitySuffix,"")
+                        if(key.matches(numericId))key=name
                     }else if(line.isNotEmpty()&&!line.startsWith("#")){
                         if(name.isNotEmpty())add(name,group,listOf(line),key)
                         name="";group="未分组";key=""

@@ -6,6 +6,9 @@ import android.app.usage.UsageStatsManager
 
 @android.annotation.TargetApi(21)
 internal object DesktopForeground {
+    fun elapsedTimestamp(eventWall:Long,sampledWall:Long,sampledElapsed:Long):Long =
+        (sampledElapsed-(sampledWall-eventWall).coerceAtLeast(0L)).coerceAtLeast(0L)
+
     fun latest(context:Context,lookback:Long):Pair<ComponentName,Long>? {
         var found:Pair<ComponentName,Long>?=null;val now=System.currentTimeMillis()
         val events=runCatching{(context.getSystemService("usagestats") as UsageStatsManager).queryEvents(now-lookback,now)}.getOrNull()?:return null

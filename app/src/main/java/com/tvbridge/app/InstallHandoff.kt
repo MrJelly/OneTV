@@ -22,6 +22,7 @@ internal object InstallHandoff {
         finish(context);return true
     }
     fun active(context:Context):Boolean {
+        if(!DesktopTakeover.unlocked(context))return false
         val at=prefs(context).getLong(KEY,0)
         return at>0&&System.currentTimeMillis()-at in 0..15*60_000L
     }

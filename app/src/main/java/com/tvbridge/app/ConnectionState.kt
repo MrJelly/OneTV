@@ -7,52 +7,46 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * The phone-connection card's address list, owned in one place.
- *
- * Enumerating network interfaces is a system call sweep that used to run on
- * the UI thread whenever the 30-second cache went stale under the home
- * ticker. The cache lives here now: the first fill is synchronous so the
- * card is right at once, later refreshes run on the io pool and callers
- * always read the last known list.
- */
 object ConnectionState {
     @Volatile private var cachedAddresses = emptyList<String>()
     @Volatile private var cachedAddressesMs = 0L
     private val refreshing = AtomicBoolean(false)
 
-    /** Drop the cached list so the next read recomputes it (refresh button). */
+    private const val FRESH_TTL_MS = 30_000L
+    private const val EMPTY_RETRY_MS = 5_000L
+
     fun invalidate() {
         cachedAddresses = emptyList()
         cachedAddressesMs = 0L
     }
 
-    fun addresses(context: Context, port: Int): List<String> {
+    fun addresses(context: Context, port: Int, onUpdated: (() -> Unit)? = null): List<String> {
+        val current = cachedAddresses
         val now = SystemClock.elapsedRealtime()
-        if (now - cachedAddressesMs < 30000 && cachedAddresses.isNotEmpty() && cachedAddresses.all { it.endsWith(":$port") }) return cachedAddresses
-        if (cachedAddresses.isEmpty()) {
-            val found = compute(context, port)
-            if (found.isNotEmpty()) {
-                cachedAddresses = found
-                cachedAddressesMs = now
-            }
-            return found
+        val age = now - cachedAddressesMs
+        val fresh = if (current.isNotEmpty()) {
+            age < FRESH_TTL_MS && current.all { it.endsWith(":$port") }
+        } else {
+            cachedAddressesMs != 0L && age < EMPTY_RETRY_MS
         }
+        if (fresh) return current
+
         if (refreshing.compareAndSet(false, true)) {
             val app = context.applicationContext
             AppThreads.onIo {
+                var changed = false
                 try {
                     val found = compute(app, port)
-                    if (found.isNotEmpty()) {
-                        cachedAddresses = found
-                        cachedAddressesMs = SystemClock.elapsedRealtime()
-                    }
+                    changed = found != cachedAddresses
+                    cachedAddresses = found
+                    cachedAddressesMs = SystemClock.elapsedRealtime()
                 } finally {
                     refreshing.set(false)
                 }
+                if (changed) onUpdated?.invoke()
             }
         }
-        return cachedAddresses
+        return current
     }
 
     private fun compute(context: Context, port: Int): List<String> {

@@ -35,8 +35,6 @@ object SystemControls {
     fun networkIntents(context:Context):List<Intent> {
         val wired=network(context)=="有线网络"
         return listOfNotNull(
-            // Aerial 829cb68 (PR #1540): LeTV's own network page; the explicit
-            // component only resolves where LeTV's settings app is installed.
             Intent("com.letv.setting.NETWORK").setComponent(ComponentName("com.stv.globalsetting","com.stv.globalsetting.activity.NetworkActivity")),
             fengOsSettings(context)?.let{Intent(Settings.ACTION_WIFI_SETTINGS).setPackage(fengOsPanel.packageName)},
             ChanghongSettings.intent(context,ChanghongSettings.NETWORK),
@@ -62,6 +60,9 @@ object SystemControls {
         if(standard.any{it.kind!=Kind.Tuner})return standard.take(64)
         val vendor=XgimiInputAdapter.load(context).ifEmpty{KonkaInputAdapter.load(context)}
             .ifEmpty{HisenseInputAdapter.load(context)}.ifEmpty{HisenseInputAdapter.loadLegacy(context)}
+            .ifEmpty{if(standard.isEmpty())VendorInputFallbacks.tcl(context) else emptyList()}
+            .ifEmpty{if(standard.isEmpty())VendorInputFallbacks.whaley(context) else emptyList()}
+            .ifEmpty{if(standard.isEmpty())VendorInputFallbacks.dangbei(context) else emptyList()}
             .ifEmpty{InputRoutes.skyworth(context)}
         return (vendor+standard).distinctBy{it.id}.take(64)
     }
@@ -142,20 +143,14 @@ object SystemControls {
         }
         changhongInputPanel(context)?.let{intent->if(runCatching{context.startService(intent)}.getOrNull()!=null)return}
         if(DeviceAdapters.xgimiPage(context,"Settings://com.xgimi.settings.signalSource/hdmi_misckey"))return
+        if(open(context,listOf(Intent("com.dangbei.action.INPUTSOURCE_CHOOSER_ACTIVITY").setPackage("com.huanglong.tvui")),false))return
         if(open(context,listOf(Intent("android.settings.TV_INPUT_SETTINGS"),Intent("android.intent.action.TV_INPUT_SETTINGS"),Intent("coocaa.intent.action.SOURCE_DIALOG")),false))return
         for(intent in listOf(Intent("com.tcl.insrc.SHOW_WINDOW").setPackage("com.tcl.settings"),Intent("com.hisense.tv.start_inputs").setComponent(ComponentName("com.hisense.tv.inputs","com.hisense.tv.InputsUIService")))){
             val info=runCatching{context.packageManager.resolveService(intent,0)?.serviceInfo}.getOrNull()
             if(info?.exported==true)try{if(Build.VERSION.SDK_INT>=26&&info.packageName=="com.hisense.tv.inputs")context.startForegroundService(intent)else context.startService(intent);return}catch(_:RuntimeException){}
         }
-        // Aerial 5d52b73: MStar tvsetting's input list is the panel the
-        // remote's input key shows; SOURCE_INFO below is only a banner on
-        // some MStar sets. Only an exported one.
         val mstarList=ComponentName("com.mstar.tvsetting","com.mstar.tvsetting.hotkey.InputSourceListViewActivity")
         if(runCatching{context.packageManager.getActivityInfo(mstarList,0)}.getOrNull()?.exported==true&&runCatching{context.startActivity(Intent(Intent.ACTION_MAIN).setComponent(mstarList).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))}.isSuccess)return
-        // Aerial 829cb68: LeTV EUI has no tv_input service; its source app is
-        // SignalSourceManager. Prime the desktop tags first so it does not
-        // crash on them, then launch it fresh (no action, NEW_TASK |
-        // CLEAR_TASK), the way Dangbei's launcher does.
         val letvSources=ComponentName("com.stv.signalsourcemanager","com.stv.signalsourcemanager.MainActivity")
         if(runCatching{context.packageManager.getActivityInfo(letvSources,0)}.getOrNull()?.exported==true){
             InputRoutes.primeLetvDesktopTags()
@@ -163,9 +158,6 @@ object SystemControls {
         }
         val mstar=Intent("com.mstar.tv.tvplayer.ui.intent.action.SOURCE_INFO").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if(runCatching{context.packageManager.resolveActivity(mstar,0)?.activityInfo}.getOrNull()?.exported==true&&runCatching{context.startActivity(mstar)}.isSuccess)return
-        // Aerial 44285e6: YunOS sets (Hisense/Haier HS350) list inputs but no
-        // passthrough intent answers; the system TVSource list is behind
-        // this URI. Only where it resolves to an exported activity.
         val alliance=Intent(Intent.ACTION_VIEW,android.net.Uri.parse("alliance://start_signal")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if(runCatching{context.packageManager.resolveActivity(alliance,0)?.activityInfo}.getOrNull()?.exported==true&&runCatching{context.startActivity(alliance)}.isSuccess)return
         NativeUi.notice(context,"设备未提供可用的信号源入口")
@@ -213,15 +205,11 @@ object SystemControls {
         val netButton=row(if(net=="网络已连接")"网络"else net,when(net){"有线网络"->"ethernet";"未连接"->"network_off";"Wi-Fi"->wifiIcon(activity);"移动网络"->"cellular";else->"monitor"}){
             if(!DeviceAdapters.xgimiPage(activity,"Settings://com.xgimi.settings.net/wifi_misckey"))open(activity,networkIntents(activity))
         }
-        // The header is built once, so without this the network button kept
-        // showing the state from when the settings page was opened. Follow
-        // connectivity changes while the header is on screen.
         var shown=""
         fun refreshNet(){
+            if(!body.isAttachedToWindow||activity.isFinishing||(Build.VERSION.SDK_INT>=17&&activity.isDestroyed))return
             val n=network(activity);val label=if(n=="网络已连接")"网络" else n
             val icon=when(n){"有线网络"->"ethernet";"未连接"->"network_off";"Wi-Fi"->wifiIcon(activity);"移动网络"->"cellular";else->"monitor"}
-            // Capability/link callbacks fire in bursts (Wi-Fi signal jitter, hand-overs); only touch the
-            // view when what it shows actually changes.
             if("$label|$icon"==shown)return
             shown="$label|$icon"
             netButton.text=label
@@ -229,10 +217,8 @@ object SystemControls {
             val inset=((buttonWidth-netButton.paint.measureText(label)-iconSize-netButton.compoundDrawablePadding)/2).toInt().coerceAtLeast(0)
             netButton.setPadding(inset,0,inset,0)
         }
-        // Settle for a moment before reading: during a Wi-Fi/Ethernet hand-over the old network is lost
-        // a beat before the new default is announced, which would flash "未连接".
         val settle=Runnable{refreshNet()}
-        fun scheduleRefresh(){body.removeCallbacks(settle);body.postDelayed(settle,400)}
+        fun scheduleRefresh(){AppThreads.main.removeCallbacks(settle);AppThreads.main.postDelayed(settle,400)}
         val manager=activity.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
         if(Build.VERSION.SDK_INT>=21&&manager!=null){
             val callback=object:ConnectivityManager.NetworkCallback(){
@@ -244,24 +230,17 @@ object SystemControls {
             body.addOnAttachStateChangeListener(object:android.view.View.OnAttachStateChangeListener{
                 override fun onViewAttachedToWindow(v:android.view.View){
                     refreshNet()
-                    // Track the default network (what network() reads): the
-                    // default-network callback fires on every Wi-Fi/cellular/
-                    // ethernet hand-over; an empty NetworkRequest could be
-                    // filtered differently by vendor firmwares.
                     runCatching{if(Build.VERSION.SDK_INT>=24)manager.registerDefaultNetworkCallback(callback) else manager.registerNetworkCallback(android.net.NetworkRequest.Builder().addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET).build(),callback)}
                 }
-                override fun onViewDetachedFromWindow(v:android.view.View){body.removeCallbacks(settle);runCatching{manager.unregisterNetworkCallback(callback)}}
+                override fun onViewDetachedFromWindow(v:android.view.View){AppThreads.main.removeCallbacks(settle);runCatching{manager.unregisterNetworkCallback(callback)}}
             })
         }else{
             val receiver=object:android.content.BroadcastReceiver(){override fun onReceive(c:Context,intent:Intent){scheduleRefresh()}}
             body.addOnAttachStateChangeListener(object:android.view.View.OnAttachStateChangeListener{
                 override fun onViewAttachedToWindow(v:android.view.View){runCatching{activity.registerReceiver(receiver,android.content.IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION))}}
-                override fun onViewDetachedFromWindow(v:android.view.View){body.removeCallbacks(settle);runCatching{activity.unregisterReceiver(receiver)}}
+                override fun onViewDetachedFromWindow(v:android.view.View){AppThreads.main.removeCallbacks(settle);runCatching{activity.unregisterReceiver(receiver)}}
             })
         }
-        // Aerial #1528: LeTV's own settings lead where installed (the
-        // explicit component resolves nowhere else); EUI has no usable
-        // AOSP settings page.
         row("系统设置","settings"){open(activity,listOfNotNull(Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.stv.globalsetting","com.stv.globalsetting.activity.SettingActivity")),fengOsSettings(activity),ChanghongSettings.intent(activity),Intent(Settings.ACTION_SETTINGS),
             Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.konka.systemsetting","com.konka.systemsetting.MainActivity")),
             Intent(Intent.ACTION_MAIN).setComponent(ComponentName("com.konka.tvsettings","com.konka.settingcenter.settings.view.MainSettingsActivity"))))}

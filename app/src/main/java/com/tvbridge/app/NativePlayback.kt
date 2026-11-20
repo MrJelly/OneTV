@@ -34,6 +34,7 @@ object NativePlayback {
         renderers.setEnableDecoderFallback(true)
         return ExoPlayer.Builder(context,renderers)
             .setLoadControl(loadControl(context,startupMs,live))
+            .setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true)
             .build()
     }
     fun source(context:Context,url:String,attempt:PlaybackAttempts,policy:LoadErrorHandlingPolicy):MediaSource {
@@ -50,24 +51,35 @@ object NativePlayback {
         val data=DefaultDataSource.Factory(context,http)
         return DefaultMediaSourceFactory(data).setLoadErrorHandlingPolicy(policy).createMediaSource(item)
     }
-    fun browserSource(context:Context,url:String,userAgent:String,headers:Map<String,String>):MediaSource {
-        val http=DefaultHttpDataSource.Factory().setUserAgent(userAgent)
+    fun browserSource(
+        context: Context,
+        url: String,
+        userAgent: String,
+        headers: Map<String, String>,
+        attempt: PlaybackAttempts? = null,
+        hintMime: String? = null
+    ): MediaSource {
+        val http = DefaultHttpDataSource.Factory()
+            .setUserAgent(userAgent)
             .setDefaultRequestProperties(headers)
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(3500).setReadTimeoutMs(3500)
-        val cookies=android.webkit.CookieManager.getInstance()
-        val data=ResolvingDataSource.Factory(http){spec->
-            val cookie=cookies.getCookie(spec.uri.toString())
-            if(cookie.isNullOrEmpty())spec else spec.withAdditionalHeaders(mapOf("Cookie" to cookie))
+            .setConnectTimeoutMs(8000)
+            .setReadTimeoutMs(12000)
+        val cookies = runCatching { android.webkit.CookieManager.getInstance() }.getOrNull()
+        val data = ResolvingDataSource.Factory(http) { spec ->
+            val cookie = cookies?.let { runCatching { it.getCookie(spec.uri.toString()) }.getOrNull() }
+            if (cookie.isNullOrEmpty()) spec else spec.withAdditionalHeaders(mapOf("Cookie" to cookie))
         }
-        val path=url.substringBefore('?').substringBefore('#').lowercase()
-        val item=MediaItem.Builder().setUri(url).apply{
-            when{
-                path.endsWith(".m3u8")->setMimeType(MimeTypes.APPLICATION_M3U8)
-                path.endsWith(".mpd")->setMimeType(MimeTypes.APPLICATION_MPD)
+        val path = url.substringBefore('?').substringBefore('#').lowercase()
+        val item = MediaItem.Builder().setUri(url).apply {
+            val forcedMime = attempt?.format?.mime ?: hintMime
+            when {
+                forcedMime != null -> setMimeType(forcedMime)
+                path.endsWith(".m3u8") -> setMimeType(MimeTypes.APPLICATION_M3U8)
+                path.endsWith(".mpd") -> setMimeType(MimeTypes.APPLICATION_MPD)
             }
         }.build()
-        return DefaultMediaSourceFactory(DefaultDataSource.Factory(context,data))
+        return DefaultMediaSourceFactory(DefaultDataSource.Factory(context, data))
             .createMediaSource(item)
     }
 }

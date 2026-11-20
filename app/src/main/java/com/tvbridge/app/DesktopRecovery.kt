@@ -29,6 +29,7 @@ object DesktopRecovery {
     private const val STOCK_VISIT_UNTIL="stock_visit_until"
     private const val STOCK_VISIT_BOOT="stock_visit_boot"
     private const val STOCK_VISIT_BOOT_ID="stock_visit_boot_id"
+    private const val STOCK_VISIT_PACKAGE="stock_visit_package"
     private const val SAME_BOOT_SLACK_MS=120000L
     @Volatile var leftForAnApp=false
         private set
@@ -70,16 +71,18 @@ object DesktopRecovery {
         val leftAt=homeLeftAt(context)?:return false
         return !stockHomeSinceHomeLeft(context)&&!screenOffSince(context,leftAt)
     }
-    fun noteStockVisit(context:Context,untilElapsed:Long?){
+    fun noteStockVisit(context:Context,untilElapsed:Long?,targetPackage:String?=null){
         if(!DesktopTakeover.unlocked(context))return
         val prefs=startupPrefs(context)
         if(untilElapsed==null){
             if(!prefs.contains(STOCK_VISIT_UNTIL))return
-            prefs.edit().remove(STOCK_VISIT_AT).remove(STOCK_VISIT_UNTIL).remove(STOCK_VISIT_BOOT).remove(STOCK_VISIT_BOOT_ID).apply()
+            prefs.edit().remove(STOCK_VISIT_AT).remove(STOCK_VISIT_UNTIL).remove(STOCK_VISIT_BOOT).remove(STOCK_VISIT_BOOT_ID).remove(STOCK_VISIT_PACKAGE).apply()
             return
         }
-        prefs.edit().putLong(STOCK_VISIT_AT,SystemClock.elapsedRealtime()).putLong(STOCK_VISIT_UNTIL,untilElapsed).putLong(STOCK_VISIT_BOOT,bootStamp()).putString(STOCK_VISIT_BOOT_ID,BOOT_ID).commit()
+        prefs.edit().putLong(STOCK_VISIT_AT,SystemClock.elapsedRealtime()).putLong(STOCK_VISIT_UNTIL,untilElapsed).putLong(STOCK_VISIT_BOOT,bootStamp()).putString(STOCK_VISIT_BOOT_ID,BOOT_ID).putString(STOCK_VISIT_PACKAGE,targetPackage).commit()
     }
+    fun stockVisitPackage(context:Context)=if(stockVisitLeftMs(context)>0)startupPrefs(context).getString(STOCK_VISIT_PACKAGE,null) else null
+    fun stockVisitAgeMs(context:Context):Long=if(stockVisitLeftMs(context)>0)(SystemClock.elapsedRealtime()-startupPrefs(context).getLong(STOCK_VISIT_AT,0)).coerceAtLeast(0) else Long.MAX_VALUE
     fun stockVisitLeftMs(context:Context):Long{
         if(!DesktopTakeover.unlocked(context))return 0L
         val prefs=startupPrefs(context);val at=prefs.getLong(STOCK_VISIT_AT,-1L)

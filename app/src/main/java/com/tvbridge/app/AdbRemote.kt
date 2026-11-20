@@ -18,7 +18,7 @@ class AdbRemote(context:Context){
     private val prefs=context.getSharedPreferences("remote-adb",Context.MODE_PRIVATE)
     private val keyDir=File(context.filesDir,"adb-key").apply{mkdirs()}
     @Volatile var ready=false;private set
-    @Volatile var message="未连接。先开启投影仪 ADB 调试，再确认屏幕上的授权请求。";private set
+    @Volatile var message="未连接。先开启设备 ADB 调试，再确认屏幕上的授权请求。";private set
     private val keyPair:KeyPair by lazy {
         val privateFile=File(keyDir,"private.der");val publicFile=File(keyDir,"public.der")
         if(privateFile.exists()&&publicFile.exists()){
@@ -44,7 +44,6 @@ class AdbRemote(context:Context){
         if(port !in 1024..65535){message="端口应为 1024–65535";return false}
         return try{val result=shell("echo tvbridge-adb-ready",port,true);check(result.contains("tvbridge-adb-ready")){"ADB 测试未通过"};prefs.edit().putInt("port",port).putBoolean("enabled",true).apply();ready=true;message="ADB 已授权，可跨应用遥控";true}catch(e:Exception){ready=false;message="连接未完成：${e.message?:"请检查调试端口和屏幕授权"}";false}
     }
-    /** Per-item outcome of the last [authorizeDesktop], in run order. */
     @Volatile var authReport:List<Pair<String,Boolean>> = emptyList()
         private set
     private fun appOpsAllowed(op:String):Boolean {
@@ -56,13 +55,6 @@ class AdbRemote(context:Context){
         if(cleanSetting(shell("settings get system boot_app_componentname",port(),false))!="none")return true
         return shell("pm path com.tcl.ttvs",port(),false).contains("package:")
     }
-    /**
-     * Runs each desktop grant, then reads the resulting state back from the
-     * system itself — permission state, app-ops, the secure listener list,
-     * the boot-app setting — so a command the firmware accepted but did not
-     * apply is reported as failed instead of assumed done. Only the items
-     * this device actually has are attempted and reported.
-     */
     fun authorizeDesktop():Boolean {
         if(!enabled()||!ready)return false
         return try{
@@ -78,6 +70,30 @@ class AdbRemote(context:Context){
                 runCatching{shell("appops set $pkg SYSTEM_ALERT_WINDOW allow",port(),false)}
                 report["悬浮窗"]=appOpsAllowed(android.app.AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW)
             }
+            runCatching{
+                for(op in listOf("APP_AUTO_START","APP_ASSOC_START","AUTO_START","ASSOC_START","REQUEST_INSTALL_PACKAGES"))shell("appops set $pkg $op allow",port(),false)
+                if(android.os.Build.VERSION.SDK_INT>=33)shell("appops set $pkg ACCESS_RESTRICTED_SETTINGS allow",port(),false)
+            }
+            if(DesktopPolicy.stockHomeMustRemainDefault(appContext)){
+                runCatching{shell("appops set $pkg ${DesktopPolicy.MIUI_BACKGROUND_START_OP} allow",port(),false)}
+                report["后台弹出界面"]=DesktopPolicy.stockHomeBackgroundAllowed(appContext)
+            }
+            runCatching{
+                val guard=ComponentName(appContext,DesktopGuardService::class.java)
+                val current=cleanSetting(shell("settings get secure enabled_accessibility_services",port(),false))
+                val listed=current.split(':').mapNotNull{ComponentName.unflattenFromString(it)}
+                if(guard !in listed){
+                    val joined=(listed.map{it.flattenToString()}+guard.flattenToString()).joinToString(":")
+                    shell("settings put secure enabled_accessibility_services $joined",port(),false)
+                }
+                shell("settings put secure accessibility_enabled 1",port(),false)
+            }
+            report["无障碍接管"]=runCatching{
+                val guard=ComponentName(appContext,DesktopGuardService::class.java)
+                val now=android.provider.Settings.Secure.getString(appContext.contentResolver,android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+                now.split(':').any{ComponentName.unflattenFromString(it)==guard}&&
+                    android.provider.Settings.Secure.getInt(appContext.contentResolver,android.provider.Settings.Secure.ACCESSIBILITY_ENABLED,0)==1
+            }.getOrDefault(false)
             if(android.os.Build.VERSION.SDK_INT>=24){
                 runCatching{shell("cmd notification allow_listener $pkg/.DesktopRevivalService",port(),false)}
                 val listener=ComponentName(appContext,DesktopRevivalService::class.java)
@@ -92,12 +108,6 @@ class AdbRemote(context:Context){
         }catch(_:Exception){message="授权未完成，请检查系统遥控连接";false}
     }
     private fun cleanSetting(value:String)=value.trim().let{if(it.isEmpty()||it=="null")"none" else it}
-    /**
-     * TCL / FFALCON read system boot_app_mode and boot_app_componentname (com.tcl.ttvs) at power-on.
-     * Pointing them at One makes it the first screen instead of TCL's launcher (idea from Aerial's
-     * install.sh). Only where the firmware has the key: com.tcl.ttvs installed or a value already set.
-     * Original values are kept for [restoreBootApp].
-     */
     fun applyBootApp():Boolean {
         if(!ready)return false
         val own="${appContext.packageName}/.MainActivity"
@@ -112,7 +122,6 @@ class AdbRemote(context:Context){
         shell("settings put system boot_app_componentname $own",port(),false)
         return cleanSetting(shell("settings get system boot_app_componentname",port(),false))==own
     }
-    /** True when there is nothing to restore or the original values are back (verified by reading them again). */
     fun bootAppPending():Boolean=appContext.getSharedPreferences("startup",Context.MODE_PRIVATE).contains("boot_app_previous")
     fun restoreBootApp():Boolean {
         val prefs=appContext.getSharedPreferences("startup",Context.MODE_PRIVATE)
@@ -153,18 +162,29 @@ class AdbRemote(context:Context){
                     if(!vendorHome&&!hadBackup)startup.edit().remove("desktop_vt_previous").apply()
                 }
             }else if(pkg!=appContext.packageName){
-                val previous=startup.getString("desktop_vt_previous",null)
-                if(previous!=null&&packagePattern.matches(previous)){
-                    val current=shell("getprop persist.vt.use_home_pkg",port(),false).trim()
-                    if(current==appContext.packageName)shell("setprop persist.vt.use_home_pkg '$previous'",port(),false)
-                    if(shell("getprop persist.vt.use_home_pkg",port(),false).trim()!=appContext.packageName)startup.edit().remove("desktop_vt_previous").apply()
-                }
+                restoreVendorHomePkg()
             }
             val command=if(android.os.Build.VERSION.SDK_INT>=24)"cmd package"else "pm"
             if(android.os.Build.VERSION.SDK_INT>=29)runCatching{shell("cmd role add-role-holder --user 0 android.app.role.HOME '$pkg'",port(),false,timeout=2500)}
             shell("$command set-home-activity --user 0 '$id'",port(),false)
             val result=shell("$command resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME",port(),false)
             vendorHome||result.lineSequence().mapNotNull{ComponentName.unflattenFromString(it.trim())}.lastOrNull()?.packageName==component.packageName
+        }catch(_:Exception){false}
+    }
+    fun restoreVendorHomePkg():Boolean {
+        val startup=appContext.getSharedPreferences("startup",Context.MODE_PRIVATE)
+        val previous=startup.getString("desktop_vt_previous",null)?:return true
+        val packagePattern=Regex("^[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+$")
+        if(!packagePattern.matches(previous)){
+            startup.edit().remove("desktop_vt_previous").apply()
+            return true
+        }
+        return try{
+            val current=shell("getprop persist.vt.use_home_pkg",port(),false).trim()
+            if(current==appContext.packageName)shell("setprop persist.vt.use_home_pkg '$previous'",port(),false)
+            val restored=shell("getprop persist.vt.use_home_pkg",port(),false).trim()!=appContext.packageName
+            if(restored)startup.edit().remove("desktop_vt_previous").apply()
+            restored
         }catch(_:Exception){false}
     }
     fun command(cmd:String):Boolean {

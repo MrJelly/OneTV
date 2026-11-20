@@ -4,11 +4,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.os.Build
 
-/** Home-specific firmware contracts from Aerial edfffc7 (MIT; assets/licenses/aerial-MIT.txt). */
 internal object DesktopPolicy {
     val inputPlayers=setOf("com.tcl.tv","com.xiaomi.mitv.tvplayer","com.skyworth.tv","com.mediatek.wwtv.tvcenter","com.hisilicon.tvui")
     val notLaunchers=setOf("com.stv.appdaemon","com.letv.lekids")
-    val sourceSwitchers=setOf("com.tianci.tv")
+    val sourceSwitchers=setOf("com.tianci.tv","com.droidlogic.tvsource","com.hisense.tv.inputs","com.mstar.tvsetting","com.changhong.SourceMenu")
     private val vidaa=setOf("com.hisense.vidaaassistant","com.jamdeo.tv.vod")
     private val unfiltered=mapOf(
         "com.skyworth.panasonichome" to "com.skyworth.panasonichome.MainActivity",
@@ -29,6 +28,16 @@ internal object DesktopPolicy {
     fun vendorCategory(category:String)=category.startsWith("android.intent.category.HOME.")||(category.endsWith("_HOME")&&category!="android.intent.category.SECONDARY_HOME"&&!category.endsWith("_AT_HOME"))
     fun acceptsPriority(component:ComponentName,priority:Int)=priority>=0||component==ComponentName("com.keylab.speech.view.vidaa","com.ju.secondscreen.HomeActivity")
     fun installed(context:Context,pkg:String)=runCatching{context.packageManager.getApplicationInfo(pkg,0).enabled}.getOrDefault(false)
+    fun stockHomeMustRemainDefault(context:Context)=installed(context,"com.miui.home")
+    const val MIUI_BACKGROUND_START_OP=10021
+    fun stockHomeBackgroundAllowed(context:Context):Boolean {
+        if(!stockHomeMustRemainDefault(context))return true
+        return runCatching{
+            val ops=context.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+            val check=ops.javaClass.getMethod("checkOpNoThrow",Int::class.javaPrimitiveType,Int::class.javaPrimitiveType,String::class.java)
+            check.invoke(ops,MIUI_BACKGROUND_START_OP,android.os.Process.myUid(),context.packageName)==android.app.AppOpsManager.MODE_ALLOWED
+        }.getOrDefault(false)
+    }
     fun passKeys(context:Context)=vidaa.any{installed(context,it)}
     fun volumeFilterUnsafe(context:Context)=installed(context,"com.tianci.system")||
         Build.MANUFACTURER.lowercase(java.util.Locale.US).let{it.contains("skyworth")||it.contains("coocaa")}
@@ -55,17 +64,9 @@ internal object DesktopPolicy {
         (getter.invoke(null,"persist.sys.boot.source",0) as Int)!=0
     }.getOrDefault(false)
 
-    fun bootCover(component:ComponentName)=android.os.SystemClock.elapsedRealtime()<180000&&component==ComponentName("com.mitv.tvhome","com.mitv.tvhome.BootActivity")
-    /**
-     * Skyworth/Coocaa firmwares boot their homepage by component, not by
-     * HOME resolution, so a stock launcher that declares no HOME category
-     * is invisible to the usual queries. The component is recorded in the
-     * persist properties and in the firmware's general_config.xml
-     * (DEFAULT_HOMEPAGE); Aerial's CoocaaHome reads the same two sources.
-     * Read-only: this identifies the stock home for the guard's stock set
-     * and for restore; it never writes either source. The component is
-     * returned only when it names a real, enabled activity of another app.
-     */
+    fun bootPlaceholder(pkg:String,cls:String)=pkg in setOf("com.android.tv.settings","com.android.settings")&&cls.endsWith(".FallbackHome")
+    fun bootCover(component:ComponentName)=android.os.SystemClock.elapsedRealtime()<180000&&
+        (component==ComponentName("com.mitv.tvhome","com.mitv.tvhome.BootActivity")||bootPlaceholder(component.packageName,component.className))
     fun coocaaHome(context:Context):ComponentName? {
         if(!volumeFilterUnsafe(context))return null
         val fromProps=runCatching{

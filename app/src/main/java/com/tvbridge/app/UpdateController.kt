@@ -20,7 +20,7 @@ class UpdateController(private val activity:Activity,private val installer:ApkIn
     fun check(){
         if(request!=null)return
         val work=GithubUpdates.Request();request=work
-        val waiting=NativeUi.show(AlertDialog.Builder(activity).setTitle("检查更新").setMessage("正在检查更新，自动选择可用线路…").setNegativeButton("取消"){_,_->work.cancel()});dialog=waiting
+        val waiting=NativeUi.show(AlertDialog.Builder(activity).setTitle("检查更新").setMessage("正在检查更新，自动选择可用线路…").setNegativeButton("取消"){_,_->work.cancel();if(request===work)request=null});dialog=waiting
         waiting.setOnCancelListener{work.cancel();if(request===work)request=null}
         AppThreads.onIo{
             var release:GithubUpdates.Release?=null
@@ -46,7 +46,7 @@ class UpdateController(private val activity:Activity,private val installer:ApkIn
         val label=TextView(activity).apply{text="下载中 · 0%";gravity=Gravity.CENTER;NativeUi.textSize(this,30f);setTextColor(GlassUi.ink(activity))}
         val bar=ProgressBar(activity,null,android.R.attr.progressBarStyleHorizontal).apply{max=100}
         row.addView(label);row.addView(bar,LinearLayout.LayoutParams(-1,(12*NativeUi.scale(activity)).toInt().coerceAtLeast(4)))
-        val waiting=NativeUi.show(AlertDialog.Builder(activity).setTitle("更新 One").setView(row).setNegativeButton("取消"){_,_->work.cancel()});dialog=waiting;waiting.setOnCancelListener{work.cancel();if(request===work)request=null}
+        val waiting=NativeUi.show(AlertDialog.Builder(activity).setTitle("更新 One").setView(row).setNegativeButton("取消"){_,_->work.cancel();if(request===work)request=null});dialog=waiting;waiting.setOnCancelListener{work.cancel();if(request===work)request=null}
         AppThreads.onIo{
             var file:java.io.File?=null
             val error=try{file=work.download(activity.applicationContext,release){percent->activity.runOnUiThread{if(waiting.isShowing){bar.progress=percent;label.text="下载中 · $percent%"}}};null}catch(e:Exception){reason(e)}

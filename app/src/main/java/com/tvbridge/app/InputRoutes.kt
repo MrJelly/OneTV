@@ -3,7 +3,6 @@ package com.tvbridge.app
 import android.content.*
 import android.content.pm.PackageManager
 
-/** Native-player contracts adapted from Aerial (MIT); resolve and check permission before use. */
 object InputRoutes {
     private fun allowed(context:Context,intent:Intent):Boolean {
         val a=runCatching{context.packageManager.resolveActivity(intent,0)?.activityInfo}.getOrNull()?:return false
@@ -44,14 +43,6 @@ object InputRoutes {
         }
         return generic
     }
-    /**
-     * Aerial 829cb68: LeTV's SignalSourceManager iterates
-     * DesktopManager.getEnabledDesktopTags() and crashes on a null array or a
-     * null element (what the stock desktop leaves behind after a factory
-     * reset). Prime the tags to ["signal"] first, the way Dangbei's own
-     * launcher does, and read them back to confirm. Safe when DesktopManager
-     * is absent: returns false and the caller proceeds anyway.
-     */
     fun primeLetvDesktopTags():Boolean = runCatching{
         val managerClass=Class.forName("letv.desktop.DesktopManager")
         val manager=managerClass.getMethod("get").invoke(null)

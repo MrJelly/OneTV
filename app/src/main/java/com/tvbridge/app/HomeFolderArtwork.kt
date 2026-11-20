@@ -10,14 +10,8 @@ import android.graphics.drawable.Drawable
 
 internal class HomeFolderArtwork(private val previews:List<Pair<Drawable,Boolean>>):Drawable(){
     private val paint=Paint(Paint.ANTI_ALIAS_FLAG)
-    // The folder's base is the tile's own frosted-glass background (GlassUi.homeGlass,
-    // set by the home view); this artwork only draws the mini icons on top of it.
     private val sheen=LinearGradient(0f,0f,0f,180f*0.55f,0x59ffffff,0x00ffffff,Shader.TileMode.CLAMP)
     private val rimGrad=LinearGradient(0f,0f,0f,180f,intArrayOf(0xe6ffffff.toInt(),0x40ffffff,0x2effffff,0x8cffffff.toInt()),floatArrayOf(0f,0.4f,0.6f,1f),Shader.TileMode.CLAMP)
-    // Minis flow left-to-right, top-to-bottom on a fixed 3x3 lattice (the
-    // caller caps the preview at nine; the rest appear when the folder is
-    // opened). Margins are 13 on all four sides and the gaps 8, so every
-    // mini sits on the same grid however many the folder holds.
     private val spots=previews.indices.map{index->
         (13f+(index%3)*54f) to (13f+(index/3)*54f)
     }
@@ -37,7 +31,6 @@ internal class HomeFolderArtwork(private val previews:List<Pair<Drawable,Boolean
             val clipped=canvas.save()
             canvas.clipPath(outline)
             art.draw(canvas)
-            // Each mini icon carries the same gloss as a full tile.
             paint.style=Paint.Style.FILL
             paint.shader=sheen
             canvas.drawRect(x.toFloat(),y.toFloat(),(x+46).toFloat(),(y+46).toFloat(),paint)

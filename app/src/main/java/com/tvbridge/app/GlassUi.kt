@@ -53,15 +53,12 @@ object GlassUi {
     fun frost(b: Bitmap): Bitmap {
         val w = 320
         val h = (b.height * 320f / b.width).toInt().coerceIn(1, 320)
-        val small = Bitmap.createScaledBitmap(b, w, h, true)
+        val scaled = Bitmap.createScaledBitmap(b, w, h, true)
+        val small = if(scaled===b)b.copy(Bitmap.Config.ARGB_8888,true) else scaled
         blurInPlace(small)
         return small
     }
 
-    /** The one blur core shared by every frost source — wallpaper, static fallback
-     *  and captured scene alike: 3 box passes, radius 7, over a pixel buffer the
-     *  caller owns (so the scene path can reuse its buffers instead of allocating
-     *  per capture). Pure CPU work; no RenderScript, no RenderEffect, API 19 safe. */
     private fun blurPasses(px: IntArray, tmp: IntArray, w: Int, h: Int) {
         repeat(3) {
             pass(px, tmp, w, h, 7, horizontal = true)
@@ -104,7 +101,27 @@ object GlassUi {
         }
     }
 
-    @Synchronized
+    private data class CachedWallpaperFrost(val key: String, val frost: Frost)
+    @Volatile private var cachedWallpaperFrost: CachedWallpaperFrost? = null
+    private val wallpaperPending=mutableSetOf<String>()
+
+    fun prewarmWallpaperFrost(context: Context) {
+        val app = context.applicationContext
+        val size = app.resources.displayMetrics
+        val w = size.widthPixels.coerceAtLeast(1)
+        val h = size.heightPixels.coerceAtLeast(1)
+        val key = "${HomeAppearance.key(app)}:$w:$h:0:0"
+        if (cachedWallpaperFrost?.key == key) return
+        val targetH = (h * 320f / w).toInt().coerceAtLeast(1)
+        val image = HomeAppearance.backdrop(app, 320, targetH, HomeAppearance.dark(app))
+        val blurred = Frost(frost(image), w, h, 0, 0)
+        synchronized(this) {
+            wallpaperFrost = blurred
+            frostKey = key
+            cachedWallpaperFrost = CachedWallpaperFrost(key, blurred)
+        }
+    }
+
     private fun wallpaper(context: Context): Frost {
         val size = context.resources.displayMetrics
         val root = activity(context)?.window?.decorView
@@ -112,14 +129,41 @@ object GlassUi {
         val h = root?.height?.takeIf { it > 0 } ?: size.heightPixels
         val point = IntArray(2)
         root?.getLocationOnScreen(point)
-        val key = "${HomeAppearance.key(context)}:$w:$h:${point[0]}:${point[1]}"
-        if (key != frostKey || wallpaperFrost == null) {
-            val targetH = (h * 320f / w).toInt().coerceAtLeast(1)
-            val image = HomeAppearance.backdrop(context, 320, targetH, HomeAppearance.dark(context))
-            wallpaperFrost = Frost(frost(image), w, h, point[0], point[1])
-            frostKey = key
+        val appearance=HomeAppearance.key(context)
+        val key = "$appearance:$w:$h:${point[0]}:${point[1]}"
+        cachedWallpaperFrost?.let { if (it.key == key) return it.frost }
+        if(android.os.Looper.myLooper()==android.os.Looper.getMainLooper()){
+            if(synchronized(this){wallpaperPending.add(key)}){
+                val app=context.applicationContext
+                val host=WeakReference(root)
+                AppThreads.onIo{
+                    val result=runCatching{buildWallpaper(app,w,h,point[0],point[1])}.getOrNull()
+                    AppThreads.main.post{
+                        synchronized(this){wallpaperPending.remove(key)}
+                        if(result!=null&&HomeAppearance.key(app)==appearance){
+                            synchronized(this){wallpaperFrost=result;frostKey=key;cachedWallpaperFrost=CachedWallpaperFrost(key,result)}
+                            synchronized(sceneMaterials){sceneMaterials.toList()}.forEach{it.invalidateSelf()}
+                            host.get()?.invalidate()
+                        }
+                    }
+                }
+            }
+            return cachedWallpaperFrost?.frost?:staticFrost(context)
         }
-        return wallpaperFrost!!
+        val blurred=buildWallpaper(context,w,h,point[0],point[1])
+        synchronized(this) {
+            if (key == frostKey && wallpaperFrost != null) return wallpaperFrost!!
+            wallpaperFrost = blurred
+            frostKey = key
+            cachedWallpaperFrost = CachedWallpaperFrost(key, blurred)
+            return blurred
+        }
+    }
+
+    private fun buildWallpaper(context:Context,w:Int,h:Int,left:Int,top:Int):Frost{
+        val targetH = (h * 320f / w).toInt().coerceAtLeast(1)
+        val image = HomeAppearance.backdrop(context, 320, targetH, HomeAppearance.dark(context))
+        return Frost(frost(image),w,h,left,top)
     }
 
     private var staticFrostBitmap: Bitmap? = null
@@ -156,36 +200,32 @@ object GlassUi {
         synchronized(sceneMaterials) { sceneMaterials.add(material) }
     }
 
-    /** Drop the captured scene and void any capture still in flight. Call whenever
-     *  the underlying content may have changed (a page switch, a resume); the next
-     *  popup prepares a fresh one before it shows. */
     fun invalidateScene() {
         synchronized(this) { sceneFrostCache = null; sceneCaptureGen++ }
     }
 
-    /**
-     * The scene frost for drawing: the last completed capture if one is ready,
-     * otherwise the wallpaper frost while a fresh capture runs. Never blocks and
-     * never captures from inside a draw — captures are kicked off by
-     * [prepareScene] before a surface shows.
-     */
+    @Synchronized
+    fun trimMemory() {
+        sceneCaptureGen++
+        sceneFrostCache = null
+        detailFrostCache = null
+        detailFrostKey = ""
+        cachedWallpaperFrost = null
+        wallpaperFrost = null
+        frostKey = ""
+        if (!sceneCaptureRunning) {
+            sceneBitmap = null
+            scenePx = null
+            sceneTmp = null
+        }
+    }
+
     @Synchronized
     fun sceneFrost(context: Context): Frost {
         sceneFrostCache?.let { return it }
         return try { wallpaper(context) } catch (_: Exception) { staticFrost(context) }
     }
 
-    /**
-     * Capture the scene behind upcoming glass, BEFORE the glass shows, so a popup
-     * can never capture itself (popup and dialog windows are separate windows and
-     * never appear in the activity's hierarchy anyway). The hierarchy draw happens
-     * here, once, into a reused bitmap at 1/10 scale; the blur itself runs on the
-     * io lane over reused pixel buffers, so a low-end box neither stalls its UI
-     * thread nor churns the GC. When the frost lands, every live scene material
-     * repaints itself with it; until then it shows the wallpaper frost. SurfaceView
-     * content (live video) cannot be captured this way, so surfaces over video
-     * sample a plain deep-grey backdrop through the same path instead.
-     */
     fun prepareScene(context: Context) {
         val root = activity(context)?.window?.decorView ?: return
         val w = root.width.takeIf { it > 0 } ?: return
@@ -196,37 +236,63 @@ object GlassUi {
         }
         val gen = sceneCaptureGen
         val bw = (w / 10).coerceAtLeast(1); val bh = (h / 10).coerceAtLeast(1)
-        val bitmap = sceneBitmap?.takeIf { it.width == bw && it.height == bh && !it.isRecycled }
-            ?: Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888).also { sceneBitmap = it }
-        val canvas = android.graphics.Canvas(bitmap)
-        canvas.scale(bw.toFloat() / w, bh.toFloat() / h)
-        root.draw(canvas)
-        val px = scenePx?.takeIf { it.size == bw * bh } ?: IntArray(bw * bh).also { scenePx = it }
-        bitmap.getPixels(px, 0, bw, 0, 0, bw, bh)
-        val point = IntArray(2); root.getLocationOnScreen(point)
-        AppThreads.io.execute {
-            val tmp = sceneTmp?.takeIf { it.size == px.size } ?: IntArray(px.size).also { sceneTmp = it }
-            blurPasses(px, tmp, bw, bh)
-            val out = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
-            out.setPixels(px, 0, bw, 0, 0, bw, bh)
-            val frost = Frost(out, w, h, point[0], point[1])
-            AppThreads.main.post {
-                sceneCaptureRunning = false
-                if (gen == sceneCaptureGen) {
-                    synchronized(this@GlassUi) { sceneFrostCache = frost }
-                    val targets = synchronized(sceneMaterials) { sceneMaterials.toList() }
-                    targets.forEach { it.invalidateSelf() }
+        val point = IntArray(2)
+        try {
+            val bitmap = sceneBitmap?.takeIf { it.width == bw && it.height == bh && !it.isRecycled }
+                ?: Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888).also { sceneBitmap = it }
+            root.getLocationOnScreen(point)
+            if(android.os.Build.VERSION.SDK_INT>=26){
+                val window=activity(context)!!.window
+                AppThreads.onIo{
+                    try{
+                        android.view.PixelCopy.request(window,bitmap,{result->
+                            if(result==android.view.PixelCopy.SUCCESS)blurSceneCapture(bitmap,w,h,point,gen)
+                            else synchronized(this){sceneCaptureRunning=false}
+                        },AppThreads.main)
+                    }catch(_:Throwable){synchronized(this){sceneCaptureRunning=false}}
                 }
+            }else{
+                val canvas=android.graphics.Canvas(bitmap)
+                canvas.scale(bw.toFloat()/w,bh.toFloat()/h)
+                root.draw(canvas)
+                blurSceneCapture(bitmap,w,h,point,gen)
             }
+        } catch (_: Throwable) {
+            synchronized(this) { sceneCaptureRunning = false }
+            return
         }
     }
 
-    // ---- One-time detail-region capture -------------------------------------
-    // Pages with a detail area (settings/control) capture that region ONCE
-    // when the page settles; every popup over it then samples this stored
-    // frost directly instead of re-capturing (and re-tinting) the whole scene
-    // per popup. The QR card is hidden for the synchronous draw, as with the
-    // scene capture, so it never bakes into a popup's backdrop.
+    private fun blurSceneCapture(bitmap:Bitmap,w:Int,h:Int,point:IntArray,gen:Int){
+        val bw=bitmap.width;val bh=bitmap.height
+        try {
+            AppThreads.io.execute {
+                val frost = try {
+                    val px=scenePx?.takeIf{it.size==bw*bh}?:IntArray(bw*bh).also{scenePx=it}
+                    bitmap.getPixels(px,0,bw,0,0,bw,bh)
+                    check(SceneFrame.hasContent(px))
+                    val tmp = sceneTmp?.takeIf { it.size == px.size } ?: IntArray(px.size).also { sceneTmp = it }
+                    blurPasses(px, tmp, bw, bh)
+                    val out = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+                    out.setPixels(px, 0, bw, 0, 0, bw, bh)
+                    Frost(out, w, h, point[0], point[1])
+                } catch (_: Throwable) {
+                    null
+                }
+                AppThreads.main.post {
+                    synchronized(this@GlassUi) { sceneCaptureRunning = false }
+                    if (frost != null && gen == sceneCaptureGen) {
+                        synchronized(this@GlassUi) { sceneFrostCache = frost }
+                        val targets = synchronized(sceneMaterials) { sceneMaterials.toList() }
+                        targets.forEach { it.invalidateSelf() }
+                    }
+                }
+            }
+        } catch (_: Throwable) {
+            synchronized(this) { sceneCaptureRunning = false }
+        }
+    }
+
     private var detailFrostCache: Frost? = null
     private var detailFrostKey = ""
 
@@ -241,6 +307,7 @@ object GlassUi {
         return synchronized(this) { detailFrostCache?.takeIf { detailFrostKey == key } }
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun prepareDetailRegion(detail: View, qrBox: View?) {
         if (!detail.isAttachedToWindow) return
         val decor = activity(detail.context)?.window?.decorView ?: return
@@ -249,21 +316,30 @@ object GlassUi {
         val loc = IntArray(2); detail.getLocationOnScreen(loc)
         val key = detailKey(detail)
         val bw = (w / 10).coerceAtLeast(1); val bh = (h / 10).coerceAtLeast(1)
-        val bitmap = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
-        val canvas = android.graphics.Canvas(bitmap)
-        canvas.scale(bw.toFloat() / w, bh.toFloat() / h)
-        canvas.translate(-loc[0].toFloat(), -loc[1].toFloat())
-        val qrWasVisible = qrBox != null && qrBox.visibility == View.VISIBLE
-        if (qrWasVisible) qrBox!!.visibility = View.GONE
-        try { decor.draw(canvas) } finally { if (qrWasVisible) qrBox!!.visibility = View.VISIBLE }
-        val px = IntArray(bw * bh); bitmap.getPixels(px, 0, bw, 0, 0, bw, bh)
+        val rootW=decor.width.coerceAtLeast(1);val rootH=decor.height.coerceAtLeast(1)
+        val origin=IntArray(2);decor.getLocationOnScreen(origin)
+        val app=detail.context.applicationContext
         AppThreads.io.execute {
+            val frost=runCatching{
+            val wallpaper=HomeAppearance.backdrop(app,320,(rootH*320f/rootW).toInt().coerceAtLeast(1),HomeAppearance.dark(app))
+            val bitmap=Bitmap.createBitmap(bw,bh,Bitmap.Config.ARGB_8888)
+            val canvas=Canvas(bitmap)
+            canvas.scale(bw.toFloat()/w,bh.toFloat()/h)
+            canvas.translate(-(loc[0]-origin[0]).toFloat(),-(loc[1]-origin[1]).toFloat())
+            canvas.drawBitmap(wallpaper,null,Rect(0,0,rootW,rootH),Paint(Paint.FILTER_BITMAP_FLAG))
+            val px=IntArray(bw*bh);bitmap.getPixels(px,0,bw,0,0,bw,bh)
             val tmp = IntArray(px.size)
             blurPasses(px, tmp, bw, bh)
             val out = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
             out.setPixels(px, 0, bw, 0, 0, bw, bh)
-            val frost = Frost(out, w, h, loc[0], loc[1])
-            AppThreads.main.post { synchronized(this@GlassUi) { detailFrostCache = frost; detailFrostKey = key } }
+            Frost(out, w, h, loc[0], loc[1])
+            }.getOrNull()?:return@execute
+            AppThreads.main.post {
+                if(detail.isAttachedToWindow&&detailKey(detail)==key){
+                    synchronized(this@GlassUi) { detailFrostCache = frost; detailFrostKey = key }
+                    synchronized(sceneMaterials){sceneMaterials.toList()}.forEach{it.invalidateSelf()}
+                }
+            }
         }
     }
 
@@ -288,7 +364,7 @@ object GlassUi {
         override fun draw(canvas: Canvas) {
             val saved = canvas.save()
             canvas.translate(bounds.left.toFloat(), bounds.top.toFloat())
-            HomeAppearance.drawBackdrop(view.context, canvas, bounds.width(), bounds.height(), HomeAppearance.dark(view.context), paint)
+            HomeAppearance.drawBackdrop(view.context, canvas, bounds.width(), bounds.height(), HomeAppearance.dark(view.context), paint){view.invalidate()}
             canvas.restoreToCount(saved)
         }
         override fun setAlpha(alpha: Int) { paint.alpha = alpha }
@@ -309,16 +385,18 @@ object GlassUi {
         bottomCorners: Boolean = true,
         scene: Boolean = false,
         plain: Boolean = false,
-        marked: Boolean = false
-    ): Drawable = Material(view, radius, frost, video, dark, dense, border, faint, alphaBoost, bottomCorners, false, null, null, scene, plain, marked)
+        marked: Boolean = false,
+        detail: View? = null
+    ): Drawable = Material(view, radius, frost, video, dark, dense, border, faint, alphaBoost, bottomCorners, false, null, null, scene, plain, marked,detail?.let{WeakReference(it)})
 
     fun homeGlass(view:View,radius:Float,screenLeft:Int?=null,screenTop:Int?=null):Drawable =
         Material(view,radius,null,false,true,false,true,false,0,true,true,screenLeft,screenTop)
 
-    /** Home-glass positioning over the captured scene instead of the wallpaper:
-     *  for popups and menus that float above arbitrary activity content. */
     fun sceneGlass(view:View,radius:Float,screenLeft:Int?=null,screenTop:Int?=null):Drawable =
         Material(view,radius,null,false,true,false,true,false,0,true,true,screenLeft,screenTop,true)
+
+    fun settingsRow(view:View,video:Boolean=video(view.context),dark:Boolean?=null,heightPx:Int=NativeUi.settingsRowHeight(view.context)):Drawable =
+        surface(view,24f*heightPx/NativeUi.settingsRowHeight(view.context),video=video,dark=dark,faint=true,plain=true)
 
     fun selectedBorder(view: View, radius: Float = 18f): Drawable {
         val scale = NativeUi.scale(view.context)
@@ -420,10 +498,8 @@ object GlassUi {
         private val screenTop: Int? = null,
         private val scene: Boolean = false,
         private val plain: Boolean = false,
-        /** Draw the selected treatment unconditionally: for rows whose
-         *  "current" fact lives in the data, not in the view state the
-         *  list keeps overwriting (the playing channel's row). */
-        private val marked: Boolean = false
+        private val marked: Boolean = false,
+        private val detail: WeakReference<View>? = null
     ) : Drawable() {
         private var sampled: Bitmap? = null
         private var sampledShader: BitmapShader? = null
@@ -443,7 +519,7 @@ object GlassUi {
         private var topHighlight: Shader? = null
         private var bottomHighlight: Shader? = null
 
-        init { if (scene) registerSceneMaterial(this) }
+        init { registerSceneMaterial(this) }
 
         override fun onBoundsChange(bounds: Rect) { geometryDirty = true }
 
@@ -456,18 +532,12 @@ object GlassUi {
             val rimWidth = (if(homeGlass) 2.4f else if (scene) 2.0f else if (selected() && !plain) 2.2f else if (selected()) 1.8f else 1.2f) * scale
             rimPaint.strokeWidth = rimWidth
             if (plain) {
-                // List items keep the original border: a flat hairline rim, no lit
-                // edge and no sheen — the glass light is for windows and buttons.
                 rimPaint.shader = null
                 rimPaint.color = Color.argb(if (selected()) 178 else 56, 255, 255, 255)
                 topHighlight = null
                 bottomHighlight = null
             } else {
                 rimPaint.color = Color.WHITE
-                // One lit edge, the folder's recipe: iOS glass catches its light on
-                // the horizontal edges — bright along the top, faint down the sides,
-                // lit again (a little less) along the bottom. Selected, the whole
-                // perimeter lights up instead.
                 rimPaint.shader = if (selected()) LinearGradient(rect.left,rect.top,rect.left,rect.bottom,
                     intArrayOf(0xf2ffffff.toInt(),0x99ffffff.toInt(),0x99ffffff.toInt(),0xf2ffffff.toInt()),
                     floatArrayOf(0f,.4f,.6f,1f),Shader.TileMode.CLAMP)
@@ -534,12 +604,6 @@ object GlassUi {
             canvas.clipPath(path)
 
             if (video) {
-                // Baked, never sampled: over moving content the glass is a
-                // fixed translucent black-grey, measured once against the
-                // desktop glass and written down as a colour. Nothing is
-                // captured, shaded or tinted at runtime; density folds
-                // into the fill's alpha, and the sheen and rim below are
-                // the same ones the desktop glass draws.
                 paint.style = Paint.Style.FILL
                 paint.shader = null
                 paint.colorFilter = null
@@ -547,7 +611,7 @@ object GlassUi {
                 paint.color = if (dark) Color.argb(alpha, 18, 20, 24) else Color.argb(alpha, 233, 237, 240)
                 canvas.drawRect(rect, paint)
             } else {
-                val source = captured ?: if (scene) sceneFrost(view.context) else try { wallpaper(view.context) } catch (_: Exception) { staticFrost(view.context) }
+                val source = detail?.get()?.let{detailFrost(it)} ?: captured ?: if (scene) sceneFrost(view.context) else try { wallpaper(view.context) } catch (_: Exception) { staticFrost(view.context) }
                 view.getLocationOnScreen(point)
                 if (sampled !== source.bitmap) {
                     sampled = source.bitmap
@@ -557,10 +621,6 @@ object GlassUi {
                 placement.postTranslate((source.left - point[0]).toFloat(), (source.top - point[1]).toFloat())
                 sampledShader!!.setLocalMatrix(placement)
                 paint.shader = sampledShader
-                // Scene captures already hold final displayed colours, so a
-                // second tint would darken them; a captured REGION holds the
-                // raw backdrop (its page furniture was hidden for the draw),
-                // so it takes the same single tint as the wallpaper frost.
                 paint.colorFilter = if (scene) null else if(dark)plateTintDark else plateTintLight
                 paint.alpha = 255
                 canvas.drawRect(rect, paint)
@@ -575,8 +635,6 @@ object GlassUi {
             }
 
             if (!plain) {
-                // The glass edge's sheen: light pooled inside the top of the
-                // pane, and a fainter pool along the bottom.
                 paint.style = Paint.Style.FILL
                 paint.shader = topHighlight
                 canvas.drawRect(rect, paint)

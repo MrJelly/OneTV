@@ -18,11 +18,13 @@ class PlaybackAttempts {
     var rtspTcp=false; private set
     private var rtsp=false
     val format get()=candidates.getOrElse(index){Format.AUTO}
-    fun reset(url:String){
+    fun reset(url:String, hintMime:String?=null){
         val uri=try{URI(url)}catch(_:Exception){null}
         rtsp=uri?.scheme.equals("rtsp",true);softwareTracks=0;rtspTcp=false;index=0
         val path=uri?.path.orEmpty().lowercase(Locale.ROOT)
         val initial=when {
+            hintMime?.substringBefore(';')?.lowercase(Locale.ROOT) in listOf("application/x-mpegurl","application/vnd.apple.mpegurl")->Format.HLS
+            hintMime?.substringBefore(';')?.lowercase(Locale.ROOT)=="application/dash+xml"->Format.DASH
             path.endsWith(".m3u8")->Format.HLS
             path.endsWith(".mpd")->Format.DASH
             Regex("\\.ism[l]?(/manifest.*)?$").containsMatchIn(path)->Format.SMOOTH

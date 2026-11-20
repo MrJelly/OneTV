@@ -3,18 +3,6 @@ package com.tvbridge.app
 import android.content.Context
 import android.os.Build
 
-/**
- * What kind of TV this is, probed once per process.
- *
- * The vendor answers (package probes in [DesktopPolicy]) used to be
- * recomputed at every guard tick and every key configuration, a handful of
- * PackageManager binder calls each time. They only change when the package
- * set changes, so they are computed once on the state thread, cached here,
- * and recomputed when a package broadcast invalidates them. Readers use
- * the cached fields; before the first compute lands they see the safe
- * defaults, and the warm-up posted at guard connect lands within
- * milliseconds, so a key decision never waits on a probe.
- */
 object DeviceProfile {
     @Volatile private var computed = false
     @Volatile private var owner: Context? = null
@@ -28,8 +16,6 @@ object DeviceProfile {
         private set
     @Volatile var watchForeground = false
         private set
-    /** API <= 23: another enabled accessibility service filters key events
-     * without the DEFAULT flag, so the guard must yield the default slot. */
     @Volatile var otherFilter = false
         private set
 
@@ -40,10 +26,6 @@ object DeviceProfile {
         AppThreads.onState { compute(app) }
     }
 
-    /** Synchronous first compute for this application: decision points
-     * (key configuration, the guard's connect path) must not act on the
-     * safe defaults while an async warm-up is still in flight. Costs a
-     * few package queries, once per process per application. */
     fun ensure(context: Context) {
         val app = context.applicationContext
         if (computed && owner === app) return

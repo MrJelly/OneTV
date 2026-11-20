@@ -25,16 +25,20 @@ object NativeUi {
             noticeView.get()?.let{old->old.animate().cancel();(old.parent as? ViewGroup)?.removeView(old)}
             val root=activity.findViewById<android.widget.FrameLayout>(android.R.id.content)?:return@runOnUiThread
             val unit=scale(activity)
+            val inBrowser=activity.javaClass.name=="com.tvbridge.app.BrowserActivity"
             val label=android.widget.TextView(activity).apply{
-                text=message;gravity=Gravity.CENTER;maxLines=3;setTextColor(GlassUi.ink(activity));NativeUi.textSize(this,30f)
+                text=message;gravity=Gravity.CENTER;maxLines=3;setTextColor(if(inBrowser)Color.WHITE else GlassUi.ink(activity));NativeUi.textSize(this,30f)
                 setPadding((24*unit).toInt(),(16*unit).toInt(),(24*unit).toInt(),(16*unit).toInt())
-                background=GlassUi.surface(this,22f,dense=true);isFocusable=false;isClickable=false
+                background=if(inBrowser)GlassUi.surface(this,22f,video=true,dark=true,dense=true) else GlassUi.surface(this,22f,dense=true);isFocusable=false;isClickable=false
                 accessibilityLiveRegion=View.ACCESSIBILITY_LIVE_REGION_POLITE
                 alpha=0f;translationY=-24*unit
             }
             root.addView(label,android.widget.FrameLayout.LayoutParams(-2,-2,Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply{topMargin=(28*unit).toInt();leftMargin=(32*unit).toInt();rightMargin=(32*unit).toInt()})
             noticeView=WeakReference(label);label.animate().alpha(1f).translationY(0f).setDuration(160).start()
-            dismissNotice=Runnable{label.animate().alpha(0f).translationY(-20*unit).setDuration(160).withEndAction{(label.parent as? ViewGroup)?.removeView(label)}.start()}
+            dismissNotice=Runnable{
+                dismissNotice=null
+                label.animate().alpha(0f).translationY(-20*unit).setDuration(160).withEndAction{(label.parent as? ViewGroup)?.removeView(label)}.start()
+            }
             notices.postDelayed(dismissNotice!!,1840)
         }
     }
@@ -69,8 +73,8 @@ object NativeUi {
     fun scale(context:Context):Float {val metrics=context.resources.displayMetrics;return minOf(metrics.widthPixels/1920f,metrics.heightPixels/1080f)}
     const val BODY_TEXT_SIZE = 30f
     fun textSize(view:android.widget.TextView,pixels:Float){view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX,pixels.coerceAtLeast(BODY_TEXT_SIZE)*scale(view.context))}
-    private var dialog=WeakReference<AlertDialog>(null)
-    private val dialogStack=mutableListOf<WeakReference<AlertDialog>>()
+    private var dialog=WeakReference<android.app.Dialog>(null)
+    private val dialogStack=mutableListOf<WeakReference<android.app.Dialog>>()
     private var hiddenQrBox:WeakReference<android.view.View>?=null
     private fun hideQrBox(qrBox:android.view.View){qrBox.visibility=android.view.View.GONE;hiddenQrBox=WeakReference(qrBox)}
     private fun restoreQrBox(){hiddenQrBox?.get()?.let{it.visibility=android.view.View.VISIBLE};hiddenQrBox=null}
@@ -98,21 +102,23 @@ object NativeUi {
             NativeUi.touchClicks(this)
         }
     }
+    internal fun styleDialogAction(button:android.widget.Button,video:Boolean,dark:Boolean?=null){
+        val context=button.context
+        fun dp(value:Int)=(value*2*scale(context)).toInt()
+        button.isSoundEffectsEnabled=false;textSize(button,30f);button.isAllCaps=false;button.maxLines=1;button.ellipsize=android.text.TextUtils.TruncateAt.END
+        button.minWidth=0;button.minimumWidth=0;button.minHeight=0;button.minimumHeight=0
+        if(android.os.Build.VERSION.SDK_INT>=21){button.backgroundTintList=null;button.stateListAnimator=null;button.elevation=0f}
+        button.setPadding(dp(8),0,dp(8),0)
+        button.background=GlassUi.surface(button,18f,null,video=video,dark=dark,faint=true,scene=!video)
+        button.setTextColor(GlassUi.colors(context,dark?:HomeAppearance.dark(context)))
+        button.setTypeface(null,android.graphics.Typeface.NORMAL)
+    }
     fun show(builder:AlertDialog.Builder,tallList:Boolean=false,compact:Boolean=false,widthDp:Int?=null,anchor:View?=null,maxListHeightDp:Int?=null,initialFocus:View?=null,listIcons:List<String> = emptyList(),fillDetailWith:View?=null):AlertDialog {
         val video=GlassUi.video(builder.context)
-        // Capture the scene behind this dialog BEFORE the dialog exists, blur it on
-        // a background thread, and let the panel's scene glass swap it in when it
-        // lands (wallpaper frost until then). Over video the panel takes the
-        // wallpaper frost too — the same glass as the desktop.
-        // The connection QR box is hidden just for the capture and restored right
-        // after (the draw is synchronous, so no frame ever shows it gone): it
-        // occupies the detail area the popup replaces, and capturing it would
-        // bake the QR card into the popup's frosted backdrop.
-        // Popups over a page detail area reuse the region frost that page
-        // captured once when it settled — no fresh capture, no second tint.
         val detailEarly=GlassUi.activity(builder.context)?.window?.decorView?.findViewWithTag<View>(CONTROL_DETAIL)?.takeIf{it.isShown&&it.width>0&&it.height>0}
         val regionFrost=if(video)null else detailEarly?.let{GlassUi.detailFrost(it)}
-        if(!video&&regionFrost==null){
+        if(!video&&regionFrost==null&&detailEarly!=null)GlassUi.prepareDetailRegion(detailEarly,null)
+        if(!video&&regionFrost==null&&detailEarly==null){
             val qrBox=GlassUi.activity(builder.context)?.window?.decorView?.findViewWithTag<View>(CONTROL_DETAIL)?.let{it as? ViewGroup}?.let{group->(0 until group.childCount).map{group.getChildAt(it)}.firstOrNull{it.tag==QR_BOX}}
             val qrWasVisible=qrBox!=null&&qrBox.visibility==View.VISIBLE
             if(qrWasVisible)qrBox!!.visibility=View.GONE
@@ -152,7 +158,7 @@ object NativeUi {
         val detail=GlassUi.activity(context)?.window?.decorView?.findViewWithTag<View>(CONTROL_DETAIL)?.takeIf{it.isShown&&it.width>0&&it.height>0}
         var dialogWidth=minOf(dp(widthDp?:if(compact)300 else if(custom!=null)430 else if(list!=null)380 else 340),detail?.width?:(context.resources.displayMetrics.widthPixels*.76f).toInt())
         val buttons=listOf(AlertDialog.BUTTON_NEGATIVE,AlertDialog.BUTTON_NEUTRAL,AlertDialog.BUTTON_POSITIVE).mapNotNull{which->value.getButton(which)?.takeIf{it.visibility==View.VISIBLE}?.let{which to it}}
-        val panel=android.widget.LinearLayout(context).apply{orientation=android.widget.LinearLayout.VERTICAL;setPadding(dp(16),dp(14),dp(16),dp(14));background=if(regionFrost!=null)GlassUi.surface(this,28f,regionFrost) else GlassUi.surface(this,28f,null,video=video,dense=true,scene=!video)}
+        val panel=android.widget.LinearLayout(context).apply{orientation=android.widget.LinearLayout.VERTICAL;setPadding(dp(16),dp(14),dp(16),dp(14));background=GlassUi.surface(this,28f,video=video,dense=true,scene=!video&&detail==null,detail=detail)}
         if(compact)panel.setPadding(dp(12),dp(8),dp(12),dp(8))
         if(title!=null&&title.text.isNotBlank()){
             detach(title);textSize(title,34f);title.setTextColor(GlassUi.ink(context));title.setTypeface(null,android.graphics.Typeface.BOLD);title.setPadding(0,0,0,0)
@@ -193,7 +199,7 @@ object NativeUi {
             val maxButtonWidth=buttons.maxOf{(_,button)->(button.paint.measureText(button.text.toString())+dp(16)).toInt()}.coerceIn(dp(80),dp(200))
             var totalWidth=0
             buttons.forEach{(which,button)->
-                detach(button);button.isSoundEffectsEnabled=false;textSize(button,30f);button.isAllCaps=false;button.maxLines=1;button.ellipsize=android.text.TextUtils.TruncateAt.END;button.minWidth=0;button.minimumWidth=0;button.minHeight=0;button.minimumHeight=0;if(android.os.Build.VERSION.SDK_INT>=21)button.backgroundTintList=null;if(android.os.Build.VERSION.SDK_INT>=21)button.stateListAnimator=null;if(android.os.Build.VERSION.SDK_INT>=21)button.elevation=0f;button.setPadding(dp(8),0,dp(8),0);button.background=GlassUi.surface(button,18f,null,video=video,faint=true,scene=!video);button.setTextColor(GlassUi.colors(context));button.setTypeface(null,android.graphics.Typeface.NORMAL)
+                detach(button);styleDialogAction(button,video)
                 totalWidth+=maxButtonWidth
                 row.addView(button,android.widget.LinearLayout.LayoutParams(maxButtonWidth,dp(40)).apply{if(row.childCount>0)leftMargin=dp(10)})
             }
@@ -280,7 +286,12 @@ object NativeUi {
         value.show();dialog=WeakReference(value);dialogStack.add(WeakReference(value))
         return value
     }
-    fun handleExternalDismiss(value:AlertDialog){
+    fun registerDialog(value:android.app.Dialog){
+        dialog=WeakReference(value)
+        dialogStack.add(WeakReference(value))
+        value.setOnDismissListener{handleExternalDismiss(value)}
+    }
+    fun handleExternalDismiss(value:android.app.Dialog){
         dialogStack.removeAll{it.get()==null||it.get()===value||it.get()?.isShowing!=true}
         if(dialogStack.isEmpty())restoreQrBox()
         if(dialog.get()===value)dialog=WeakReference(dialogStack.lastOrNull()?.get())
@@ -294,7 +305,14 @@ object NativeUi {
     fun dialogCommand(cmd:String):Boolean? {
         val value=dialog.get()?.takeIf{it.isShowing}?:return null
         if(cmd=="back"){value.dismiss();return true}
-        if(cmd=="ok"){val list=value.listView;if(list!=null&&list.hasFocus()&&list.selectedItemPosition>=0)return list.performItemClick(list.selectedView,list.selectedItemPosition,list.selectedItemId);val focused=value.currentFocus;if(focused!=null&&focused.performClick())return true;return value.getButton(AlertDialog.BUTTON_POSITIVE)?.performClick()==true}
+        if(cmd=="ok"){
+            val alert=value as? AlertDialog
+            val list=alert?.listView
+            if(list!=null&&list.hasFocus()&&list.selectedItemPosition>=0)return list.performItemClick(list.selectedView,list.selectedItemPosition,list.selectedItemId)
+            val focused=value.currentFocus
+            if(focused!=null&&focused.performClick())return true
+            return alert?.getButton(AlertDialog.BUTTON_POSITIVE)?.performClick()==true
+        }
         val code=when(cmd){"up"->19;"down"->20;"left"->21;"right"->22;"ok"->23;else->return null}
         value.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN,code));value.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP,code));return true
     }

@@ -32,7 +32,7 @@ class FileExporter(private val activity:Activity){
                     val resolver=activity.contentResolver
                     val values=ContentValues().apply{
                         put(MediaStore.MediaColumns.DISPLAY_NAME,file.name)
-                        put(MediaStore.MediaColumns.MIME_TYPE,if(file.extension.equals("apk",true))"application/vnd.android.package-archive" else "application/octet-stream")
+                        put(MediaStore.MediaColumns.MIME_TYPE,when(file.extension.lowercase(java.util.Locale.US)){"apk"->"application/vnd.android.package-archive";"txt"->"text/plain";else->"application/octet-stream"})
                         put(MediaStore.MediaColumns.RELATIVE_PATH,Environment.DIRECTORY_DOWNLOADS+"/One")
                         put(MediaStore.MediaColumns.IS_PENDING,1)
                     }
@@ -45,7 +45,8 @@ class FileExporter(private val activity:Activity){
                     @Suppress("DEPRECATION") val directory=File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),"One")
                     check(directory.isDirectory||directory.mkdirs())
                     var target=File(directory,file.name);var suffix=1
-                    while(target.exists()){target=File(directory,"${file.nameWithoutExtension} (${suffix++}).${file.extension}")}
+                    val ext=file.extension.let{if(it.isEmpty())"" else ".$it"}
+                    while(target.exists()){target=File(directory,"${file.nameWithoutExtension} (${suffix++})$ext")}
                     try{file.inputStream().use{input->target.outputStream().use{input.copyTo(it)}}}catch(e:Exception){target.delete();throw e}
                 }
                 "已保存到 Download/One"

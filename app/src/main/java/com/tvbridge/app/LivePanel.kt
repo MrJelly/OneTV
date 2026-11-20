@@ -19,7 +19,6 @@ import java.io.IOException
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.ui.PlayerView
 
-
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class LivePanel(context:Context,private val repo:LiveRepository,private val exit:()->Unit,private val noSources:(()->Unit)?=null):FrameLayout(context) {
     private val touchDevice=(resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK)!=android.content.res.Configuration.UI_MODE_TYPE_TELEVISION&&!context.packageManager.hasSystemFeature("android.software.leanback")
@@ -43,9 +42,22 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             return created
         }
         set(value){nativePlayer=value}
-    private var softwarePlayer=0
+    private val livePrefs = context.getSharedPreferences("live-prefs", Context.MODE_PRIVATE)
+    private var softwarePlayer = 0
+    private var manualSoftwareDecode = livePrefs.getBoolean("software_decode", false)
+    private var aspectMode = livePrefs.getInt("aspect_mode", 0).coerceIn(0, 2)
     private var multicast:android.net.wifi.WifiManager.MulticastLock?=null
-    private val playerView=PlayerView(context).apply{useController=false;setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER);setShutterBackgroundColor(Color.BLACK);setBackgroundColor(Color.BLACK);isFocusable=false}
+    private val playerView=PlayerView(context).apply{
+        useController=false
+        setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+        setShutterBackgroundColor(Color.BLACK)
+        setBackgroundColor(Color.BLACK)
+        isFocusable=false
+        resizeMode = when (aspectMode) {
+            1, 2 -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
+            else -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
+    }
     private val videoSurface=FrameLayout(context).apply{background=GradientDrawable().apply{setColor(0xff292d32.toInt())};if(android.os.Build.VERSION.SDK_INT>=21)clipToOutline=true;addView(playerView,LayoutParams(-1,-1))}
     private var lastSource=""
     private val autoRefreshTried=java.util.concurrent.atomic.AtomicBoolean(false)
@@ -57,6 +69,8 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     private val controls=LinearLayout(context).apply{gravity=Gravity.CENTER}
     private var favoriteAction:Button?=null
     private var lineAction:Button?=null
+    private var decoderAction:Button?=null
+    private var aspectAction:Button?=null
     private val drawer=LinearLayout(context).apply{orientation=LinearLayout.VERTICAL;visibility=View.GONE;isClickable=true}
     private val drawerList=ListView(context).apply{divider=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT);dividerHeight=dp(4);isVerticalScrollBarEnabled=false}
 
@@ -64,6 +78,86 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     private lateinit var sourceButton:Button
     private var all=emptyList<LiveChannel>()
     private var shown=emptyList<LiveChannel>()
+    private val shownItems=mutableListOf<LiveChannel>()
+    private val focusColorWhite by lazy { liveFocusColors(Color.WHITE) }
+    private val starFavDrawable by lazy { AppIcons.Vector("star") { 0xffffc233.toInt() } }
+    private val starDimDrawable by lazy { AppIcons.Vector("star") { 0x59ffffff } }
+    private class ChannelRowHolder(
+        val badge: TextView,
+        val name: TextView,
+        val star: View,
+        val starHit: View,
+        var marked: Boolean = false
+    )
+    private val channelAdapter by lazy {
+        object : ArrayAdapter<LiveChannel>(context, android.R.layout.simple_list_item_1, shownItems) {
+            override fun getView(position: Int, convert: View?, parent: ViewGroup): View {
+                val item = getItem(position)!!
+                val row: LinearLayout
+                val holder: ChannelRowHolder
+                if (convert is LinearLayout && convert.tag is ChannelRowHolder) {
+                    row = convert
+                    holder = convert.tag as ChannelRowHolder
+                } else {
+                    row = LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        setPadding(dp(8), 0, dp(6), 0)
+                        minimumHeight = dp(if (touchDevice) 42 else 36)
+                        val badge = TextView(context).apply {
+                            gravity = Gravity.CENTER
+                            includeFontPadding = false
+                            background = GradientDrawable().apply {
+                                setColor(0x2effffff)
+                                cornerRadius = dp(4).toFloat()
+                                setStroke(NativeUi.scale(context).toInt().coerceAtLeast(1), 0x59ffffff)
+                            }
+                            minWidth = dp(22)
+                            maxLines = 1
+                            setPadding(dp(3), 0, dp(3), 0)
+                            NativeUi.textSize(this, 20f)
+                        }
+                        addView(badge, LinearLayout.LayoutParams(-2, dp(22)))
+                        val name = TextView(context).apply {
+                            maxLines = 1
+                            ellipsize = android.text.TextUtils.TruncateAt.END
+                            NativeUi.textSize(this, 28f)
+                            setTextColor(focusColorWhite)
+                        }
+                        addView(name, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(8) })
+                        val starHit = FrameLayout(context).apply { contentDescription = "收藏" }
+                        val star = View(context)
+                        starHit.addView(star, FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER))
+                        addView(starHit, LinearLayout.LayoutParams(dp(32), -1).apply { marginStart = dp(2) })
+                        background = GlassUi.surface(this, GlassUi.CHIP_RADIUS, video = true, dark = true, faint = true, plain = true, marked = false)
+                        tag = ChannelRowHolder(badge, name, star, starHit, marked = false)
+                    }
+                    holder = row.tag as ChannelRowHolder
+                }
+                val favorite = repo.favorite(item.id)
+                val playing = item.id == current?.id
+                row.isSelected = (parent as? AbsListView)?.selectedItemPosition == position || playing
+                if (holder.marked != playing) {
+                    holder.marked = playing
+                    row.background = GlassUi.surface(row, GlassUi.CHIP_RADIUS, video = true, dark = true, faint = true, plain = true, marked = playing)
+                }
+                holder.badge.text = (position + 1).toString()
+                (holder.badge.background as? GradientDrawable)?.setColor(if (playing) 0xd9ffffff.toInt() else 0x2effffff)
+                holder.badge.setTextColor(if (playing) 0xff292f32.toInt() else 0xffc8d0d8.toInt())
+                holder.name.text = item.name
+                holder.name.setTypeface(null, if (playing) Typeface.BOLD else Typeface.NORMAL)
+                holder.star.background = if (favorite) starFavDrawable else starDimDrawable
+                holder.starHit.setOnClickListener {
+                    val pos = drawerList.firstVisiblePosition
+                    val top = drawerList.getChildAt(0)?.top ?: 0
+                    repo.toggleFavorite(item.id)
+                    refresh()
+                    drawerList.setSelectionFromTop(pos, top)
+                }
+                return row
+            }
+        }
+    }
     private var current:LiveChannel?=null
     private var retries=0
     private var readySince=0L
@@ -75,15 +169,21 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     private var released=false
     private var paused=false
     private var resumePlayback=false
+    private var parkedPosition=0L
     private var lastFailure=""
     private var pendingRetry:Runnable?=null
     private var playbackEpoch=0
+    private var renderedEpoch=-1
     private var openedAt=0L
     private var bufferingAt=0L
     private var mediaProgressAt=0L
     private val hide=Runnable{if(drawer.visibility!=View.VISIBLE&&(touchDevice||!controls.hasFocus())){overlay.visibility=View.GONE;fullTitle.visibility=View.GONE;isFocusableInTouchMode=true;requestFocus()}}
     private val timeout=object:Runnable{override fun run(){
-        if(released||paused||current==null||player.playbackState==Player.STATE_READY)return
+        if(released||paused||current==null)return
+        if(player.playbackState==Player.STATE_READY){
+            if(renderedEpoch==playbackEpoch||!player.currentTracks.containsType(C.TRACK_TYPE_VIDEO))return
+            lastFailure="视频首帧超时";recover(lastFailure);return
+        }
         val now=SystemClock.elapsedRealtime()
         if(PlaybackAttempts.waitForMedia(now-bufferingAt,now-mediaProgressAt))ui.postDelayed(this,5000)
         else{lastFailure="缓冲超时，请检查网络或切换线路";recover(lastFailure)}
@@ -120,17 +220,35 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     private fun bindPlayer(){
         val boundPlayer=player
         player.addListener(object:Player.Listener {
+            override fun onEvents(player:Player,events:Player.Events){
+                if(boundPlayer===nativePlayer)updateAwake()
+            }
             override fun onPlaybackStateChanged(state:Int){
                 if(boundPlayer!==nativePlayer||state!=player.playbackState||released)return
                 ui.removeCallbacks(timeout)
                 PlaybackDiagnostics.update("state",state);PlaybackDiagnostics.update("bufferedMs",player.totalBufferedDuration);PlaybackDiagnostics.update("liveOffsetMs",player.currentLiveOffset)
                 if(BuildConfig.DEBUG&&current!=null)android.util.Log.i("TVBridgeMetrics","channel=${current?.name} state=$state bufferedMs=${player.totalBufferedDuration} liveOffsetMs=${player.currentLiveOffset}")
-                when(state){Player.STATE_IDLE->{readySince=0};Player.STATE_READY->{readySince=SystemClock.elapsedRealtime();lastFailure="";hideCover();refreshTitle("正在播放")};Player.STATE_BUFFERING->{readySince=0;bufferingAt=SystemClock.elapsedRealtime();showCover("${current?.name.orEmpty()}\n正在缓冲",true);refreshTitle("正在缓冲");if(!paused)ui.postDelayed(timeout,20000)};Player.STATE_ENDED->{readySince=0;if(current?.id=="cast")refreshTitle("播放结束")else{lastFailure="直播连接结束";recover(lastFailure)}}}
+                when(state){
+                    Player.STATE_IDLE->readySince=0
+                    Player.STATE_READY->{
+                        lastFailure=""
+                        if(player.currentTracks.containsType(C.TRACK_TYPE_VIDEO)&&!player.currentTracks.isTypeSelected(C.TRACK_TYPE_VIDEO)){
+                            lastFailure="视频轨道未能启用";PlaybackDiagnostics.update("missingVideoTrack",true)
+                            if(attempts.softwareFallback(NativePlayback.softwareAvailable(),2))startLine()else failLine()
+                            return
+                        }
+                        if(renderedEpoch==playbackEpoch||!player.currentTracks.containsType(C.TRACK_TYPE_VIDEO)){
+                            readySince=SystemClock.elapsedRealtime();hideCover();refreshTitle("正在播放")
+                        }else{readySince=0;refreshTitle("等待视频首帧");if(!paused)ui.postDelayed(timeout,20000)}
+                    }
+                    Player.STATE_BUFFERING->{readySince=0;bufferingAt=SystemClock.elapsedRealtime();showCover("${current?.name.orEmpty()}\n正在缓冲",true);refreshTitle("正在缓冲");if(!paused)ui.postDelayed(timeout,20000)}
+                    Player.STATE_ENDED->{readySince=0;if(current?.id=="cast")refreshTitle("播放结束")else{lastFailure="直播连接结束";recover(lastFailure)}}
+                }
             }
             override fun onPlayerError(error:PlaybackException){if(boundPlayer!==nativePlayer||error!==player.playerError)return;if(BuildConfig.DEBUG)android.util.Log.e("TVBridgePlayer",error.errorCodeName,error);if(!released&&!paused)handlePlaybackError(error)}
         })
         player.addAnalyticsListener(object:AnalyticsListener{
-            override fun onRenderedFirstFrame(eventTime:AnalyticsListener.EventTime,output:Any,renderTimeMs:Long){if(boundPlayer===nativePlayer&&(eventTime.mediaPeriodId==null||eventTime.mediaPeriodId==eventTime.currentMediaPeriodId)){routes.rendered(line);PlaybackDiagnostics.update("firstFrameMs",SystemClock.elapsedRealtime()-openedAt);player.videoFormat?.let{PlaybackDiagnostics.update("width",it.width);PlaybackDiagnostics.update("height",it.height)}}}
+            override fun onRenderedFirstFrame(eventTime:AnalyticsListener.EventTime,output:Any,renderTimeMs:Long){if(boundPlayer===nativePlayer&&(eventTime.mediaPeriodId==null||eventTime.mediaPeriodId==eventTime.currentMediaPeriodId)){renderedEpoch=playbackEpoch;readySince=SystemClock.elapsedRealtime();if(player.playbackState==Player.STATE_READY)ui.removeCallbacks(timeout);hideCover();refreshTitle("正在播放");routes.rendered(line);PlaybackDiagnostics.update("firstFrameMs",SystemClock.elapsedRealtime()-openedAt);player.videoFormat?.let{PlaybackDiagnostics.update("width",it.width);PlaybackDiagnostics.update("height",it.height)}}}
             override fun onVideoDecoderInitialized(eventTime:AnalyticsListener.EventTime,decoderName:String,initializedTimestampMs:Long,initializationDurationMs:Long){PlaybackDiagnostics.update("decoder",decoderName)}
             override fun onAudioDecoderInitialized(eventTime:AnalyticsListener.EventTime,decoderName:String,initializedTimestampMs:Long,initializationDurationMs:Long){PlaybackDiagnostics.update("audioDecoder",decoderName)}
             override fun onDroppedVideoFrames(eventTime:AnalyticsListener.EventTime,droppedFrames:Int,elapsedMs:Long){PlaybackDiagnostics.update("lastDroppedFrames",droppedFrames);PlaybackDiagnostics.update("droppedIntervalMs",elapsedMs)}
@@ -146,19 +264,58 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             multicast=wifi?.createMulticastLock("One:live").also{it?.setReferenceCounted(false);it?.acquire()}
         }catch(_:RuntimeException){ }
     }
+    private fun effectiveSoftwareTracks(): Int =
+        if (manualSoftwareDecode && NativePlayback.softwareAvailable()) 3 else attempts.softwareTracks
+
     private fun configureDecoder(){
-        if(softwarePlayer==attempts.softwareTracks)return
-        val next=try{NativePlayback.player(context,attempts.softwareTracks,live=true)}catch(t:Throwable){android.util.Log.w("TVBridgePlayer","configureDecoder failed: ${t.javaClass.simpleName} ${t.message}");return}
+        val target = effectiveSoftwareTracks()
+        if(softwarePlayer==target)return
         val previous=nativePlayer;playerView.player=null
-        softwarePlayer=attempts.softwareTracks;player=next
+        nativePlayer=null
+        previous?.release()
+        val next=NativePlayback.player(context,target,live=true)
+        softwarePlayer=target;player=next
         bindPlayer();playerView.player=player
-        previous?.let{try{it.release()}catch(_:Throwable){}}
+    }
+    private fun aspectLabel(): String = when (aspectMode) {
+        1 -> "16:9"
+        2 -> "满屏"
+        else -> "自适应"
+    }
+    private fun cycleAspectMode() {
+        aspectMode = (aspectMode + 1) % 3
+        livePrefs.edit().putInt("aspect_mode", aspectMode).apply()
+        playerView.resizeMode = when (aspectMode) {
+            1, 2 -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
+            else -> androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
+        aspectAction?.text = "画面:${aspectLabel()}"
+        requestLayout()
+        NativeUi.notice(context, "画面比例：${aspectLabel()}")
+    }
+    private fun toggleManualDecoder() {
+        if (!NativePlayback.softwareAvailable()) {
+            NativeUi.notice(context, "当前设备不支持软解")
+            return
+        }
+        manualSoftwareDecode = !manualSoftwareDecode
+        livePrefs.edit().putBoolean("software_decode", manualSoftwareDecode).apply()
+        decoderAction?.text = if (manualSoftwareDecode) "软解" else "硬解"
+        NativeUi.notice(context, if (manualSoftwareDecode) "已切换为软解播放" else "已切换为硬解播放")
+        if (current != null) startLine()
     }
     private fun dp(value:Int)=(value*2*NativeUi.scale(context)).toInt()
     override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int){
         super.onMeasure(widthMeasureSpec,heightMeasureSpec)
-        val w=minOf(measuredWidth,(measuredHeight*16f/9).toInt()).coerceAtLeast(1)
-        val h=(w*9f/16).toInt().coerceAtLeast(1)
+        val w: Int
+        val h: Int
+        if (aspectMode == 1) {
+            w = minOf(measuredWidth, (measuredHeight * 16f / 9).toInt()).coerceAtLeast(1)
+            h = (w * 9f / 16).toInt().coerceAtLeast(1)
+        } else {
+            w = measuredWidth.coerceAtLeast(1)
+            h = measuredHeight.coerceAtLeast(1)
+        }
         videoSurface.measure(MeasureSpec.makeMeasureSpec(w,MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec(h,MeasureSpec.EXACTLY))
         val coverWidth=measuredWidth
         val coverHeight=measuredHeight
@@ -222,8 +379,9 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             rail.addView(row,LinearLayout.LayoutParams(-1,dp(if(touchDevice)42 else 36)).apply{bottomMargin=dp(4)})
         }
         item("收藏频道","收藏",repo.favoriteChannels().size,favoritesOnly){if(!favoritesOnly){favoritesOnly=true;refresh(false)}}
-        railGroups().filter{it.isNotEmpty()}.forEach{group->item(group,group,all.count{it.group==group},!favoritesOnly&&category==group){if(favoritesOnly||category!=group){category=group;favoritesOnly=false;refresh(false)}}}
-        if(railGroups().any{it.isEmpty()})item("","默认",all.count{it.group.isEmpty()},!favoritesOnly&&category==""){if(favoritesOnly||category!=""){category="";favoritesOnly=false;refresh(false)}}
+        val counts=all.groupingBy{it.group}.eachCount()
+        railGroups().filter{it.isNotEmpty()}.forEach{group->item(group,group,counts[group]?:0,!favoritesOnly&&category==group){if(favoritesOnly||category!=group){category=group;favoritesOnly=false;refresh(false)}}}
+        if(counts.containsKey(""))item("","默认",counts[""]?:0,!favoritesOnly&&category==""){if(favoritesOnly||category!=""){category="";favoritesOnly=false;refresh(false)}}
         val railTarget=railNeeded.coerceIn(dp(96),dp(176));railColumn?.let{column->val lp=column.layoutParams as? LinearLayout.LayoutParams;if(lp!=null&&lp.width!=railTarget){lp.width=railTarget;column.layoutParams=lp}}
         if(focusedTag!=null&&!isInTouchMode)rail.findViewWithTag<View>(focusedTag)?.requestFocus()
     }
@@ -247,7 +405,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     }
     private fun touchVideo(){if(!touchDevice)return;if(drawer.visibility==View.VISIBLE){drawer.visibility=View.GONE;hideControls()}else if(overlay.visibility==View.VISIBLE)hideControls()else showControls()}
     private fun buildControls(cast:Boolean){
-        controls.removeAllViews();favoriteAction=null;lineAction=null
+        controls.removeAllViews();favoriteAction=null;lineAction=null;decoderAction=null;aspectAction=null
         if(cast){
             action(controls,"后退 10 秒",true){command("videoBack","")}
             action(controls,"播放 / 暂停",true){command("videoToggle","")}
@@ -257,6 +415,10 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             action(controls,"频道列表",true){showDrawer()}
             favoriteAction=action(controls,"收藏",true){current?.let{repo.toggleFavorite(it.id);refreshTitle();refresh()}}
             lineAction=action(controls,"切换线路",true){nextLine()}
+            if(NativePlayback.softwareAvailable()){
+                decoderAction=action(controls,if(manualSoftwareDecode)"软解" else "硬解",true){toggleManualDecoder()}
+            }
+            aspectAction=action(controls,"画面:${aspectLabel()}",true){cycleAspectMode()}
             if(touchDevice)action(controls,"下一台",true){stepChannel(1)}
         }
         if(touchDevice)action(controls,"返回",true){exit()}
@@ -328,35 +490,13 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         if(current!=null&&current?.id!="cast"&&repo.findChannel(current!!.id)==null){cancelRecovery();nativePlayer?.stop();current=null;ui.removeCallbacks(timeout);showEmptyCover()}
         shown=if(favoritesOnly)repo.favoriteChannels()else all.filter{it.group==category}
         if(rebuildFilters)renderRail()else for(i in 0 until rail.childCount){val railItem=rail.getChildAt(i);railItem.isSelected=when(railItem.tag){"收藏频道"->favoritesOnly;else->!favoritesOnly&&railItem.tag==category}}
-        fun adapter()=object:ArrayAdapter<LiveChannel>(context,android.R.layout.simple_list_item_1,shown){override fun getView(position:Int,convert:View?,parent:ViewGroup):View{
-            val item=getItem(position)!!
-            val row=(convert as? LinearLayout)?:LinearLayout(context).apply{
-                orientation=LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL
-                val badge=TextView(context);badge.tag="badge";badge.gravity=Gravity.CENTER;badge.includeFontPadding=false
-                badge.background=GradientDrawable().apply{setColor(0x2effffff);cornerRadius=dp(4).toFloat();setStroke((NativeUi.scale(context)).toInt().coerceAtLeast(1),0x59ffffff)}
-                badge.minWidth=dp(22);badge.maxLines=1;badge.setPadding(dp(3),0,dp(3),0)
-                addView(badge,LinearLayout.LayoutParams(-2,dp(22)))
-                val name=TextView(context);name.tag="name";name.maxLines=1;name.ellipsize=android.text.TextUtils.TruncateAt.END
-                addView(name,LinearLayout.LayoutParams(0,-2,1f).apply{marginStart=dp(8)})
-                val starHit=FrameLayout(context);starHit.tag="starHit"
-                val star=View(context);star.tag="star";starHit.addView(star,FrameLayout.LayoutParams(dp(19),dp(19),Gravity.CENTER))
-                addView(starHit,LinearLayout.LayoutParams(dp(32),-1).apply{marginStart=dp(2)})
-            }
-            val badge=row.findViewWithTag<TextView>("badge");val name=row.findViewWithTag<TextView>("name");val star=row.findViewWithTag<View>("star")
-            val favorite=repo.favorite(item.id)
-            val playing=item.id==current?.id
-            row.isSelected=(parent as? AbsListView)?.selectedItemPosition==position||playing
-            row.background=GlassUi.surface(row,GlassUi.CHIP_RADIUS,video=true,dark=true,faint=true,plain=true,marked=playing)
-            row.setPadding(dp(8),0,dp(6),0);row.minimumHeight=dp(if(touchDevice)42 else 36)
-            badge.text=(position+1).toString();NativeUi.textSize(badge,20f)
-            (badge.background as? GradientDrawable)?.setColor(if(playing)0xd9ffffff.toInt() else 0x2effffff)
-            badge.setTextColor(if(playing)0xff292f32.toInt() else 0xffc8d0d8.toInt())
-            name.text=item.name;NativeUi.textSize(name,28f);name.setTextColor(liveFocusColors());name.setTypeface(null,if(playing)Typeface.BOLD else Typeface.NORMAL)
-            star.background=AppIcons.Vector("star"){if(favorite)0xffffc233.toInt() else 0x59ffffff}
-            val starHit=row.findViewWithTag<View>("starHit");starHit.contentDescription="收藏";starHit.setOnClickListener{val pos=drawerList.firstVisiblePosition;val top=drawerList.getChildAt(0)?.top?:0;repo.toggleFavorite(item.id);refresh();drawerList.setSelectionFromTop(pos,top)}
-            return row
-        }}
-        drawerList.adapter=adapter()
+        shownItems.clear()
+        shownItems.addAll(shown)
+        if (drawerList.adapter !== channelAdapter) {
+            drawerList.adapter = channelAdapter
+        } else {
+            channelAdapter.notifyDataSetChanged()
+        }
         val playingIndex=shown.indexOfFirst{it.id==current?.id}
         if(playingIndex>=0)drawerList.setSelectionFromTop(playingIndex,dp(6))
         if(current!=null)refreshTitle()
@@ -399,13 +539,13 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             PlaybackDiagnostics.update("softwareFallback",attempts.software)
             PlaybackDiagnostics.update("softwareTracks",attempts.softwareTracks)
             PlaybackDiagnostics.update("rtspTcp",attempts.rtspTcp)
-            player.setMediaSource(NativePlayback.source(context,url,attempts,loadPolicy));player.prepare();player.playWhenReady=true;ui.postDelayed(timeout,20000);fullTitle.visibility=View.VISIBLE;ui.removeCallbacks(hide);ui.postDelayed(hide,1800)
+            player.setMediaSource(NativePlayback.source(context,url,attempts,loadPolicy));player.prepare();if(current?.id=="cast"&&parkedPosition>0){player.seekTo(parkedPosition);parkedPosition=0};player.playWhenReady=true;ui.postDelayed(timeout,20000);fullTitle.visibility=View.VISIBLE;ui.removeCallbacks(hide);ui.postDelayed(hide,1800)
         }catch(t:Throwable){
             android.util.Log.w("TVBridgePlayer","startLine failed: ${t.javaClass.simpleName} ${t.message}")
             failLine()
         }
     }
-    private fun maybeResetRetries(){val now=SystemClock.elapsedRealtime();if((readySince>0&&now-readySince>=10_000)||(lastErrorAt>0&&now-lastErrorAt>=60_000))retries=0}
+    private fun maybeResetRetries(){val now=SystemClock.elapsedRealtime();if((readySince>0&&now-readySince>=10_000)||(lastErrorAt>0&&now-lastErrorAt>=60_000)){retries=0}}
     private fun recover(reason:String){
         if(released||paused||current==null)return
         maybeResetRetries();lastErrorAt=SystemClock.elapsedRealtime()
@@ -438,17 +578,21 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         cancelRecovery()
         if(allowFormatFallback&&attempts.nextFormat()){startLine();return}
         val next=routes.next(line)
-        if(next!=null){line=next;retries=0;resetAttempt();startLine()}else{multicastFor(null);player.stop();val reason=lastFailure.ifBlank{"播放失败，请切换线路"};refreshTitle(reason);showCover(reason,false);fullTitle.visibility=View.VISIBLE}
+        if(next!=null){line=next;retries=0;resetAttempt();startLine()}else{multicastFor(null);nativePlayer?.stop();updateAwake();val reason=lastFailure.ifBlank{"播放失败，请切换线路"};refreshTitle(reason);showCover(reason,false);fullTitle.visibility=View.VISIBLE}
     }
     private fun refreshTitle(state:String=""){favoriteAction?.text=if(current?.let{repo.favorite(it.id)}==true)"已收藏"else "收藏";lineAction?.text="切换线路";val channel=current;val text=channel?.let{it.name+(if(it.id=="cast")""else " · 线路 ${line+1}/${it.streams.size}")+(if(repo.favorite(it.id))" · 已收藏" else "")+(if(state.isNotEmpty())" · $state" else "")}?:"直播";fullTitle.text=text}
-    private fun nextLine(){val channel=current?:return;routes.manual();line=(line+1)%channel.streams.size;retries=0;lastFailure="";resetAttempt();startLine()}
+    private fun nextLine(){val channel=current?:return;if(channel.streams.isEmpty())return;routes.manual();line=(line+1)%channel.streams.size;retries=0;lastFailure="";resetAttempt();startLine()}
     private fun stepChannel(step:Int){
+        val now=SystemClock.uptimeMillis()
+        if(now-lastChannelStep<180)return
+        lastChannelStep=now
         val items=shown.ifEmpty{all}
         if(items.isEmpty())return
         val index=items.indexOfFirst{it.id==current?.id}
         val next=(index+step)%items.size
         play(items[if(next<0)next+items.size else next],true)
     }
+    private var lastChannelStep=Long.MIN_VALUE/2
     private fun sources(){
         groupPopup?.dismiss();val entries=repo.sourceList()
         val activeNow=repo.activeSource();val manageable=activeNow!="local";val labels=entries.map{"${it.name} · ${it.channels.size} 台"}+(if(manageable)listOf("更新订阅","删除当前源")else emptyList())
@@ -498,7 +642,12 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             val inRail=rail.findFocus()!=null||sourceButton.hasFocus()
             if(code==KeyEvent.KEYCODE_DPAD_LEFT){
                 if(inRail)return true
-                if(drawerList.hasFocus()){for(i in 0 until rail.childCount){val railItem=rail.getChildAt(i);if(railItem.isSelected){railItem.requestFocus();break}};return true}
+                if(drawerList.hasFocus()){
+                    var focused=false
+                    for(i in 0 until rail.childCount){val railItem=rail.getChildAt(i);if(railItem.isSelected){focused=railItem.requestFocus();break}}
+                    if(!focused)(rail.getChildAt(0)?:sourceButton).requestFocus()
+                    return true
+                }
                 return false
             }
             if(code==KeyEvent.KEYCODE_DPAD_RIGHT){
@@ -533,8 +682,16 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         }
         return true
     }
-    fun command(cmd:String,value:String):Boolean=when(cmd){"videoToggle"->{if(player.playWhenReady)player.pause()else player.play();true};"videoPause"->{player.pause();true};"videoBack"->{player.seekTo((player.currentPosition-10000).coerceAtLeast(0));true};"videoForward"->{player.seekTo(player.currentPosition+10000);true};"videoFull"->{showControls();true};"liveNext"->{stepChannel(1);true};"livePrev"->{stepChannel(-1);true};"liveLine"->{nextLine();true};"liveFull"->{showDrawer();true};"volumeUp","volumeDown"->{(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager).adjustStreamVolume(AudioManager.STREAM_MUSIC,if(cmd=="volumeUp")AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,AudioManager.FLAG_SHOW_UI);true};else->false}
-    fun pause(){ui.removeCallbacks(selectNumber);channelDigits="";multicastFor(null);resumePlayback=nativePlayer?.playWhenReady==true;paused=true;cancelRecovery();nativePlayer?.pause();ui.removeCallbacks(timeout);ui.removeCallbacks(hide)}
-    fun resume(){if(!released&&paused&&current!=null){paused=false;multicastFor(current?.streams?.getOrNull(line));if(resumePlayback){if(current?.id!="cast")player.seekToDefaultPosition();if(player.playerError!=null)player.prepare();player.play();ui.postDelayed(timeout,20000)}}}
-    fun stop(){ui.removeCallbacks(selectNumber);channelDigits="";multicastFor(null);groupPopup?.dismiss();released=true;loading.visibility=View.GONE;ui.removeCallbacksAndMessages(null);playerView.player=null;nativePlayer?.release();nativePlayer=null}
+    fun command(cmd:String,value:String):Boolean{if(released)return false;return when(cmd){"videoToggle"->{if(player.playWhenReady)player.pause()else player.play();true};"videoPause"->{player.pause();true};"videoBack"->{player.seekTo((player.currentPosition-10000).coerceAtLeast(0));true};"videoForward"->{player.seekTo(player.currentPosition+10000);true};"videoFull"->{showControls();true};"liveNext"->{stepChannel(1);true};"livePrev"->{stepChannel(-1);true};"liveLine"->{nextLine();true};"liveFull"->{showDrawer();true};"volumeUp","volumeDown"->{(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager).adjustStreamVolume(AudioManager.STREAM_MUSIC,if(cmd=="volumeUp")AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER,AudioManager.FLAG_SHOW_UI);true};else->false}}
+    private fun updateAwake(){keepScreenOn=!released&&!paused&&nativePlayer?.let{it.isPlaying||(it.playWhenReady&&it.playbackState==Player.STATE_BUFFERING)}==true}
+    fun pause(){ui.removeCallbacks(selectNumber);channelDigits="";multicastFor(null);resumePlayback=nativePlayer?.playWhenReady==true;paused=true;cancelRecovery();nativePlayer?.pause();updateAwake();ui.removeCallbacks(timeout);ui.removeCallbacks(hide)}
+    fun releaseInBackground(){
+        if(released||!paused)return
+        parkedPosition=if(current?.id=="cast")nativePlayer?.currentPosition?:parkedPosition else 0L
+        playerView.player=null
+        val previous=nativePlayer;nativePlayer=null;previous?.release()
+        softwarePlayer=0;keepScreenOn=false
+    }
+    fun resume(){if(!released&&paused&&current!=null){paused=false;multicastFor(current?.streams?.getOrNull(line));if(nativePlayer==null){startLine();if(!resumePlayback)nativePlayer?.pause()}else if(resumePlayback){if(current?.id!="cast")player.seekToDefaultPosition();if(player.playerError!=null)player.prepare();player.play();ui.postDelayed(timeout,20000)};updateAwake()}}
+    fun stop(){ui.removeCallbacks(selectNumber);channelDigits="";multicastFor(null);groupPopup?.dismiss();released=true;keepScreenOn=false;loading.visibility=View.GONE;ui.removeCallbacksAndMessages(null);playerView.player=null;nativePlayer?.release();nativePlayer=null}
 }

@@ -1,6 +1,5 @@
 package com.tvbridge.app
 
-
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent

@@ -8,13 +8,15 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.io.ByteArrayOutputStream
-import java.util.concurrent.Executors
+import java.util.concurrent.CountDownLatch
 
 class LiveRepository(private val context:Context) {
     data class Source(val url:String,val name:String,val channels:List<LiveChannel>,val updated:Long)
     private val file=AtomicFile(java.io.File(context.filesDir,"live-sources.json"))
-    private val persistExecutor=Executors.newSingleThreadExecutor()
+    private val loaded=CountDownLatch(1)
     @Volatile private var persistSeq=0L
+    private val storeWriteLock=Any()
+    private var saveQueued=false
     private val playback=context.getSharedPreferences("live-resume",Context.MODE_PRIVATE)
     private val sources=mutableListOf<Source>()
     private val favorites=mutableSetOf<String>()
@@ -23,26 +25,92 @@ class LiveRepository(private val context:Context) {
     private var lastPlayedAt=0L
     @Volatile var lastMessage="可使用手机添加订阅或导入节目单"
         private set
-    init {try {
-        val stored=file.readFully(); val root=JSONObject(String(stored,Charsets.UTF_8));active=root.optString("active","local");lastChannel=root.optString("lastChannel");lastPlayedAt=root.optLong("lastPlayedAt")
-        val list=root.optJSONArray("sources")
-        val retireBuiltIn=list!=null && (0 until minOf(list.length(),11)).any{i->
-            list.optJSONObject(i)?.let{isRetiredBuiltIn(it)}==true
-        } && backupBeforeRetiringBuiltIn(stored)
-        list?.let{entries->var total=0;for(i in 0 until minOf(entries.length(),11)){try{
-            val s=entries.getJSONObject(i);if(retireBuiltIn&&isRetiredBuiltIn(s))continue;val saved=s.getJSONArray("channels");val limit=minOf(saved.length(),20000,(20000-total).coerceAtLeast(0))
-            val channels=(0 until limit).mapNotNull{index->try{val c=saved.getJSONObject(index);val urls=c.getJSONArray("streams");val streams=(0 until urls.length()).mapNotNull{savedStream(urls.getString(it))};if(streams.isEmpty())null else LiveChannel(c.getString("id"),c.getString("name"),c.getString("group"),streams)}catch(_:Exception){null}}
-            total+=channels.size;val url=s.getString("url");sources.add(Source(url,s.getString("name"),channels,s.optLong("updated")))
-        }catch(e:Exception){android.util.Log.w("LiveRepository","跳过损坏的直播源 #$i: ${e.javaClass.simpleName} ${e.message}")}}}
-        root.optJSONArray("favorites")?.let{a->for(i in 0 until a.length())favorites.add(a.getString(i))}
-    }catch(_:Exception){}
-        val playedAt=playback.getLong("time",0)
-        val playedId=playback.getString("channel","").orEmpty()
-        val playedSource=sources.firstOrNull{source->source.channels.any{it.id==playedId}}
-        if(playedAt>lastPlayedAt&&playedSource!=null){
-            lastPlayedAt=playedAt
-            lastChannel=playedId
-            active=playedSource.url
+
+    init {
+        AppThreads.onPersist {
+            try {
+                loadFromDisk()
+            } catch (t: Throwable) {
+                Log.w("LiveRepository", "异步加载 live-sources.json 失败", t)
+            } finally {
+                loaded.countDown()
+            }
+        }
+    }
+
+    private fun awaitLoaded() {
+        if (loaded.count == 0L) return
+        try {
+            loaded.await()
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+    }
+    val isLoaded:Boolean get()=loaded.count==0L
+    fun whenLoaded(done:()->Unit){AppThreads.onIo{awaitLoaded();AppThreads.main.post{done()}}}
+
+    private fun loadFromDisk() {
+        val loadedSources = mutableListOf<Source>()
+        val loadedFavorites = mutableSetOf<String>()
+        var loadedActive = "local"
+        var loadedLastChannel = ""
+        var loadedLastPlayedAt = 0L
+        try {
+            val stored = file.readFully()
+            val root = JSONObject(String(stored, Charsets.UTF_8))
+            loadedActive = root.optString("active", "local")
+            loadedLastChannel = root.optString("lastChannel")
+            loadedLastPlayedAt = root.optLong("lastPlayedAt")
+            val list = root.optJSONArray("sources")
+            val retireBuiltIn = list != null && (0 until minOf(list.length(), 11)).any { i ->
+                list.optJSONObject(i)?.let { isRetiredBuiltIn(it) } == true
+            } && backupBeforeRetiringBuiltIn(stored)
+            list?.let { entries ->
+                var total = 0
+                for (i in 0 until minOf(entries.length(), 11)) {
+                    try {
+                        val s = entries.getJSONObject(i)
+                        if (retireBuiltIn && isRetiredBuiltIn(s)) continue
+                        val saved = s.getJSONArray("channels")
+                        val limit = minOf(saved.length(), 20000, (20000 - total).coerceAtLeast(0))
+                        val channels = (0 until limit).mapNotNull { index ->
+                            try {
+                                val c = saved.getJSONObject(index)
+                                val urls = c.getJSONArray("streams")
+                                val streams = (0 until urls.length()).mapNotNull { savedStream(urls.getString(it)) }
+                                if (streams.isEmpty()) null else LiveChannel(c.getString("id"), c.getString("name"), c.getString("group"), streams)
+                            } catch (_: Exception) {
+                                null
+                            }
+                        }
+                        total += channels.size
+                        val url = s.getString("url")
+                        loadedSources.add(Source(url, s.getString("name"), channels, s.optLong("updated")))
+                    } catch (e: Exception) {
+                        Log.w("LiveRepository", "跳过损坏的直播源 #$i: ${e.javaClass.simpleName} ${e.message}")
+                    }
+                }
+            }
+            root.optJSONArray("favorites")?.let { a -> for (i in 0 until a.length()) loadedFavorites.add(a.getString(i)) }
+        } catch (_: Exception) {
+        }
+        val playedAt = playback.getLong("time", 0)
+        val playedId = playback.getString("channel", "").orEmpty()
+        val playedSource = loadedSources.firstOrNull { source -> source.channels.any { it.id == playedId } }
+        if (playedAt > loadedLastPlayedAt && playedSource != null) {
+            loadedLastPlayedAt = playedAt
+            loadedLastChannel = playedId
+            loadedActive = playedSource.url
+        }
+        synchronized(this) {
+            sources.clear()
+            sources.addAll(loadedSources)
+            favorites.clear()
+            favorites.addAll(loadedFavorites)
+            active = loadedActive
+            lastChannel = loadedLastChannel
+            lastPlayedAt = loadedLastPlayedAt
+            snapshotKey = null
         }
     }
     private fun isRetiredBuiltIn(source:JSONObject):Boolean {
@@ -79,103 +147,324 @@ class LiveRepository(private val context:Context) {
 
     private fun savedStream(value:String)=PlaylistParser.streamUrl(value)
 
-    @Synchronized fun allChannels():List<LiveChannel> {
-        val allowed=sourceList()
-        if(allowed.none{it.url==active})active=allowed.firstOrNull()?.url?:"local"
-        return allowed.firstOrNull{it.url==active}?.channels.orEmpty()
-    }
-    @Synchronized fun sourceList()=sources.toList()
-    @Synchronized fun findChannel(id:String?)=sourceList().asSequence().flatMap{it.channels.asSequence()}.firstOrNull{it.id==id}
-    @Synchronized fun favoriteChannels()=sourceList().flatMap{it.channels}.filter{favorites.contains(it.id)}.distinctBy{it.id}
-    @Synchronized fun activeSource():String {allChannels();return active}
-    @Synchronized fun rememberChannel(id:String){
-        val source=sources.firstOrNull{s->s.channels.any{it.id==id}}?:return
-        if(id=="cast")return
-        if(lastChannel==id&&active==source.url)return
-        lastChannel=id
-        lastPlayedAt=maxOf(System.currentTimeMillis(),lastPlayedAt+1)
-        active=source.url
-        playback.edit().putString("channel",id).putLong("time",lastPlayedAt).apply()
-    }
-    @Synchronized fun resumeChannel():LiveChannel? {
-        val available=sourceList()
-        val source=available.firstOrNull{s->s.channels.any{it.id==lastChannel}}
-        if(source!=null){if(active!=source.url){active=source.url;saveAsync()};return source.channels.first{it.id==lastChannel}}
-        val fallback=allChannels().firstOrNull()?:available.firstOrNull{it.channels.isNotEmpty()}?.channels?.firstOrNull()
-        if(fallback!=null){val next=available.first{s->s.channels.any{it.id==fallback.id}};if(active!=next.url){active=next.url;saveAsync()}}
-        return fallback
-    }
-    @Synchronized fun favorite(id:String)=favorites.contains(id)
-    @Synchronized fun toggleFavorite(id:String){if(!favorites.add(id))favorites.remove(id);saveAsync()}
-    @Synchronized fun selectSource(url:String){if(sources.any{it.url==url}){active=url;saveAsync()}}
-    @Synchronized fun removeSource(url:String){sources.removeAll{it.url==url};if(active==url)active=sources.firstOrNull()?.url?:"local";saveAsync()}
-    private data class SnapshotKey(val revision:Long,val source:String,val message:String)
-    private var snapshotKey:SnapshotKey?=null
-    private var snapshotJson=""
-    private var snapshotVersion=0L
-    @Synchronized fun snapshot(knownVersion:String=""):String {
-        val key=SnapshotKey(revision,active,lastMessage)
-        if(key==snapshotKey)return if(knownVersion==snapshotVersion.toString())"" else snapshotJson
-        val channels=JSONArray();allChannels().forEach{channels.put(it.json().put("favorite",favorites.contains(it.id)))}
-        val list=JSONArray();sourceList().forEach{list.put(JSONObject().put("url",it.url).put("name",it.name).put("count",it.channels.size))}
-        snapshotVersion=maxOf(snapshotVersion+1,System.currentTimeMillis())
-        snapshotJson=JSONObject().put("version",snapshotVersion.toString()).put("channels",channels).put("favoriteChannels",JSONArray(favoriteChannels().map{it.json().put("favorite",true)})).put("sources",list).put("active",active).put("message",lastMessage).toString()
-        snapshotKey=key.copy(revision=revision,source=active)
-        return snapshotJson
-    }
-    @Volatile var revision=0L;private set
-    var onPersist:((String)->Unit)?=null
-    @Synchronized fun exportStore():String {
-        val list=JSONArray();sources.forEach{s->list.put(JSONObject().put("url",s.url).put("name",s.name).put("updated",s.updated).put("channels",JSONArray(s.channels.map{it.json()})))}
-        return JSONObject().put("active",active).put("sources",list).put("favorites",JSONArray(favorites.toList())).put("lastChannel",lastChannel).put("lastPlayedAt",lastPlayedAt).toString()
-    }
-    @Synchronized private fun save() {
-        persistSeq++
-        val text=exportStore();writeStore(text);revision++;onPersist?.invoke(text)
-    }
-    private fun writeStore(text:String) {
-        val data=text.toByteArray(Charsets.UTF_8)
-        val out=file.startWrite();try{out.write(data);file.finishWrite(out)}catch(e:Exception){file.failWrite(out);throw e}
-    }
-    private fun saveAsync() {
-        val snapshot=synchronized(this){exportStore().also{revision++} to ++persistSeq}
-        val text=snapshot.first;val seq=snapshot.second
-        persistExecutor.execute{synchronized(this){try{if(seq==persistSeq){writeStore(text);onPersist?.invoke(text)}}catch(e:Throwable){Log.w("LiveRepository","live-sources.json 异步写盘失败",e)}}}
-    }
-    private fun decodedSources(root:JSONObject):List<Source>{
-        val entries=root.getJSONArray("sources");require(entries.length()<=11)
-        return (0 until entries.length()).mapNotNull {i->val item=entries.getJSONObject(i);if(isRetiredBuiltIn(item))return@mapNotNull null;val url=item.getString("url");require(url=="local"||PlaylistParser.playlistAddress(url)!=null)
-            val channels=item.getJSONArray("channels");require(channels.length()<=20000)
-            Source(url,item.getString("name").take(100),(0 until channels.length()).map{j->val c=channels.getJSONObject(j);val streams=c.getJSONArray("streams");require(streams.length() in 1..100)
-                LiveChannel(c.getString("id"),c.getString("name").take(200),c.optString("group").take(100),(0 until streams.length()).map{k->savedStream(streams.getString(k))?:error("无效频道地址")})},item.optLong("updated"))
+    fun allChannels(): List<LiveChannel> {
+        awaitLoaded()
+        return synchronized(this) {
+            val allowed = sources.toList()
+            if (allowed.none { it.url == active }) active = allowed.firstOrNull()?.url ?: "local"
+            allowed.firstOrNull { it.url == active }?.channels.orEmpty()
         }
     }
-    @Synchronized fun restoreSnapshot(text:String){
-        val root=JSONObject(text);val next=decodedSources(root);require(next.sumOf{it.channels.size}<=20000)
-        sources.clear();sources.addAll(next);favorites.clear();root.optJSONArray("favorites")?.let{a->for(i in 0 until minOf(a.length(),20000))favorites.add(a.getString(i))};active=root.getString("active");lastChannel=root.optString("lastChannel");lastPlayedAt=root.optLong("lastPlayedAt")
-        snapshotKey=null
+
+    fun sourceList(): List<Source> {
+        awaitLoaded()
+        return synchronized(this) { sources.toList() }
     }
-    @Synchronized fun mergeSnapshot(before:String,after:String){
-        val old=JSONObject(before);val next=JSONObject(after);val previous=decodedSources(old).associateBy{it.url};val incoming=decodedSources(next).associateBy{it.url}
-        val result=sources.filter{it.url !in previous||it.url in incoming}.associateBy{it.url}.toMutableMap()
-        incoming.forEach{(key,value)->if(previous[key]!=value)result[key]=value};require(result.size<=11&&result.values.sumOf{it.channels.size}<=20000)
-        fun ids(root:JSONObject):Set<String>{val a=root.optJSONArray("favorites")?:JSONArray();require(a.length()<=20000);return (0 until a.length()).map{a.getString(it)}.toSet()}
-        val oldIds=ids(old);val newIds=ids(next);sources.clear();sources.addAll(result.values);favorites.removeAll(oldIds-newIds);favorites.addAll(newIds-oldIds)
-        if(old.optString("active")!=next.optString("active"))active=next.getString("active");
-        if(old.optString("lastChannel")!=next.optString("lastChannel")&&next.optLong("lastPlayedAt")>lastPlayedAt){lastChannel=next.optString("lastChannel");lastPlayedAt=next.optLong("lastPlayedAt")};saveAsync()
+
+    fun findChannel(id: String?): LiveChannel? {
+        awaitLoaded()
+        return synchronized(this) {
+            sources.asSequence().flatMap { it.channels.asSequence() }.firstOrNull { it.id == id }
+        }
     }
-    @Synchronized private fun replace(source:Source) {
-        require(sources.size<10 || sources.any{it.url==source.url}){"最多保存 10 个订阅源"}
-        require(source.channels.size+sources.filter{it.url!=source.url}.sumOf{it.channels.size}<=20000){"总频道数最多 20000，请先删除不需要的源"}
-        val old=sources.toList();val previousActive=active
-        sources.removeAll{it.url==source.url};sources.add(source);active=source.url
-        try{save()}catch(e:Exception){sources.clear();sources.addAll(old);active=previousActive;throw e}
-        lastMessage="已保存 ${source.channels.size} 个频道"
+
+    fun favoriteChannels(): List<LiveChannel> {
+        awaitLoaded()
+        return synchronized(this) {
+            sources.flatMap { it.channels }.filter { favorites.contains(it.id) }.distinctBy { it.id }
+        }
     }
-    fun importText(text:String):Boolean=attempt {
-        val channels=PlaylistParser.parse(text,"local");require(channels.isNotEmpty()){"没有找到可用频道"}
-        val old=synchronized(this){sources.firstOrNull{it.url=="local"}?.channels.orEmpty()}
-        replace(Source("local","本地导入",(old+channels).associateBy{it.id}.values.toList(),System.currentTimeMillis()))
+
+    fun activeSource(): String {
+        awaitLoaded()
+        return synchronized(this) {
+            if (sources.none { it.url == active }) active = sources.firstOrNull()?.url ?: "local"
+            active
+        }
+    }
+
+    fun rememberChannel(id: String) {
+        awaitLoaded()
+        synchronized(this) {
+            val source = sources.firstOrNull { s -> s.channels.any { it.id == id } } ?: return
+            if (id == "cast") return
+            if (lastChannel == id && active == source.url) return
+            lastChannel = id
+            lastPlayedAt = maxOf(System.currentTimeMillis(), lastPlayedAt + 1)
+            active = source.url
+            playback.edit().putString("channel", id).putLong("time", lastPlayedAt).apply()
+        }
+    }
+
+    fun resumeChannel(): LiveChannel? {
+        awaitLoaded()
+        return synchronized(this) {
+            val available = sources.toList()
+            val source = available.firstOrNull { s -> s.channels.any { it.id == lastChannel } }
+            if (source != null) {
+                if (active != source.url) {
+                    active = source.url
+                    saveAsync()
+                }
+                return@synchronized source.channels.first { it.id == lastChannel }
+            }
+            val currentChannels = available.firstOrNull { it.url == active }?.channels.orEmpty()
+            val fallback = currentChannels.firstOrNull()
+                ?: available.firstOrNull { it.channels.isNotEmpty() }?.channels?.firstOrNull()
+            if (fallback != null) {
+                val next = available.first { s -> s.channels.any { it.id == fallback.id } }
+                if (active != next.url) {
+                    active = next.url
+                    saveAsync()
+                }
+            }
+            fallback
+        }
+    }
+
+    fun favorite(id: String): Boolean {
+        awaitLoaded()
+        return synchronized(this) { favorites.contains(id) }
+    }
+
+    fun toggleFavorite(id: String) {
+        awaitLoaded()
+        synchronized(this) {
+            if (!favorites.add(id)) favorites.remove(id)
+            saveAsync()
+        }
+    }
+
+    fun selectSource(url: String) {
+        awaitLoaded()
+        synchronized(this) {
+            if (sources.any { it.url == url }) {
+                active = url
+                saveAsync()
+            }
+        }
+    }
+
+    fun removeSource(url: String) {
+        awaitLoaded()
+        synchronized(this) {
+            sources.removeAll { it.url == url }
+            if (active == url) active = sources.firstOrNull()?.url ?: "local"
+            saveAsync()
+        }
+    }
+
+    private data class SnapshotKey(val revision: Long, val source: String, val message: String)
+    private var snapshotKey: SnapshotKey? = null
+    private var snapshotJson = ""
+    private var snapshotVersion = 0L
+
+    fun snapshot(knownVersion: String = ""): String {
+        awaitLoaded()
+        return synchronized(this) {
+            val key = SnapshotKey(revision, active, lastMessage)
+            if (key == snapshotKey) return@synchronized if (knownVersion == snapshotVersion.toString()) "" else snapshotJson
+            if (sources.none { it.url == active }) active = sources.firstOrNull()?.url ?: "local"
+            val activeChannels = sources.firstOrNull { it.url == active }?.channels.orEmpty()
+            val channels = JSONArray()
+            activeChannels.forEach { channels.put(it.json().put("favorite", favorites.contains(it.id))) }
+            val list = JSONArray()
+            sources.forEach { list.put(JSONObject().put("url", it.url).put("name", it.name).put("count", it.channels.size)) }
+            val favs = sources.flatMap { it.channels }.filter { favorites.contains(it.id) }.distinctBy { it.id }
+            snapshotVersion = maxOf(snapshotVersion + 1, System.currentTimeMillis())
+            snapshotJson = JSONObject()
+                .put("version", snapshotVersion.toString())
+                .put("channels", channels)
+                .put("favoriteChannels", JSONArray(favs.map { it.json().put("favorite", true) }))
+                .put("sources", list)
+                .put("active", active)
+                .put("message", lastMessage)
+                .toString()
+            snapshotKey = key.copy(revision = revision, source = active)
+            snapshotJson
+        }
+    }
+
+    @Volatile var revision = 0L
+        private set
+    var onPersist: ((String) -> Unit)? = null
+
+    fun exportStore(): String {
+        awaitLoaded()
+        return encodeStore(synchronized(this){captureStore()})
+    }
+
+    private data class Store(val sources:List<Source>,val favorites:List<String>,val active:String,val lastChannel:String,val lastPlayedAt:Long,val sequence:Long)
+    private fun captureStore()=Store(sources.toList(),favorites.toList(),active,lastChannel,lastPlayedAt,persistSeq)
+    private fun encodeStore(store:Store): String {
+        val list = JSONArray()
+        store.sources.forEach { s ->
+            list.put(
+                JSONObject()
+                    .put("url", s.url)
+                    .put("name", s.name)
+                    .put("updated", s.updated)
+                    .put("channels", JSONArray(s.channels.map { it.json() }))
+            )
+        }
+        return JSONObject()
+            .put("active", store.active)
+            .put("sources", list)
+            .put("favorites", JSONArray(store.favorites))
+            .put("lastChannel", store.lastChannel)
+            .put("lastPlayedAt", store.lastPlayedAt)
+            .toString()
+    }
+
+    private fun writeStore(text: String) {
+        val data = text.toByteArray(Charsets.UTF_8)
+        val out = file.startWrite()
+        try {
+            out.write(data)
+            file.finishWrite(out)
+        } catch (e: Exception) {
+            file.failWrite(out)
+            throw e
+        }
+    }
+
+    private fun saveAsync() {
+        synchronized(this){
+            persistSeq++;revision++
+            if(saveQueued)return
+            saveQueued=true
+        }
+        AppThreads.onPersist {
+            while(true){
+                val snapshot=synchronized(this){captureStore()}
+                try {
+                    val text=encodeStore(snapshot)
+                    synchronized(storeWriteLock){
+                        if(snapshot.sequence==persistSeq){writeStore(text);onPersist?.invoke(text)}
+                    }
+                }catch(e:Throwable){Log.w("LiveRepository","live-sources.json 异步写盘失败",e)}
+                synchronized(this){
+                    if(snapshot.sequence==persistSeq){saveQueued=false;return@onPersist}
+                }
+            }
+        }
+    }
+
+    private fun decodedSources(root: JSONObject): List<Source> {
+        val entries = root.getJSONArray("sources")
+        require(entries.length() <= 11)
+        return (0 until entries.length()).mapNotNull { i ->
+            val item = entries.getJSONObject(i)
+            if (isRetiredBuiltIn(item)) return@mapNotNull null
+            val url = item.getString("url")
+            require(url == "local" || PlaylistParser.playlistAddress(url) != null)
+            val channels = item.getJSONArray("channels")
+            require(channels.length() <= 20000)
+            Source(
+                url,
+                item.getString("name").take(100),
+                (0 until channels.length()).map { j ->
+                    val c = channels.getJSONObject(j)
+                    val streams = c.getJSONArray("streams")
+                    require(streams.length() in 1..100)
+                    LiveChannel(
+                        c.getString("id"),
+                        c.getString("name").take(200),
+                        c.optString("group").take(100),
+                        (0 until streams.length()).map { k -> savedStream(streams.getString(k)) ?: error("无效频道地址") }
+                    )
+                },
+                item.optLong("updated")
+            )
+        }
+    }
+
+    fun restoreSnapshot(text: String) {
+        awaitLoaded()
+        synchronized(this) {
+            val root = JSONObject(text)
+            val next = decodedSources(root)
+            require(next.sumOf { it.channels.size } <= 20000)
+            sources.clear()
+            sources.addAll(next)
+            favorites.clear()
+            root.optJSONArray("favorites")?.let { a ->
+                for (i in 0 until minOf(a.length(), 20000)) favorites.add(a.getString(i))
+            }
+            active = root.getString("active")
+            lastChannel = root.optString("lastChannel")
+            lastPlayedAt = root.optLong("lastPlayedAt")
+            snapshotKey = null
+        }
+    }
+
+    fun mergeSnapshot(before: String, after: String) {
+        awaitLoaded()
+        synchronized(this) {
+            val old = JSONObject(before)
+            val next = JSONObject(after)
+            val previous = decodedSources(old).associateBy { it.url }
+            val incoming = decodedSources(next).associateBy { it.url }
+            val result = sources.filter { it.url !in previous || it.url in incoming }.associateBy { it.url }.toMutableMap()
+            incoming.forEach { (key, value) -> if (previous[key] != value) result[key] = value }
+            require(result.size <= 11 && result.values.sumOf { it.channels.size } <= 20000)
+            fun ids(root: JSONObject): Set<String> {
+                val a = root.optJSONArray("favorites") ?: JSONArray()
+                require(a.length() <= 20000)
+                return (0 until a.length()).map { a.getString(it) }.toSet()
+            }
+            val oldIds = ids(old)
+            val newIds = ids(next)
+            sources.clear()
+            sources.addAll(result.values)
+            favorites.removeAll(oldIds - newIds)
+            favorites.addAll(newIds - oldIds)
+            if (old.optString("active") != next.optString("active")) active = next.getString("active")
+            if (old.optString("lastChannel") != next.optString("lastChannel") && next.optLong("lastPlayedAt") > lastPlayedAt) {
+                lastChannel = next.optString("lastChannel")
+                lastPlayedAt = next.optLong("lastPlayedAt")
+            }
+            saveAsync()
+        }
+    }
+
+    private fun replace(source: Source) {
+        awaitLoaded()
+        synchronized(storeWriteLock){
+          val before:Store
+          val next:Store
+          synchronized(this) {
+            require(sources.size < 10 || sources.any { it.url == source.url }) { "最多保存 10 个订阅源" }
+            require(source.channels.size + sources.filter { it.url != source.url }.sumOf { it.channels.size } <= 20000) { "总频道数最多 20000，请先删除不需要的源" }
+            before=captureStore()
+            sources.removeAll { it.url == source.url }
+            sources.add(source)
+            active = source.url
+            persistSeq++;revision++
+            next=captureStore()
+          }
+          try {
+                val text=encodeStore(next)
+                writeStore(text)
+                onPersist?.invoke(text)
+            } catch (e: Exception) {
+                synchronized(this){
+                    sources.clear();sources.addAll(before.sources)
+                    if(active==source.url)active=before.active
+                    saveAsync()
+                }
+                throw e
+            }
+            lastMessage = "已保存 ${source.channels.size} 个频道"
+        }
+    }
+
+    fun importText(text: String): Boolean = attempt {
+        awaitLoaded()
+        val channels = PlaylistParser.parse(text, "local")
+        require(channels.isNotEmpty()) { "没有找到可用频道" }
+        val old = synchronized(this) { sources.firstOrNull { it.url == "local" }?.channels.orEmpty() }
+        replace(Source("local", "本地导入", (old + channels).associateBy { it.id }.values.toList(), System.currentTimeMillis()))
     }
     fun addDirect(name:String,url:String):Boolean=attempt {
         val stream=PlaylistParser.streamUrl(url)?:error("请输入 HTTP、HTTPS、RTSP 或 UDP 直播地址")
@@ -183,6 +472,7 @@ class LiveRepository(private val context:Context) {
         if(!importText(JSONArray().put(channel).toString()))error(lastMessage)
     }
     fun subscribe(address:String):Boolean=attempt {
+        awaitLoaded()
         var next=PlaylistParser.playlistAddress(address)?:error("请输入 HTTP / HTTPS 节目单链接")
         val original=next
         var text:String?=null

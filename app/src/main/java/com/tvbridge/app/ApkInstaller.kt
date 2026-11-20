@@ -23,18 +23,32 @@ class ApkInstaller(private val activity:Activity){
     private var pendingInstallAt=0L
     private var installReceiver:BroadcastReceiver?=null
     private var sessionFallbackTried=false
-    private var homePaused=false
+    private var homeInFront=false
     private var installerLeftHome=false
     private var openingInstaller=false
-    private var deferredConfirmation:Intent?=null
-    private var deferredRetries=0
     private var installerSeen=false
     private var confirmationCheck:Runnable?=null
     private var sessionId=-1
     private val abandonedSessions=mutableSetOf<Int>()
     private val main=android.os.Handler(android.os.Looper.getMainLooper())
-    private var sessionTimeout:Runnable?=null
-    companion object{const val REQUEST_PERMISSION=11;const val INSTALL_STATUS_ACTION="com.tvbridge.app.INSTALL_STATUS"}
+    private var awaitId=-1
+    private var awaitConfirmation=false
+    private var awaitShowConfirmation:Intent?=null
+    private var awaitHomeLeft=false
+    private var awaitLeftAt=0L
+    private var awaitTimedOut=false
+    private var awaitCheck:Runnable?=null
+
+    private fun answerTimeout()=if(android.os.Build.VERSION.SDK_INT>=31)SILENT_INSTALL_TIMEOUT_MS else ANSWER_TIMEOUT_MS
+    companion object{
+        const val REQUEST_PERMISSION=11
+        const val INSTALL_STATUS_ACTION="com.tvbridge.app.INSTALL_STATUS"
+        const val ANSWER_TIMEOUT_MS=8_000L
+        const val SILENT_INSTALL_TIMEOUT_MS=120_000L
+        const val CONFIRM_TIMEOUT_MS=4_000L
+        const val PAGE_DIED_MS=1_500L
+        const val ANSWER_AFTER_RETURN_MS=1_500L
+    }
     val allowed get()=if(android.os.Build.VERSION.SDK_INT>=26)activity.packageManager.canRequestPackageInstalls()else android.provider.Settings.Secure.getInt(activity.contentResolver,android.provider.Settings.Secure.INSTALL_NON_MARKET_APPS,0)==1
     private val useInstallSession get()=android.os.Build.VERSION.SDK_INT>=28
     fun request(file:File){
@@ -42,14 +56,13 @@ class ApkInstaller(private val activity:Activity){
             (installerSeen||android.os.SystemClock.uptimeMillis()-pendingInstallAt>=10000))resetStaleInstall()
         if(sessionId>=0||openingInstaller){message("安装正在进行，请先完成或取消安装");return}
         if(!valid(file)){message("文件已不存在或不是 APK");return}
-        if(installViaSession(file))return
         if(allowed){launch(file);return}
         openPermissionSettings(file)
     }
     private fun resetStaleInstall(){
         val id=sessionId
-        sessionId=-1;openingInstaller=false;installerSeen=false;deferredConfirmation=null;deferredRetries=0
-        sessionTimeout?.let{main.removeCallbacks(it)};sessionTimeout=null
+        sessionId=-1;openingInstaller=false;installerSeen=false
+        stopAwait()
         confirmationCheck?.let{main.removeCallbacks(it)};confirmationCheck=null
         if(id>=0){
             abandonedSessions.add(id)
@@ -73,36 +86,38 @@ class ApkInstaller(private val activity:Activity){
         return true
     }
     fun onResume(){
-        homePaused=false
-        val justLeftInstaller=installerLeftHome
+        homeInFront=true
         if(installerLeftHome||(!openingInstaller&&sessionId<0&&pendingInstallName==null&&!awaitingPermission)){
             InstallHandoff.finish(activity);openingInstaller=false;installerLeftHome=false
         }
-        val confirmation=deferredConfirmation
-        if(confirmation!=null){deferredConfirmation=null;openConfirmation(confirmation)}
-        else if(!justLeftInstaller&&sessionId>=0&&!openingInstaller&&android.os.SystemClock.uptimeMillis()-pendingInstallAt>=20000)fallbackSession()
+        if(awaitId>=0&&awaitId==sessionId){
+            val parked=awaitShowConfirmation
+            when{
+                parked!=null->{awaitShowConfirmation=null;openConfirmation(parked)}
+                awaitConfirmation&&awaitHomeLeft->{
+                    if(android.os.SystemClock.uptimeMillis()-awaitLeftAt<PAGE_DIED_MS){
+                        val id=awaitId
+                        main.postDelayed({if(awaitId==id&&awaitConfirmation)giveUpSession()},ANSWER_AFTER_RETURN_MS)
+                    }else stopAwait()
+                }
+                awaitTimedOut->runAwaitCheck()
+            }
+        }
         if(!awaitingPermission)return
         if(android.os.SystemClock.uptimeMillis()-permissionLaunchedAt<1000)return
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({resumePermission()},500)
     }
-    fun onPause(){homePaused=true;if(openingInstaller){installerLeftHome=true;installerSeen=true;InstallHandoff.opened(activity)}}
+    fun onPause(){
+        homeInFront=false
+        if(openingInstaller){installerLeftHome=true;installerSeen=true;InstallHandoff.opened(activity)}
+        if(awaitConfirmation&&awaitId==sessionId&&!awaitHomeLeft){awaitLeftAt=android.os.SystemClock.uptimeMillis();awaitHomeLeft=true}
+    }
     private fun openConfirmation(confirmation:Intent){
-        if(homePaused){
-            deferredConfirmation=confirmation
-            if(deferredRetries<5){
-                deferredRetries++
-                main.postDelayed({
-                    val pending=deferredConfirmation
-                    if(pending!=null){deferredConfirmation=null;openConfirmation(pending)}
-                },3000)
-            }
-            return
-        }
-        deferredRetries=0
-        try{
+        val started=try{
             openingInstaller=true;installerLeftHome=false;pendingInstallAt=android.os.SystemClock.uptimeMillis();InstallHandoff.begin(activity)
-            activity.startActivity(confirmation);checkConfirmationOpened()
-        }catch(_:RuntimeException){fallbackSession()}
+            activity.startActivity(confirmation.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));true
+        }catch(_:RuntimeException){false}
+        if(started)awaitSession(sessionId,CONFIRM_TIMEOUT_MS,confirmation=true)else giveUpSession()
     }
     private fun resumePermission(){
         if(!awaitingPermission)return
@@ -115,7 +130,7 @@ class ApkInstaller(private val activity:Activity){
         }
         val file=File(activity.filesDir,"received/$name")
         if(!valid(file)){message("APK 文件已不存在");return}
-        if(!installViaSession(file))launch(file)
+        launch(file)
     }
     fun save(state:Bundle){
         state.putString("install.pending",pendingName);state.putBoolean("install.awaiting",awaitingPermission)
@@ -128,13 +143,18 @@ class ApkInstaller(private val activity:Activity){
         pendingInstallAt=state.getLong("install.sessionAt",0)
         val restoredId=state.getInt("install.sessionId",-1)
         if(restoredId>=0&&pendingInstallName!=null&&android.os.Build.VERSION.SDK_INT>=21){
-            sessionId=restoredId;ensureInstallReceiver();armSessionWatchdog(restoredId)
+            sessionId=restoredId;ensureInstallReceiver();awaitSession(restoredId,answerTimeout())
         }
     }
     private fun valid(file:File)=try{file.isFile&&file.extension.equals("apk",true)&&file.canonicalFile.parentFile==File(activity.filesDir,"received").canonicalFile}catch(_:Exception){false}
     private fun launch(file:File){
         try{
-            val uri=FileProvider.getUriForFile(activity,"${activity.packageName}.files",file)
+            val uri=if(android.os.Build.VERSION.SDK_INT<24){
+                val directory=activity.externalCacheDir?:throw IllegalStateException("External cache unavailable")
+                val staged=File(directory,"one-install.apk")
+                file.copyTo(staged,overwrite=true)
+                Uri.fromFile(staged)
+            }else FileProvider.getUriForFile(activity,"${activity.packageName}.files",file)
             val intent=Intent(Intent.ACTION_VIEW).setDataAndType(uri,"application/vnd.android.package-archive")
                 .apply{clipData=ClipData.newRawUri("APK",uri)}.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             val handler=activity.packageManager.resolveActivity(intent,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
@@ -145,28 +165,48 @@ class ApkInstaller(private val activity:Activity){
                 openingInstaller=true;installerLeftHome=false;installerSeen=false;InstallHandoff.begin(activity);activity.startActivity(intent)
                 checkConfirmationOpened()
             }
-        }catch(_:RuntimeException){InstallHandoff.finish(activity);message("无法打开系统安装器")}
+        }catch(_:Exception){openingInstaller=false;InstallHandoff.finish(activity);message("无法打开系统安装器")}
     }
     private fun checkConfirmationOpened(){
         confirmationCheck?.let{main.removeCallbacks(it)};confirmationCheck=null
         val check=object:Runnable{
             override fun run(){
                 if(!openingInstaller||installerLeftHome)return
-                if(homePaused&&android.os.SystemClock.uptimeMillis()-pendingInstallAt<30000){main.postDelayed(this,2000);return}
+                if(!homeInFront&&android.os.SystemClock.uptimeMillis()-pendingInstallAt<30000){main.postDelayed(this,2000);return}
                 openingInstaller=false;InstallHandoff.finish(activity)
-                if(sessionId>=0)fallbackSession()else message("系统安装确认页未打开，请重试")
+                message("系统安装确认页未打开，请重试")
             }
         }
         confirmationCheck=check
         main.postDelayed(check,10000)
     }
-    private fun fallbackSession(){
+    private fun giveUpSession(){
         val id=sessionId;if(id<0)return
-        sessionTimeout?.let{main.removeCallbacks(it)};sessionTimeout=null
-        sessionId=-1;installerSeen=false;abandonedSessions.add(id)
+        stopAwait()
+        sessionId=-1;installerSeen=false;openingInstaller=false;abandonedSessions.add(id)
         if(android.os.Build.VERSION.SDK_INT>=21)try{activity.packageManager.packageInstaller.abandonSession(id)}catch(_:Exception){}
         val file=pendingInstallName?.let{File(activity.filesDir,"received/$it")}
         if(file!=null&&valid(file)&&!sessionFallbackTried){sessionFallbackTried=true;launch(file)}else{InstallHandoff.finish(activity);message("无法打开系统安装器")}
+    }
+    private fun awaitSession(id:Int,timeoutMs:Long,confirmation:Boolean=false,showConfirmation:Intent?=null){
+        stopAwait()
+        if(id<0)return
+        awaitId=id;awaitConfirmation=confirmation;awaitShowConfirmation=showConfirmation
+        if(showConfirmation==null){
+            val check=Runnable{runAwaitCheck()}
+            awaitCheck=check
+            main.postDelayed(check,timeoutMs)
+        }
+    }
+    private fun runAwaitCheck(){
+        if(awaitId<0||awaitId!=sessionId)return
+        if(awaitConfirmation&&awaitHomeLeft)return
+        awaitTimedOut=true
+        if(homeInFront)giveUpSession()
+    }
+    private fun stopAwait(){
+        awaitCheck?.let{main.removeCallbacks(it)};awaitCheck=null
+        awaitId=-1;awaitConfirmation=false;awaitShowConfirmation=null;awaitHomeLeft=false;awaitLeftAt=0L;awaitTimedOut=false
     }
     private fun ensureInstallReceiver(){
         if(installReceiver!=null)return
@@ -174,12 +214,14 @@ class ApkInstaller(private val activity:Activity){
             override fun onReceive(context:Context,intent:Intent){
                 val returnedId=intent.getIntExtra(android.content.pm.PackageInstaller.EXTRA_SESSION_ID,-1)
                 if(returnedId in abandonedSessions||(returnedId>=0&&returnedId!=sessionId))return
-                sessionTimeout?.let{main.removeCallbacks(it)};sessionTimeout=null
+                if(returnedId==sessionId&&sessionId>=0)stopAwait()
                 val status=intent.getIntExtra(android.content.pm.PackageInstaller.EXTRA_STATUS,android.content.pm.PackageInstaller.STATUS_FAILURE)
                 val msg=intent.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE)
                 if(status==android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION){
                     val confirmation=intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
-                    if(confirmation!=null)openConfirmation(confirmation)else fallbackSession()
+                    if(confirmation==null){giveUpSession();return}
+                    if(homeInFront)openConfirmation(confirmation)
+                    else awaitSession(sessionId,CONFIRM_TIMEOUT_MS,confirmation=true,showConfirmation=confirmation)
                     return
                 }
                 sessionId=-1;openingInstaller=false;installerSeen=false
@@ -194,43 +236,32 @@ class ApkInstaller(private val activity:Activity){
         }
         androidx.core.content.ContextCompat.registerReceiver(activity,installReceiver,IntentFilter(INSTALL_STATUS_ACTION),androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
     }
-    private fun armSessionWatchdog(id:Int){
-        sessionTimeout?.let{main.removeCallbacks(it)};sessionTimeout=null
-        val watch=object:Runnable{
-            override fun run(){
-                if(sessionId!=id)return
-                val silentPossible=android.os.Build.VERSION.SDK_INT>=31
-                val limit=if(silentPossible)90000L else 60000L
-                val wedged=!installerSeen&&android.os.SystemClock.uptimeMillis()-pendingInstallAt>=limit
-                if(wedged||(!homePaused&&!installerSeen&&!silentPossible)){fallbackSession();return}
-                main.postDelayed(this,5000)
-            }
-        }
-        sessionTimeout=watch
-        main.postDelayed(watch,20000)
-    }
+
     private fun installViaSession(file:File):Boolean{
         if(!useInstallSession)return false
         return try{
             ensureInstallReceiver()
-            sessionFallbackTried=false;deferredRetries=0;installerSeen=false
+            sessionFallbackTried=false;installerSeen=false
             val installer=activity.packageManager.packageInstaller
             val params=android.content.pm.PackageInstaller.SessionParams(android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL)
-            if(android.os.Build.VERSION.SDK_INT>=31)params.setRequireUserAction(android.content.pm.PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+            if(android.os.Build.VERSION.SDK_INT>=31)params.setRequireUserAction(android.content.pm.PackageInstaller.SessionParams.USER_ACTION_REQUIRED)
             val sessionId=installer.createSession(params)
             this.sessionId=sessionId
             pendingInstallName=file.name;pendingInstallAt=android.os.SystemClock.uptimeMillis()
             InstallHandoff.begin(activity)
             val session=installer.openSession(sessionId)
             try{
-                val out=session.openWrite("apk",0,file.length())
-                file.inputStream().use{input->input.copyTo(out)}
-                session.fsync(out);out.close()
-                val flags=android.app.PendingIntent.FLAG_UPDATE_CURRENT or if(android.os.Build.VERSION.SDK_INT>=31)android.app.PendingIntent.FLAG_MUTABLE else 0
+                session.openWrite("apk",0,file.length()).use{out->
+                    file.inputStream().use{input->input.copyTo(out)}
+                    session.fsync(out)
+                }
+                val flags=android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                    (if(android.os.Build.VERSION.SDK_INT>=31)android.app.PendingIntent.FLAG_MUTABLE else 0) or
+                    (if(android.os.Build.VERSION.SDK_INT>=34)android.app.PendingIntent.FLAG_ALLOW_UNSAFE_IMPLICIT_INTENT else 0)
                 val sender=android.app.PendingIntent.getBroadcast(activity,sessionId,Intent(INSTALL_STATUS_ACTION).setPackage(activity.packageName),flags)
                 session.commit(sender.intentSender)
             }finally{session.close()}
-            armSessionWatchdog(sessionId)
+            awaitSession(sessionId,answerTimeout())
             true
         }catch(_:Exception){resetStaleInstall();false}
     }

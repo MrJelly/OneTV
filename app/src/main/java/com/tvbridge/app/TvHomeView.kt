@@ -33,6 +33,18 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private val tiles=mutableListOf<AppTileView>()
     private var appMenu:android.widget.ListPopupWindow?=null
     private var moving:String?=null
+    private val moveHint=android.widget.TextView(context).apply{
+        text="方向键移动，或点击要放入的位置，按确认键完成"
+        setTextColor(Color.WHITE)
+        typeface=bold
+        isSingleLine=true
+        gravity=Gravity.CENTER
+        NativeUi.textSize(this,30f)
+        val sx=NativeUi.scale(context)
+        setPadding((20*sx).toInt(),(10*sx).toInt(),(20*sx).toInt(),(10*sx).toInt())
+        visibility=View.GONE
+        isFocusable=false
+    }
     private var menuSelection=0
     private var menuEntry:String?=null
     private val controlButton=object:Button(context){
@@ -56,7 +68,13 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private val ink get()=GlassUi.ink(context,darkHome)
     private var appSignature:String?=null
     private var initialRefreshPending=true
-    private var warmingSquares=false
+    private var initialGridFocusPending=true
+    private var catalogRefreshPending=false
+    private val artInFlight=mutableSetOf<String>()
+    private var currentFolders: Map<String, List<String>> = emptyMap()
+    private var currentEntries: Map<String, LauncherApps.Entry> = emptyMap()
+    private val stockHomeId get() = LauncherApps.STOCK_HOME_ID
+    private var stockHomeEntry: LauncherApps.Entry? = null
     private val mainHandler=android.os.Handler(android.os.Looper.getMainLooper())
     private val labelCache=java.util.WeakHashMap<AppTileView,Array<Any?>>()
     private var rememberedFocus=""
@@ -68,11 +86,6 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private var connectionImage=java.lang.ref.WeakReference<android.widget.ImageView>(null)
     private var connectionDot=java.lang.ref.WeakReference<View>(null)
     private val rows get()=maxOf(1,(tiles.size+cols-1)/cols)
-    // Aerial home geometry on the 1920x1080 design canvas (its 960x540dp values doubled):
-    // Square iOS-style tiles whose side equals the old 16:9 tile height: 6 columns, 56dp side margins, 20dp column gaps, row pitch = tile side + 50dp name room.
-    // The shelf row rests at topRowY with the next row peeking; a focused row deeper in the
-    // grid rests with its top at restY; collapseDip is the shelf-to-grid scroll distance over
-    // which the clock and the plate fade out.
     private var cols=6
     private val topRowY get()=992f-tileHeight/scale
     private val restY=409f
@@ -90,7 +103,6 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             springPosted=false
             val dt=if(lastFrameNanos==0L)0.016f else ((frameTimeNanos-lastFrameNanos)/1e9f).coerceIn(0.001f,0.05f)
             lastFrameNanos=frameTimeNanos
-            // Aerial's scroll spring: dampingRatio 1 (no overshoot), stiffness 280.
             val accel=-280f*(scrollY-scrollTarget)-33.5f*scrollVel
             scrollVel+=accel*dt;scrollY+=scrollVel*dt
             if(Math.abs(scrollY-scrollTarget)<0.6f&&Math.abs(scrollVel)<8f){scrollY=scrollTarget;scrollVel=0f;applyScroll();return}
@@ -98,10 +110,33 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             springPosted=true;choreographer.postFrameCallback(this)
         }
     }
-    private fun applyScroll(){applyRowAlphas();requestLayout();invalidate()}
-    /** Aerial's hiddenFrom rule: rows below the shelf are out of sight at rest and fade in
-     *  as Home lifts into the grid. */
-    private fun applyRowAlphas(){val a=gridAlpha();tiles.forEachIndexed{i,tile->tile.alpha=if(i<cols)1f else a;tile.plateFrac=1f-liftFrac}}
+    private fun applyScrollTransforms() {
+        val railOffset = -scrollY * scale
+        appRail.translationY = railOffset
+        val lift = (liftFrac / .55f).coerceIn(0f, 1f)
+        val dissolve = lift * lift * (3f - 2f * lift)
+        val swell = 28f * scale * dissolve
+        plateView.translationY = railOffset
+        plateView.scaleX = 1f + 2f * swell / plateView.measuredWidth.coerceAtLeast(1)
+        plateView.scaleY = 1f + 2f * swell / plateView.measuredHeight.coerceAtLeast(1)
+        plateView.alpha = 1f - dissolve
+    }
+    private fun applyScroll() {
+        applyRowAlphas()
+        applyScrollTransforms()
+        invalidate()
+    }
+    private fun railTopY(): Float = appRail.top + appRail.translationY
+    private fun invalidateTileShadow(tile: AppTileView) {
+        if (liftFrac <= 0.01f || moving != null) return
+        val pad = (64f * scale).toInt()
+        val l = (appRail.left + tile.left - pad).coerceAtLeast(0)
+        val t = (railTopY() + tile.top - pad).toInt().coerceAtLeast(0)
+        val r = (appRail.left + tile.right + pad).coerceAtMost(width)
+        val b = (railTopY() + tile.bottom + pad + (30f * scale).toInt()).toInt().coerceAtMost(height)
+        if (r > l && b > t) invalidate(l, t, r, b)
+    }
+    private fun applyRowAlphas(){val a=gridAlpha();tiles.forEachIndexed{i,tile->val focusedDrag=touchDragging&&tile===focusedTile;tile.alpha=if(i<cols||focusedDrag)1f else a;if(!focusedDrag)tile.plateFrac=1f-liftFrac}}
     private fun animateScrollTo(target:Float){
         scrollTarget=target.coerceAtLeast(0f)
         if(!springPosted&&scrollY!=scrollTarget){springPosted=true;lastFrameNanos=0L;choreographer.postFrameCallback(springFrame)}
@@ -115,7 +150,10 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private val liftFrac get()=(scrollY/collapseDip).coerceIn(0f,1f)
     private fun shelfAlpha()=(1f-1.6f*liftFrac).coerceIn(0f,1f)
     private fun gridAlpha()=(2.5f*liftFrac).coerceIn(0f,1f)
-    private fun onTileFocused(tile:AppTileView){val index=tiles.indexOf(tile);if(index>=0)animateScrollTo(scrollTargetFor(index/cols))}
+    private fun onTileFocused(tile:AppTileView){
+        if(touchDragging)return
+        val index=tiles.indexOf(tile);if(index>=0)animateScrollTo(scrollTargetFor(index/cols))
+    }
 
     private data class Module(val id:String,val title:String,val glyph:String,val top:Int,val bottom:Int,val run:Runnable)
     private val modules get()=AppModules.all.zip(listOf(liveAction,filesAction,browseAction)).map{Module(it.first.id,it.first.title,it.first.glyph,it.first.top,it.first.bottom,it.second)}
@@ -134,9 +172,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         addView(plateView)
         addView(appRail)
         addView(controlButton)
-        // The first frame paints only the backdrop, plate and clock; the app
-        // catalog (a full PackageManager parse) loads right after it, so a
-        // cold start never sits on a black window while the catalog builds.
+        addView(moveHint)
         viewTreeObserver.addOnPreDrawListener(object:android.view.ViewTreeObserver.OnPreDrawListener{
             override fun onPreDraw():Boolean{
                 viewTreeObserver.removeOnPreDrawListener(this)
@@ -147,11 +183,17 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     }
 
     fun refreshApps(){
+        if(!launcherApps.catalogReady()){
+            if(!catalogRefreshPending){
+                catalogRefreshPending=true
+                AppThreads.onIo{
+                    launcherApps.installed()
+                    mainHandler.post{catalogRefreshPending=false;refreshApps();if(findFocus()==null)focusFirst()}
+                }
+            }
+            return
+        }
         initialRefreshPending=false
-        // The column count syncs here, before any early return: focus math, row
-        // alphas and grid specs all read it, and a stale count left the shelf's
-        // extra tiles invisible (alpha 0 until the first scroll) and the grid in
-        // a mixed state when switching back down. A change forces a full rebuild.
         val newCols=HomeAppearance.homeColumns(context)
         var focusBeforeSwap:String?=null
         if(newCols!=cols){
@@ -164,24 +206,36 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         val hidden=launcherApps.hiddenIds().toSet()
         val folders=launcherApps.folderLayout(all).mapKeys{"folder:"+it.key}.mapValues{(_,members)->members.filterNot{it in hidden}}.filterValues{it.isNotEmpty()}
         val grouped=folders.entries.flatMap{(folder,members)->members.map{it to folder}}.toMap()
-        val order=all.filterNot{it in hidden}.map{grouped[it]?:it}.distinct()
+        val baseOrder=all.filterNot{it in hidden}.map{grouped[it]?:it}.distinct()
         val entries=launcherApps.installed().associateBy{it.component.flattenToString()}
-        // Square icons render on the IO thread, never in this main-thread pass: cold
-        // entries build with the plain icon as a placeholder below and are swapped
-        // for the real squares by a forced rebuild once the warm-up lands.
-        val cold=entries.values.filterNot{launcherApps.squareCached(it)}
-        if(cold.isNotEmpty()&&!warmingSquares){
-            warmingSquares=true
-            AppThreads.onIo{
-                cold.forEach{runCatching{launcherApps.squareIcon(it)}}
-                mainHandler.post{
-                    warmingSquares=false
-                    if(appSignature!=null){appSignature=null;refreshApps()}
+        currentFolders=folders
+        currentEntries=entries
+        val stockEntry=launcherApps.stockHomeEntry()
+        stockHomeEntry=stockEntry
+        val order=baseOrder
+        val cold=entries.values.filter{!launcherApps.squareCached(it)}
+        if(cold.isNotEmpty()||(stockEntry!=null&&!launcherApps.squareCached(stockEntry))){
+            val queue=(order.mapNotNull{entries[it]}+cold+listOfNotNull(stockEntry)).distinct()
+            val fresh=queue.filter{artInFlight.add(it.component.flattenToString())}
+            if(fresh.isNotEmpty()){
+                AppThreads.onIo{
+                    fresh.forEach{runCatching{launcherApps.readTileHeader(it)}}
+                    mainHandler.post{fresh.forEach{applyTileTint(it)}}
                 }
+                fresh.forEach{entry->
+                    AppThreads.onIo{
+                        runCatching{launcherApps.squareIcon(entry)}
+                        mainHandler.post{
+                            artInFlight.remove(entry.component.flattenToString())
+                            applyTileArt(entry)
+                        }
+                    }
+                }
+                AppThreads.onIo{launcherApps.keepTiles(entries.values.toList()+listOfNotNull(stockEntry))}
             }
         }
         val builtIns=modules.associateBy{it.id}
-        val signature="B3:"+order.sorted().joinToString{id->val entry=entries[id];"$id:${launcherApps.appTitle(id)}:${entry?.updated}"}+":"+folders.toSortedMap()+":"+darkHome
+        val signature="B3:"+order.sorted().joinToString{id->val entry=entries[id];"$id:${launcherApps.appTitle(id)}:${entry?.updated}"}+":"+folders.toSortedMap()+":"+darkHome+":"+(stockEntry?.component?.flattenToString()?:"")
         if(appSignature==signature){
             if (tiles.map(::tileKey) != order) {
                 val byId = tiles.associateBy(::tileKey)
@@ -198,12 +252,13 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         }
         val focused=focusBeforeSwap?:(findFocus() as? AppTileView)?.let(::tileKey)
         appSignature=signature
+        val oldTiles=tiles.associateBy(::tileKey)
         appRow.removeAllViews();tiles.clear()
         fun baseTile(title:String):AppTileView{
             val tile=AppTileView(context)
             tile.title=title;tile.contentDescription=title;tile.id=generateViewId()
             tile.focusHook={focus->if(focus){val key=tileKey(tile);rememberedFocus=key;lastGridFocus=key;controlButton.nextFocusDownId=tile.id;focusedTile=tile;onTileFocused(tile)}else if(focusedTile==tile)focusedTile=null;invalidate()}
-            tile.focusAnimHook={invalidate()}
+            tile.focusAnimHook = { invalidateTileShadow(tile) }
             tiles.add(tile);appRow.addView(tile)
             return tile
         }
@@ -213,12 +268,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
                 val tile=baseTile(name)
                 tile.tag=id
                 tile.role="module"
-                val previews=folders.getValue(id).take(9).mapNotNull{key->
-                    val entry=entries[key]
-                    if(entry!=null)runCatching{(if(launcherApps.squareCached(entry))launcherApps.squareIcon(entry) else launcherApps.icon(entry)).let{it to true}}.getOrNull()
-                    else moduleArtwork(key)?.let{it to true}
-                }
-                tile.banner=HomeFolderArtwork(previews)
+                tile.banner=folderArtwork(folders.getValue(id))
                 tile.setOnClickListener{if(!placeMovingTile(tile))showFolder(name)}
                 tile.setOnLongClickListener{openerDownTime=heldConfirmDownTime;showAppMenu(tile);true}
                 NativeUi.touchClicks(tile);tile.isFocusableInTouchMode=true
@@ -235,17 +285,38 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
                 NativeUi.touchClicks(tile);tile.isFocusableInTouchMode=true
                 return@forEach
             }
+            if(id==stockHomeId){
+                val entry=stockEntry
+                if(entry!=null){
+                    val tile=baseTile("原桌面")
+                    tile.role="app";tile.tag=stockHomeId
+                    val old=oldTiles[stockHomeId]
+                    tile.banner=if(launcherApps.squareCached(entry))try{launcherApps.squareIcon(entry)}catch(_:Exception){null} else old?.banner
+                    if(tile.banner==null)tile.icon=old?.icon?:try{launcherApps.icon(entry)}catch(_:Exception){null}
+                    tile.placeholderTint=launcherApps.tileTint(entry)
+                    tile.setOnClickListener{rememberedFocus=tileKey(tile);if(!placeMovingTile(tile))openStockHome()}
+                    tile.setOnLongClickListener{openerDownTime=heldConfirmDownTime;showAppMenu(tile);true}
+                    NativeUi.touchClicks(tile);tile.isFocusableInTouchMode=true
+                }
+                return@forEach
+            }
             val entry=entries[id]?:return@forEach
             val tile=baseTile(launcherApps.displayTitle(id,entry.label))
             tile.role="app";tile.tag=entry
-            tile.banner=if(launcherApps.squareCached(entry))try{launcherApps.squareIcon(entry)}catch(_:Exception){null} else null
-            if(tile.banner==null)tile.icon=try{launcherApps.icon(entry)}catch(_:Exception){null}
+            val old=oldTiles[id]
+            tile.banner=if(launcherApps.squareCached(entry))try{launcherApps.squareIcon(entry)}catch(_:Exception){null} else old?.banner
+            if(tile.banner==null)tile.icon=old?.icon?:try{launcherApps.icon(entry)}catch(_:Exception){null}
+            tile.placeholderTint=launcherApps.tileTint(entry)
             tile.setOnClickListener{rememberedFocus=tileKey(tile);if(!placeMovingTile(tile)&&!launcherApps.launch(entry))NativeUi.notice(context,"应用已移除或无法打开")}
             tile.setOnLongClickListener{openerDownTime=heldConfirmDownTime;showAppMenu(tile);true}
             NativeUi.touchClicks(tile);tile.isFocusableInTouchMode=true
         }
         updateTileLayout()
-        if(focused!=null)(tiles.firstOrNull{tileKey(it)==focused}?:tiles.firstOrNull())?.requestFocus()
+        if(initialGridFocusPending&&tiles.isNotEmpty()){
+            initialGridFocusPending=false
+            rememberedFocus=tileKey(tiles.first())
+            tiles.first().requestFocus()
+        }else if(focused!=null)(tiles.firstOrNull{tileKey(it)==focused}?:tiles.firstOrNull())?.requestFocus()
     }
 
     private fun updateTileLayout() {
@@ -264,8 +335,45 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private fun rowIndex(row:Int,column:Int)=(row*cols+column).coerceAtMost(tiles.lastIndex)
 
     private fun focusEntry(entry:String){tiles.firstOrNull{tileKey(it)==entry}?.requestFocus()}
-    private fun finishMove(){val entry=moving?:return;moving=null;refreshApps();focusEntry(entry);invalidate()}
-    private fun enterMove(entry:String){appMenu?.dismiss();moving=entry;refreshApps();focusEntry(entry);invalidate()}
+    private fun finishMove(){val entry=moving?:return;stopWobble();hideMoveHint();moving=null;refreshApps();focusEntry(entry);invalidate()}
+    private fun enterMove(entry:String){appMenu?.dismiss();moving=entry;refreshApps();focusEntry(entry);invalidate();startWobble();showMoveHint()}
+
+    private var wobbleAnimator:android.animation.ValueAnimator?=null
+    private var wobbleTile:AppTileView?=null
+    private fun startWobble(){
+        if(wobbleAnimator?.isRunning==true)return
+        wobbleAnimator=android.animation.ValueAnimator.ofFloat(0f,(2*Math.PI).toFloat()).apply{
+            duration=260L
+            repeatCount=android.animation.ValueAnimator.INFINITE
+            interpolator=android.view.animation.LinearInterpolator()
+            addUpdateListener{anim->
+                val key=moving
+                if(key==null){stopWobble();return@addUpdateListener}
+                val tile=tiles.firstOrNull{tileKey(it)==key}
+                if(tile!==wobbleTile){wobbleTile?.rotation=0f;wobbleTile=tile}
+                tile?.rotation=(1.3f* kotlin.math.sin((anim.animatedValue as Float).toDouble())).toFloat()
+            }
+            start()
+        }
+    }
+    private fun stopWobble(){
+        wobbleAnimator?.cancel();wobbleAnimator=null
+        wobbleTile?.rotation=0f;wobbleTile=null
+    }
+
+    private fun showMoveHint(){
+        moveHint.animate().cancel()
+        moveHint.visibility=View.VISIBLE
+        moveHint.alpha=0f
+        moveHint.translationY=8f*scale
+        moveHint.animate().alpha(1f).translationY(0f).setDuration(150).start()
+        requestLayout()
+    }
+    private fun hideMoveHint(){
+        if(moveHint.visibility!=View.VISIBLE)return
+        moveHint.animate().cancel()
+        moveHint.animate().alpha(0f).setDuration(150).withEndAction{moveHint.visibility=View.GONE}.start()
+    }
     private fun moveEntry(entry:String,offset:Int){
         val from=tiles.indexOfFirst{tileKey(it)==entry}
         if(from<0)return
@@ -278,6 +386,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         if(target==from||!launcherApps.move(folderRepresentative(entry),all.indexOf(targetId)-all.indexOf(folderRepresentative(entry))))return
         refreshApps()
         focusEntry(entry)
+        startWobble()
         invalidate()
     }
     private fun placeMovingTile(tile:AppTileView):Boolean{
@@ -289,8 +398,63 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private fun folderRepresentative(id:String)=if(id.startsWith("folder:"))
         launcherApps.orderedIds().firstOrNull{it in launcherApps.folderMembers(id.removePrefix("folder:"))}?:id else id
 
-    /** The three built-in modules are drawn as square icons (brand gradient + glyph). */
     private fun moduleArtwork(id:String):android.graphics.drawable.Drawable?=AppModules.square(context,id)
+
+    private fun folderArtwork(members:List<String>):HomeFolderArtwork{
+        val previews=members.take(9).mapNotNull{key->
+            val entry=currentEntries[key]?:if(key==stockHomeId)stockHomeEntry else null
+            if(entry!=null)runCatching{(if(launcherApps.squareCached(entry))launcherApps.squareIcon(entry) else launcherApps.icon(entry)).let{it to true}}.getOrNull()
+            else moduleArtwork(key)?.let{it to true}
+        }
+        return HomeFolderArtwork(previews)
+    }
+
+    private fun applyTileArt(entry:LauncherApps.Entry){
+        if(!launcherApps.squareCached(entry))return
+        val key=entry.component.flattenToString()
+        val art=runCatching{launcherApps.squareIcon(entry)}.getOrNull()?:return
+        tiles.forEach{tile->
+            val tag=tile.tag
+            if(tag==stockHomeId&&stockHomeEntry?.component?.flattenToString()==key){
+                tile.banner=art
+                tile.invalidate()
+            }else if(tag is LauncherApps.Entry&&tileKey(tile)==key){
+                tile.banner=art
+                tile.invalidate()
+            }else if(tag is String&&tag.startsWith("folder:")){
+                val members=currentFolders[tag].orEmpty()
+                if(key in members){
+                    tile.banner=folderArtwork(members)
+                    tile.invalidate()
+                }
+            }
+        }
+    }
+
+    private fun applyTileTint(entry:LauncherApps.Entry){
+        val tint=launcherApps.tileTint(entry)
+        if(tint==0)return
+        val key=entry.component.flattenToString()
+        tiles.forEach{tile->
+            if(tile.tag is LauncherApps.Entry&&tileKey(tile)==key&&tile.banner==null){
+                tile.placeholderTint=tint
+                tile.invalidate()
+            }else if(tile.tag==stockHomeId&&stockHomeEntry?.component?.flattenToString()==key&&tile.banner==null){
+                tile.placeholderTint=tint
+                tile.invalidate()
+            }
+        }
+    }
+
+    private fun openStockHome(){
+        val target=DesktopTakeover.originalHome(context)
+        if(target==null){NativeUi.notice(context,"未找到原桌面");return}
+        val activity=context as? android.app.Activity
+        if(activity==null){NativeUi.notice(context,"原桌面无法打开");return}
+        if(!DesktopGuardService.openStock(activity,target){
+            runCatching{activity.startActivity(Intent(Intent.ACTION_MAIN).setComponent(target).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED));true}.getOrDefault(false)
+        }){DesktopGuardService.allowStockLauncher(false);NativeUi.notice(context,"原桌面无法打开")}
+    }
 
     private fun showFolder(name:String){
         val hidden=launcherApps.hiddenIds().toSet()
@@ -302,7 +466,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             private val backdropPaint=Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
             init{setWillNotDraw(false);setOnClickListener{dialog.dismiss()}}
             override fun onDraw(canvas:Canvas){
-                HomeAppearance.drawBackdrop(context,canvas,width,height,darkHome,backdropPaint)
+                HomeAppearance.drawBackdrop(context,canvas,width,height,darkHome,backdropPaint){invalidate()}
                 canvas.drawColor(0x99000000.toInt())
             }
         }
@@ -328,10 +492,11 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
                     this.title=title
                     if(id.startsWith("module:"))role="module"
                     contentDescription=title
-                    val entry=entries[id]
+                    val entry=entries[id]?:if(id==LauncherApps.STOCK_HOME_ID)launcherApps.stockHomeEntry() else null
                     if(entry!=null){
                         banner=if(launcherApps.squareCached(entry))runCatching{launcherApps.squareIcon(entry)}.getOrNull() else null
                         if(banner==null)icon=runCatching{launcherApps.icon(entry)}.getOrNull()
+                        placeholderTint=launcherApps.tileTint(entry)
                     }else banner=moduleArtwork(id)
                     setOnClickListener{dialog.dismiss();if(!launchHomeApp(id))NativeUi.notice(context,"应用已移除或无法打开")}
                     setOnLongClickListener{
@@ -344,11 +509,6 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
                     NativeUi.touchClicks(this);isFocusableInTouchMode=true
                 }
                 if(first==null)first=tile
-                // Same presentation as the lifted grid: the tile, then its
-                // name centred underneath (the grid draws names at 30 design
-                // under the tile; the name room lives inside the row pitch,
-                // so tile + name + the row's bottom margin add up to the
-                // grid's tile + 108 pitch).
                 val cell=android.widget.LinearLayout(context).apply{orientation=android.widget.LinearLayout.VERTICAL;clipChildren=false;clipToPadding=false}
                 cell.addView(tile,android.widget.LinearLayout.LayoutParams(tileHeight,tileHeight))
                 val nameView=android.widget.TextView(context).apply{
@@ -389,11 +549,13 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             }
         }
         dialog.show()
+        NativeUi.registerDialog(dialog)
         dialog.window?.setLayout(-1,-1)
         first?.requestFocusFromTouch()
     }
     private fun launchHomeApp(id:String):Boolean{
         modules.firstOrNull{it.id==id}?.let{it.run.run();return true}
+        if(id==LauncherApps.STOCK_HOME_ID){openStockHome();return true}
         return launcherApps.installed().firstOrNull{it.component.flattenToString()==id}?.let(launcherApps::launch)==true
     }
     private fun chooseFolder(id:String,anchor:AppTileView){
@@ -484,7 +646,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         popup.horizontalOffset=left-location[0]
         popup.verticalOffset=top-location[1]-anchor.height
         popup.setAnimationStyle(0)
-        GlassUi.invalidateScene();GlassUi.prepareScene(context)
+        GlassUi.invalidateScene();UiPerformance.section("menu.capture"){GlassUi.prepareScene(context)}
         popup.setBackgroundDrawable(GlassUi.sceneGlass(anchor,20f,screenLeft=left,screenTop=top))
         popup.setAdapter(object:android.widget.ArrayAdapter<String>(context,android.R.layout.simple_list_item_1,choices){
             override fun getView(position:Int,convert:View?,parent:ViewGroup):View=android.widget.TextView(context).apply{
@@ -514,8 +676,8 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             "应用信息"->{popup.dismiss();if(entry==null){showModuleDetails(anchor);return@setOnItemClickListener};try{context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+entry.component.packageName)))}catch(_:Exception){NativeUi.notice(context,"无法打开应用信息")}}
             else->{if(entry==null)return@setOnItemClickListener;popup.dismiss();try{context.startActivity(Intent(Intent.ACTION_DELETE,Uri.parse("package:"+entry.component.packageName)))}catch(_:Exception){NativeUi.notice(context,"系统未提供卸载入口")}}
         }}
-        popup.setOnDismissListener{appMenu=null;menuEntry=null;moving=null;refreshApps();focusEntry(id);invalidate()}
-        popup.show();popup.listView?.let{it.setPadding(menuPadding,menuPadding,menuPadding,menuPadding);it.divider=null;it.dividerHeight=0;it.setHeaderDividersEnabled(false);it.setFooterDividersEnabled(false);it.selector=ColorDrawable(Color.TRANSPARENT)};post{if(popup.isShowing)popup.setSelection(0)}
+        popup.setOnDismissListener{appMenu=null;menuEntry=null;moving=null;UiPerformance.section("menu.refresh"){refreshApps()};focusEntry(id);invalidate()}
+        UiPerformance.section("menu.show"){popup.show()};popup.listView?.let{it.setPadding(menuPadding,menuPadding,menuPadding,menuPadding);it.divider=null;it.dividerHeight=0;it.setHeaderDividersEnabled(false);it.setFooterDividersEnabled(false);it.selector=ColorDrawable(Color.TRANSPARENT)};post{if(popup.isShowing)popup.setSelection(0)}
         popup.listView?.setOnItemSelectedListener(object:android.widget.AdapterView.OnItemSelectedListener{
             override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){
                 menuSelection=position
@@ -546,6 +708,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         val description=when(tileKey(tile)){
             "module:live"->"观看直播频道。"
             "module:files"->"查看和管理手机发送到 One 的文件。"
+            LauncherApps.STOCK_HOME_ID->"打开电视自带的原厂桌面。"
             else->"浏览网页和播放网页视频。"
         }
         NativeUi.show(android.app.AlertDialog.Builder(context).setTitle(tile.title).setMessage(description).setPositiveButton("关闭",null))
@@ -626,9 +789,6 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         if(code==KeyEvent.KEYCODE_MENU){val tile=findFocus() as? AppTileView;if(tile!=null){showAppMenu(tile);return true}}
         return false
     }
-    // Touch: the grid itself drags, as in Aerial (its Compose grid is directly draggable with
-    // decay). The phone pad reaches here as real injected swipes (ADB input swipe), so a
-    // vertical drag pulls the grid, and on release it settles on the nearest row with focus.
     private var touchDownX=0f;private var touchDownY=0f;private var touchStartScroll=0f
     private var touchDragging=false;private var touchVel=0f;private var touchLastY=0f;private var touchLastMs=0L
     private fun maxScroll()=scrollTargetFor((rows-1).coerceAtLeast(0))
@@ -689,19 +849,14 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         }
         return super.onGenericMotionEvent(ev)
     }
-    override fun onVisibilityChanged(changedView:View,visibility:Int){super.onVisibilityChanged(changedView,visibility);if(visibility!=View.VISIBLE){appMenu?.dismiss();moving=null}}
-    override fun onDetachedFromWindow(){appMenu?.dismiss();cancelSpring();super.onDetachedFromWindow()}
+    override fun onVisibilityChanged(changedView:View,visibility:Int){super.onVisibilityChanged(changedView,visibility);if(visibility!=View.VISIBLE){appMenu?.dismiss();moving=null;moveHint.animate().cancel();moveHint.visibility=View.GONE}}
+    override fun onDetachedFromWindow(){appMenu?.dismiss();stopWobble();cancelSpring();mainHandler.removeCallbacksAndMessages(null);super.onDetachedFromWindow()}
 
     override fun onMeasure(width:Int,height:Int){
         val w=MeasureSpec.getSize(width);val h=MeasureSpec.getSize(height);setMeasuredDimension(w,h)
         scale=minOf(w/1920f,h/1080f).coerceAtLeast(0.001f);oy=(h-1080*scale)/2
         if(styledScale!=scale||styledWidth!=w){
             styledWidth=w
-            // Column count is a user setting (HomeAppearance.homeColumns), but the
-            // icon size never follows it: the side is fixed by the six-column
-            // reference slot. The grid packs with a 70-unit gap and centres as a
-            // whole; the gap only shrinks when a row would otherwise overflow.
-            // The plate follows the grid's width (see onMeasure/onLayout).
             cols=HomeAppearance.homeColumns(context)
             appRow.columnCount=cols
             val refSlot=((w-2*(112*scale).toInt()-5*(40*scale).toInt())/6).coerceAtLeast(0)
@@ -725,113 +880,172 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         plateView.measure(MeasureSpec.makeMeasureSpec(minOf(cols*tileWidth+(cols-1)*tileGap+(80*scale).toInt(),w).coerceAtLeast(0),MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec((tileHeight+(80*scale).toInt()),MeasureSpec.EXACTLY))
         controlButton.measure(MeasureSpec.makeMeasureSpec((76*scale).toInt(),MeasureSpec.EXACTLY),MeasureSpec.makeMeasureSpec((76*scale).toInt(),MeasureSpec.EXACTLY))
     }
-    override fun onLayout(changed:Boolean,l:Int,t:Int,r:Int,b:Int){
-        val railTop=(oy+(topRowY-scrollY)*scale).toInt()
-        val ax=gridMargin
-        appRail.layout(ax,railTop,ax+appRail.measuredWidth,railTop+appRail.measuredHeight)
-        val plateLeft=(gridMargin-(40*scale).toInt()).coerceAtLeast(0);val plateTop=(oy+(topRowY-40)*scale).toInt()
-        plateView.layout(plateLeft,plateTop,plateLeft+plateView.measuredWidth,plateTop+plateView.measuredHeight)
-        val lift=(liftFrac/.55f).coerceIn(0f,1f)
-        val dissolve=lift*lift*(3f-2f*lift)
-        val swell=28f*scale*dissolve
-        plateView.translationY=-scrollY*scale
-        plateView.scaleX=1f+2f*swell/plateView.measuredWidth.coerceAtLeast(1)
-        plateView.scaleY=1f+2f*swell/plateView.measuredHeight.coerceAtLeast(1)
-        plateView.alpha=1f-dissolve
-        val right=(width-96*scale).toInt();val cy=(oy+58*scale).toInt()
-        controlButton.layout(right-controlButton.measuredWidth,cy,right,cy+controlButton.measuredHeight)
-        tiles.forEach{tile->
-            val isMoving=moving==tileKey(tile)
-            tile.contentDescription=tile.title+(if(isMoving)"，移动中" else "")
-            tile.isSelected=isMoving
-            // Folder tiles sit on real frosted glass (the same wallpaper frost as
-            // the plate and the menus); the artwork itself only draws the minis.
-            if(tile.background==null&&(tile.tag as? String)?.startsWith("folder:")==true){
-                tile.background=GlassUi.homeGlass(tile,(tile.height/scale*0.225f).coerceAtLeast(1f))
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        val railTop = (oy + topRowY * scale).toInt()
+        val ax = gridMargin
+        appRail.layout(ax, railTop, ax + appRail.measuredWidth, railTop + appRail.measuredHeight)
+        val plateLeft = (gridMargin - (40 * scale).toInt()).coerceAtLeast(0)
+        val plateTop = (oy + (topRowY - 40) * scale).toInt()
+        plateView.layout(plateLeft, plateTop, plateLeft + plateView.measuredWidth, plateTop + plateView.measuredHeight)
+        applyScrollTransforms()
+        val right = (width - 96 * scale).toInt()
+        val cy = (oy + 58 * scale).toInt()
+        controlButton.layout(right - controlButton.measuredWidth, cy, right, cy + controlButton.measuredHeight)
+        if (moveHint.visibility != View.GONE) {
+            if (moveHint.background == null) moveHint.background = GlassUi.homeGlass(moveHint, 22f)
+            moveHint.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
+            val pw = moveHint.measuredWidth
+            val ph = moveHint.measuredHeight
+            val pl = (width - pw) / 2
+            val pb = height - (36 * scale).toInt()
+            moveHint.layout(pl, pb - ph, pl + pw, pb)
+        }
+        tiles.forEach { tile ->
+            val isMoving = moving == tileKey(tile)
+            val expectedDesc = tile.title + (if (isMoving) "，移动中" else "")
+            if (tile.contentDescription != expectedDesc) tile.contentDescription = expectedDesc
+            if (tile.isSelected != isMoving) tile.isSelected = isMoving
+            if (tile.background == null && (tile.tag as? String)?.startsWith("folder:") == true) {
+                tile.background = GlassUi.homeGlass(tile, (tile.height / scale * 0.225f).coerceAtLeast(1f))
             }
         }
     }
-    /** Ellipsised tile names are cached per tile: dispatchDraw runs per frame and
-     *  re-measuring every name on every frame is wasted work on TV hardware. */
-    private fun tileLabel(tile:AppTileView,focused:Boolean):String{
-        val key="${tile.title}|${tile.width}|$focused|${(30f*scale).toInt()}"
-        labelCache[tile]?.let{if(it[0]==key)return it[1] as String}
-        paint.typeface=if(focused)bold else regular;paint.textSize=30f*scale
-        val label=android.text.TextUtils.ellipsize(tile.title,paint,tile.width.toFloat(),android.text.TextUtils.TruncateAt.END).toString()
-        labelCache[tile]=arrayOf(key,label)
+    private fun tileLabel(tile: AppTileView, focused: Boolean): String {
+        val key = "${tile.title}|${tile.width}|$focused|${(28f * scale).toInt()}"
+        labelCache[tile]?.let { if (it[0] == key) return it[1] as String }
+        paint.typeface = if (focused) bold else regular
+        paint.textSize = 28f * scale
+        val label = android.text.TextUtils.ellipsize(tile.title, paint, tile.width.toFloat(), android.text.TextUtils.TruncateAt.END).toString()
+        labelCache[tile] = arrayOf(key, label)
         return label
     }
-    private val shadowPaint=Paint(Paint.FILTER_BITMAP_FLAG)
-    private class BakedShadow(val bitmap:Bitmap,val ext:Int)
-    private var bakedShadow:BakedShadow?=null
-    private var bakedShadowW=0
-    private var bakedShadowH=0
-    /** Baked once per tile size, Aerial-style: the tile's rounded outline filled
-     *  with black at 70% and blurred with a real BlurMaskFilter, so the falloff is
-     *  a true soft shadow rather than stacked strokes. The bake runs on a software
-     *  bitmap canvas, where the mask filter applies on every API level; drawing
-     *  the result is a plain bitmap draw. */
-    private fun focusShadow(w:Int,h:Int):BakedShadow?{
-        if(w<=0||h<=0)return null
-        bakedShadow?.takeIf{bakedShadowW==w&&bakedShadowH==h}?.let{return it}
-        val blur=(26f*scale).coerceAtLeast(1f)
-        val ext=kotlin.math.ceil(blur*1.5f).toInt()
-        val bitmap=Bitmap.createBitmap(w+2*ext,h+2*ext,Bitmap.Config.ARGB_8888)
-        val bc=Canvas(bitmap)
-        bc.translate(ext.toFloat(),ext.toFloat())
-        val p=Paint(Paint.ANTI_ALIAS_FLAG)
-        p.color=0xb3000000.toInt()
-        p.maskFilter=android.graphics.BlurMaskFilter(blur,android.graphics.BlurMaskFilter.Blur.NORMAL)
-        bc.drawPath(GlassUi.SmoothCorners.smoothRect(RectF(0f,0f,w.toFloat(),h.toFloat()),h*0.225f,h*0.225f),p)
-        return BakedShadow(bitmap,ext).also{bakedShadow=it;bakedShadowW=w;bakedShadowH=h}
+    private val selectedTitlePaint=android.text.TextPaint(Paint.ANTI_ALIAS_FLAG)
+    private var selectedTitleKey=""
+    private var selectedTitleLayout:android.text.StaticLayout?=null
+    private val selectedTitleBounds=RectF()
+    @Suppress("DEPRECATION")
+    private fun fullTileLabel(tile:AppTileView):android.text.StaticLayout{
+        selectedTitlePaint.textSize=28f*scale;selectedTitlePaint.typeface=bold
+        val desired=kotlin.math.ceil(selectedTitlePaint.measureText(tile.title)).toInt().coerceAtLeast(tile.width)
+        val labelWidth=minOf(desired,(tile.width*2.4f).toInt(),(width-48*scale).toInt()).coerceAtLeast(1)
+        val key="${tile.title}|$labelWidth|$scale"
+        if(key!=selectedTitleKey||selectedTitleLayout==null){
+            val first=selectedTitlePaint.breakText(tile.title,true,labelWidth.toFloat(),null)
+            val text=if(first>=tile.title.length)tile.title else tile.title.take(first)+"\n"+
+                android.text.TextUtils.ellipsize(tile.title.substring(first),selectedTitlePaint,labelWidth.toFloat(),android.text.TextUtils.TruncateAt.END)
+            selectedTitleLayout=android.text.StaticLayout(text,selectedTitlePaint,labelWidth,android.text.Layout.Alignment.ALIGN_CENTER,1f,0f,false)
+            selectedTitleKey=key
+        }
+        return selectedTitleLayout!!
     }
-    override fun dispatchDraw(canvas:Canvas){
+    private val shadowPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val frostRect = RectF()
+    private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    private val arrowPath = Path()
+    private var cachedClockKey = ""
+    private var cachedTimeText = ""
+    private var cachedDateText = ""
+    private class BakedShadow(val bitmap: Bitmap, val ext: Int)
+    private var bakedShadow: BakedShadow? = null
+    private var bakedShadowW = 0
+    private var bakedShadowH = 0
+    private fun focusShadow(w: Int, h: Int): BakedShadow? {
+        if (w <= 0 || h <= 0) return null
+        bakedShadow?.takeIf { bakedShadowW == w && bakedShadowH == h }?.let { return it }
+        val blur = (26f * scale).coerceAtLeast(1f)
+        val ext = kotlin.math.ceil(blur * 1.5f).toInt()
+        val bitmap = Bitmap.createBitmap(w + 2 * ext, h + 2 * ext, Bitmap.Config.ARGB_8888)
+        val bc = Canvas(bitmap)
+        bc.translate(ext.toFloat(), ext.toFloat())
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        p.color = 0xb3000000.toInt()
+        p.maskFilter = android.graphics.BlurMaskFilter(blur, android.graphics.BlurMaskFilter.Blur.NORMAL)
+        bc.drawPath(GlassUi.SmoothCorners.smoothRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), h * 0.225f, h * 0.225f), p)
+        return BakedShadow(bitmap, ext).also { bakedShadow = it; bakedShadowW = w; bakedShadowH = h }
+    }
+    override fun dispatchDraw(canvas: Canvas) {
         super.dispatchDraw(canvas)
-        // At rest the only name is the focused tile's caption, and never on the
-        // shelf row (it rests on the glass plate); from the second row down the
-        // caption sits in the name room the grid pitch already reserves.
-        val focused=focusedTile
-        if(focused!=null&&moving==null&&tiles.indexOf(focused)>=cols){
-            paint.style=Paint.Style.FILL;paint.textAlign=Paint.Align.CENTER
-            paint.typeface=bold;paint.textSize=30f*scale;paint.color=ink;paint.alpha=255
-            paint.setShadowLayer(9f*scale,0f,3f*scale,if(darkHome)0x65000000.toInt() else 0x50ffffff)
-            val cx=appRail.left+focused.left+focused.width/2f
-            val bottom=appRail.top+focused.top+focused.height
-            canvas.drawText(tileLabel(focused,true),cx,bottom+36f*scale,paint)
-            paint.textAlign=Paint.Align.LEFT;paint.clearShadowLayer();paint.alpha=255
+        val railY = railTopY()
+        val focused = focusedTile
+        selectedTitleBounds.setEmpty()
+        if (focused != null && moving == null && scrollTarget > 0f) {
+            val label=fullTileLabel(focused)
+            selectedTitlePaint.color=ink
+            selectedTitlePaint.setShadowLayer(9f*scale,0f,3f*scale,if(darkHome)0x99000000.toInt() else 0x70ffffff)
+            val cx = appRail.left + focused.left + focused.width / 2f
+            val bottom = railY + focused.top + focused.height
+            val left=(cx-label.width/2f).coerceIn(24f*scale,(width-label.width-24f*scale).coerceAtLeast(24f*scale))
+            val top=(bottom+12f*scale).coerceAtMost(height-label.height-8f*scale)
+            selectedTitleBounds.set(left,top,left+label.width,top+label.height)
+            val save=canvas.save();canvas.translate(left,top);label.draw(canvas);canvas.restoreToCount(save)
         }
 
-        // Lifted into the full grid, every tile earns its name: the names fade in
-        // with the lift itself — the same fraction that frosts the backdrop and
-        // dissolves the plate — under every tile except the one already carrying
-        // the bold focus caption. On the plate at rest, no names show at all.
-        val lift=liftFrac
-        if(lift>0.01f&&moving==null){
-            paint.style=Paint.Style.FILL;paint.textAlign=Paint.Align.CENTER
-            paint.typeface=regular;paint.textSize=30f*scale;paint.color=ink
-            tiles.forEachIndexed{i,tile->
-                if(tile===focused&&i>=cols)return@forEachIndexed
-                val a=(lift*(if(i<cols)1f else gridAlpha())*255).toInt().coerceIn(0,255)
-                if(a<=2)return@forEachIndexed
-                paint.alpha=a
-                paint.setShadowLayer(9f*scale,0f,3f*scale,if(darkHome)Color.argb((0x65*lift).toInt(),0,0,0) else Color.argb((0x50*lift).toInt(),255,255,255))
-                val cx=appRail.left+tile.left+tile.width/2f
-                val bottom=appRail.top+tile.top+tile.height
-                canvas.drawText(tileLabel(tile,false),cx,bottom+36f*scale,paint)
+        val lift = liftFrac
+        if (lift > 0.01f && moving == null && scrollTarget > 0f) {
+            paint.style = Paint.Style.FILL
+            paint.textAlign = Paint.Align.CENTER
+            paint.typeface = regular
+            paint.textSize = 28f * scale
+            paint.color = ink
+            paint.setShadowLayer(
+                9f * scale, 0f, 3f * scale,
+                if (darkHome) Color.argb((0x65 * lift).toInt(), 0, 0, 0) else Color.argb((0x50 * lift).toInt(), 255, 255, 255)
+            )
+            val gAlpha = gridAlpha()
+            val captionOffset = 36f * scale
+            val viewH = height.toFloat()
+            tiles.forEachIndexed { i, tile ->
+                if (tile === focused) return@forEachIndexed
+                val bottom = railY + tile.top + tile.height
+                val textY = bottom + captionOffset
+                if (textY < -40f * scale || textY - 40f * scale > viewH) return@forEachIndexed
+                val a = (lift * (if (i < cols) 1f else gAlpha) * 255).toInt().coerceIn(0, 255)
+                if (a <= 2) return@forEachIndexed
+                paint.alpha = a
+                val cx = appRail.left + tile.left + tile.width / 2f
+                if(!selectedTitleBounds.isEmpty&&textY>=selectedTitleBounds.top&&textY-36f*scale<=selectedTitleBounds.bottom&&
+                    cx+tile.width/2f>selectedTitleBounds.left&&cx-tile.width/2f<selectedTitleBounds.right)return@forEachIndexed
+                canvas.drawText(tileLabel(tile, false), cx, textY, paint)
             }
-            paint.textAlign=Paint.Align.LEFT;paint.clearShadowLayer();paint.alpha=255
+            paint.textAlign = Paint.Align.LEFT
+            paint.clearShadowLayer()
+            paint.alpha = 255
         }
 
-        val entry=moving?:return
-        val tile=tiles.firstOrNull{tileKey(it)==entry}?:return
-        val x=appRail.left+tile.left.toFloat();val y=appRail.top+tile.top+tile.height*.5f
-        val index=tiles.indexOf(tile)
-        val arrowPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=ink;style=Paint.Style.STROKE;strokeWidth=2.5f*scale;strokeCap=Paint.Cap.ROUND;strokeJoin=Paint.Join.ROUND}
-        fun arrow(center:Float,left:Boolean,enabled:Boolean){arrowPaint.alpha=if(enabled)255 else 65;val sign=if(left)-1 else 1;val p=Path();p.moveTo(center-sign*3*scale,y-6*scale);p.lineTo(center+sign*3*scale,y);p.lineTo(center-sign*3*scale,y+6*scale);canvas.drawPath(p,arrowPaint)}
-        arrow(x+13*scale,true,index%cols>0);arrow(x+tile.width-13*scale,false,index%cols<cols-1&&index<tiles.lastIndex)
-        val cx=x+tile.width/2f
-        fun vArrow(centerY:Float,up:Boolean,enabled:Boolean){arrowPaint.alpha=if(enabled)255 else 65;val sign=if(up)-1 else 1;val p=Path();p.moveTo(cx-6*scale,centerY-sign*3*scale);p.lineTo(cx,centerY+sign*3*scale);p.lineTo(cx+6*scale,centerY-sign*3*scale);canvas.drawPath(p,arrowPaint)}
-        vArrow(appRail.top+tile.top+13*scale,true,index>=cols);vArrow(appRail.top+tile.top+tile.height-13*scale,false,index/cols+1<rows)
+        val entry = moving ?: return
+        val tile = tiles.firstOrNull { tileKey(it) == entry } ?: return
+        val x = appRail.left + tile.left.toFloat()
+        val y = railY + tile.top + tile.height * .5f
+        val index = tiles.indexOf(tile)
+        arrowPaint.color = ink
+        arrowPaint.strokeWidth = 2.5f * scale
+        fun arrow(center: Float, left: Boolean, enabled: Boolean) {
+            arrowPaint.alpha = if (enabled) 255 else 65
+            val sign = if (left) -1 else 1
+            arrowPath.reset()
+            arrowPath.moveTo(center - sign * 3 * scale, y - 6 * scale)
+            arrowPath.lineTo(center + sign * 3 * scale, y)
+            arrowPath.lineTo(center - sign * 3 * scale, y + 6 * scale)
+            canvas.drawPath(arrowPath, arrowPaint)
+        }
+        arrow(x + 13 * scale, true, index % cols > 0)
+        arrow(x + tile.width - 13 * scale, false, index % cols < cols - 1 && index < tiles.lastIndex)
+        val cx = x + tile.width / 2f
+        fun vArrow(centerY: Float, up: Boolean, enabled: Boolean) {
+            arrowPaint.alpha = if (enabled) 255 else 65
+            val sign = if (up) -1 else 1
+            arrowPath.reset()
+            arrowPath.moveTo(cx - 6 * scale, centerY - sign * 3 * scale)
+            arrowPath.lineTo(cx, centerY + sign * 3 * scale)
+            arrowPath.lineTo(cx + 6 * scale, centerY - sign * 3 * scale)
+            canvas.drawPath(arrowPath, arrowPaint)
+        }
+        vArrow(railY + tile.top + 13 * scale, true, index >= cols)
+        vArrow(railY + tile.top + tile.height - 13 * scale, false, index / cols + 1 < rows)
     }
     fun update(base:String,pin:String,invite:String,count:Int,message:String){
         val minute=System.currentTimeMillis()/60000
@@ -839,7 +1053,19 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         val changed=connectionChanged||lastClockMinute!=minute
         lastClockMinute=minute
         address=base;code=pin;connected=count;controlButton.contentDescription="控制中心"+(if(count>0)"，手机已连接" else "");notice=message
-        if(payload!=invite){payload=invite;qr=null;if(invite.isNotEmpty())try{val matrix=QRCodeWriter().encode(invite,BarcodeFormat.QR_CODE,480,480,mapOf(EncodeHintType.MARGIN to 2));val pixels=IntArray(480*480){i->if(matrix[i%480,i/480])0xff191727.toInt()else Color.WHITE};qr=Bitmap.createBitmap(pixels,480,480,Bitmap.Config.ARGB_8888)}catch(_:WriterException){notice="二维码生成失败，请使用地址和配对码"}}
+        if(payload!=invite){
+            payload=invite;qr=null
+            if(invite.isNotEmpty())AppThreads.onIo{
+                val image=try{
+                    val matrix=QRCodeWriter().encode(invite,BarcodeFormat.QR_CODE,480,480,mapOf(EncodeHintType.MARGIN to 2))
+                    val pixels=IntArray(480*480){i->if(matrix[i%480,i/480])0xff191727.toInt()else Color.WHITE}
+                    Bitmap.createBitmap(pixels,480,480,Bitmap.Config.ARGB_8888)
+                }catch(_:WriterException){null}
+                mainHandler.post{
+                    if(payload==invite){qr=image;connectionImage.get()?.setImageBitmap(image);invalidate()}
+                }
+            }
+        }
         if(connectionChanged){connectionLabel.get()?.text=connectionLine();connectionImage.get()?.setImageBitmap(qr);connectionDot.get()?.background=GradientDrawable().apply{shape=GradientDrawable.OVAL;setColor(if(connected>0)0xff4caf50.toInt() else Color.WHITE)}}
         if(changed)invalidate()
     }
@@ -853,63 +1079,75 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         (target?:tiles.firstOrNull())?.requestFocus()
     }
     private fun text(c:Canvas,value:String,x:Float,y:Float,size:Float,color:Int=ink,strong:Boolean=false){paint.shader=null;paint.color=color;paint.textSize=size;paint.typeface=if(strong)bold else regular;c.drawText(value,x,y,paint)}
-    override fun onDraw(c:Canvas){
+    private fun ensureClockStrings() {
+        val nowMs = System.currentTimeMillis()
+        val zone = java.util.TimeZone.getDefault()
+        val key = "${nowMs / 60000}:${zone.id}"
+        if (cachedClockKey == key) return
+        cachedClockKey = key
+        timeFormat.timeZone = zone
+        dateFormat.timeZone = zone
+        val date = java.util.Date(nowMs)
+        cachedTimeText = timeFormat.format(date)
+        cachedDateText = dateFormat.format(date)
+    }
+    override fun onDraw(c: Canvas) {
         super.onDraw(c)
-        paint.shader=null;paint.isFilterBitmap=true
-        if(drawsBackdrop)HomeAppearance.drawBackdrop(context,c,width,height,darkHome,paint)
-        // Pulling the grid up frosts the whole backdrop (Aerial's lifted grid):
-        // the wallpaper frost under a shade of black, fading in with the lift so
-        // the tiles read against glass instead of a sharp photo.
-        val lift=liftFrac
-        if(lift>0.01f){
-            GlassUi.snapshot(context)?.let{frost->
-                paint.alpha=(lift*255).toInt().coerceIn(0,255)
-                c.drawBitmap(frost.bitmap,null,RectF(0f,0f,width.toFloat(),height.toFloat()),paint)
-                paint.style=Paint.Style.FILL;paint.color=Color.BLACK
-                paint.alpha=(lift*96).toInt().coerceIn(0,96)
-                c.drawRect(0f,0f,width.toFloat(),height.toFloat(),paint)
-                paint.alpha=255
+        paint.shader = null
+        paint.isFilterBitmap = true
+        if (drawsBackdrop) HomeAppearance.drawBackdrop(context, c, width, height, darkHome, paint){invalidate()}
+        val lift = liftFrac
+        if (lift > 0.01f) {
+            GlassUi.snapshot(context)?.let { frost ->
+                frostRect.set(0f, 0f, width.toFloat(), height.toFloat())
+                paint.alpha = (lift * 255).toInt().coerceIn(0, 255)
+                c.drawBitmap(frost.bitmap, null, frostRect, paint)
+                paint.style = Paint.Style.FILL
+                paint.color = Color.BLACK
+                paint.alpha = (lift * 96).toInt().coerceIn(0, 96)
+                c.drawRect(frostRect, paint)
+                paint.alpha = 255
             }
         }
-        // The focused tile's soft shadow, under the tiles: a bitmap baked once per
-        // tile size (the outline filled black and blurred for real), drawn dropped
-        // and faded by the tile's own focus fraction. One bitmap draw per frame.
-        val ft=focusedTile
-        if(ft!=null&&moving==null){
-            val frac=ft.focusFraction
-            if(frac>0.01f){
-                focusShadow(ft.width,ft.height)?.let{shadow->
-                    val cx=appRail.left+ft.left+ft.width/2f;val cy=appRail.top+ft.top+ft.height/2f
-                    val grow=1f+0.05f*frac
-                    // The shadow belongs to the lifted grid: on the plate the tile
-                    // answers focus with its lit rim instead (see AppTileView).
-                    shadowPaint.alpha=(frac*lift*255).toInt().coerceIn(0,255)
+        val ft = focusedTile
+        if (ft != null && moving == null && lift > 0.01f) {
+            val frac = ft.focusFraction
+            if (frac > 0.01f) {
+                focusShadow(ft.width, ft.height)?.let { shadow ->
+                    val railY = railTopY()
+                    val cx = appRail.left + ft.left + ft.width / 2f
+                    val cy = railY + ft.top + ft.height / 2f
+                    val grow = 1f + 0.05f * frac
+                    shadowPaint.alpha = (frac * lift * 255).toInt().coerceIn(0, 255)
                     c.save()
-                    c.translate(cx,cy+(24f*scale)*frac);c.scale(grow,grow);c.translate(-cx,-cy)
-                    c.drawBitmap(shadow.bitmap,cx-ft.width/2f-shadow.ext,cy-ft.height/2f-shadow.ext,shadowPaint)
+                    c.translate(cx, cy + (24f * scale) * frac)
+                    c.scale(grow, grow)
+                    c.translate(-cx, -cy)
+                    c.drawBitmap(shadow.bitmap, cx - ft.width / 2f - shadow.ext, cy - ft.height / 2f - shadow.ext, shadowPaint)
                     c.restore()
-                    shadowPaint.alpha=255
+                    shadowPaint.alpha = 255
                 }
             }
         }
-        c.save();c.translate(0f,oy);c.scale(scale,scale)
-        val now=java.util.Date();val zone=java.util.TimeZone.getDefault();timeFormat.timeZone=zone;dateFormat.timeZone=zone
-        val time=timeFormat.format(now)
-        val fade=shelfAlpha()
-        if(fade>0f){
-            fun faded(color:Int)=Color.argb((Color.alpha(color)*fade).toInt(),Color.red(color),Color.green(color),Color.blue(color))
-            paint.style=Paint.Style.FILL
-            val foreground=if(darkHome)Color.WHITE else 0xff162638.toInt()
-            paint.setShadowLayer(9f,0f,3f,faded(if(darkHome)0x65000000 else 0x50ffffff))
-            text(c,dateFormat.format(now),120f,364f,43f,color=faded(foreground),strong=true)
-            paint.shader=null
-            paint.typeface=clockFont
-            paint.textSize=168f
-            paint.color=faded(foreground)
-            c.drawText(time,120f,297f,paint)
+        val fade = shelfAlpha()
+        if (fade > 0f) {
+            ensureClockStrings()
+            c.save()
+            c.translate(0f, oy)
+            c.scale(scale, scale)
+            fun faded(color: Int) = Color.argb((Color.alpha(color) * fade).toInt(), Color.red(color), Color.green(color), Color.blue(color))
+            paint.style = Paint.Style.FILL
+            val foreground = if (darkHome) Color.WHITE else 0xff162638.toInt()
+            paint.setShadowLayer(9f, 0f, 3f, faded(if (darkHome) 0x65000000 else 0x50ffffff))
+            text(c, cachedDateText, 120f, 364f, 43f, color = faded(foreground), strong = true)
+            paint.shader = null
+            paint.typeface = clockFont
+            paint.textSize = 168f
+            paint.color = faded(foreground)
+            c.drawText(cachedTimeText, 120f, 297f, paint)
             paint.clearShadowLayer()
+            c.restore()
         }
-        c.restore()
     }
     private fun connectionSummary()=listOf(if(connected>0)"手机已连接" else "扫码连接",address.ifEmpty{"请先联网"},if(code.isNotEmpty())"配对码  $code" else "").filter{it.isNotEmpty()}.joinToString("\n")
     private fun connectionLine()=listOf(address.ifEmpty{"请先联网"},if(code.isNotEmpty())"配对码  $code" else "").filter{it.isNotEmpty()}.joinToString("    ")

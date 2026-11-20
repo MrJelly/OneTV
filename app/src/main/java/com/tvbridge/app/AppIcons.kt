@@ -36,10 +36,6 @@ object AppIcons {
                 "wifi","wifi0","wifi1","wifi2","wifi3"->{
                     val level=key.last().digitToIntOrNull()?:3
                     val color=paint.color
-                    // Drawn at the monitor glyph's visual size (span ~4..20):
-                    // fan centre 18.2, outer radius 14, dot 1.5. An earlier,
-                    // smaller fan (centre 20, radius 12) both sat low and read
-                    // smaller than the neighbouring header icons.
                     for(i in 0..2){
                         paint.alpha=if(i<level)Color.alpha(color)else Color.alpha(color)/3
                         val radius=4.7f+i*4.65f
@@ -79,6 +75,7 @@ object AppIcons {
                 "chevron-right"->line(9f,5f,16f,12f,9f,19f)
                 "history-back"->{line(10f,5f,3f,12f,10f,19f);line(3f,12f,21f,12f)}
                 "history-forward"->{line(14f,5f,21f,12f,14f,19f);line(3f,12f,21f,12f)}
+                "history"->{c.drawCircle(12f,12f,8.5f,paint);line(12f,7.5f,12f,12.5f,15.5f,14.5f)}
                 "search"->{c.drawCircle(10.5f,10.5f,6.5f,paint);line(15.5f,15.5f,21f,21f)}
                 "collapse"->line(5f,15f,12f,8f,19f,15f)
                 "menu"->{line(4f,6f,20f,6f);line(4f,12f,20f,12f);line(4f,18f,20f,18f)}

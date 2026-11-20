@@ -37,6 +37,7 @@ open class BootReceiver : BroadcastReceiver() {
             }
             return
         }
+        if(!wake)AppThreads.main.post{Hub.activity?.onBootSignal()}
         if(DesktopTakeover.wanted(app)){
             DesktopTakeover.recover(app)
             if(DesktopGuardService.connected){
@@ -66,16 +67,21 @@ open class BootReceiver : BroadcastReceiver() {
     companion object {
         private fun bootCount(context:Context)=if(Build.VERSION.SDK_INT>=24)Settings.Global.getInt(context.contentResolver,Settings.Global.BOOT_COUNT,-1)else -1
         fun arrivedThisBoot(context:Context):Boolean {
+            return seenThisBoot(context,"boot_arrived")
+        }
+        private fun seenThisBoot(context:Context,prefix:String):Boolean {
             if(!DesktopTakeover.unlocked(context))return false
             val prefs=context.getSharedPreferences("startup",Context.MODE_PRIVATE)
             val bootId=DesktopRecovery.BOOT_ID
-            val savedId=prefs.getString("boot_arrived_id",null)
+            val savedId=prefs.getString("${prefix}_id",null)
             if(bootId!=null&&savedId!=null)return savedId==bootId
             val count=bootCount(context)
-            if(count>=0)return prefs.getInt("boot_arrived_count",-2)==count
-            val arrived=prefs.getLong("boot_arrived_at",0);val now=System.currentTimeMillis()
+            if(count>=0)return prefs.getInt("${prefix}_count",-2)==count
+            val arrived=prefs.getLong("${prefix}_at",0);val now=System.currentTimeMillis()
             return arrived>0&&arrived in (now-SystemClock.elapsedRealtime())..now
         }
+        fun targetOfferedThisBoot(context:Context)=seenThisBoot(context,"boot_target_offered")
+        fun markTargetOffered(context:Context){context.getSharedPreferences("startup",Context.MODE_PRIVATE).edit().putLong("boot_target_offered_at",System.currentTimeMillis()).putInt("boot_target_offered_count",bootCount(context)).putString("boot_target_offered_id",DesktopRecovery.BOOT_ID).apply()}
         fun markArrived(context:Context){DesktopTakeover.cancel(context);context.getSharedPreferences("startup",Context.MODE_PRIVATE).edit().putString("boot_status","activity_arrived").putLong("boot_arrived_at",System.currentTimeMillis()).putInt("boot_arrived_count",bootCount(context)).putString("boot_arrived_id",DesktopRecovery.BOOT_ID).apply()}
     }
 }

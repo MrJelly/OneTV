@@ -7,6 +7,8 @@ import org.json.JSONObject
 import java.util.concurrent.*
 
 object Hub {
+    private val artworkCache=object:android.util.LruCache<String,ByteArray>(8*1024*1024){override fun sizeOf(key:String,value:ByteArray)=value.size}
+    fun trimMemory(){artworkCache.evictAll()}
     @Volatile private var activityRef: java.lang.ref.WeakReference<MainActivity>? = null
     var activity: MainActivity?
         get() = activityRef?.get()
@@ -21,7 +23,6 @@ object Hub {
         try{LegacyTls.install(context)}catch(_:Throwable){}
         if(server!=null)return
         val app=context.applicationContext
-        val artworkCache=android.util.LruCache<String,ByteArray>(96)
         val bundleVersion=runCatching{app.packageManager.getPackageInfo(app.packageName,0).lastUpdateTime}.getOrDefault(0L)
         fun webp(drawable:android.graphics.drawable.Drawable):ByteArray{
             val bitmap=android.graphics.Bitmap.createBitmap(192,192,android.graphics.Bitmap.Config.ARGB_8888)
@@ -31,14 +32,21 @@ object Hub {
             bitmap.recycle()
             return output.toByteArray()
         }
-        // Square iOS-style icons, the same art the TV home draws.
         fun appArtwork(id:String):ByteArray?{
+            if(id=="one:icon-glass"){
+                val material=AppIconGlass.prepare()
+                return webp(android.graphics.drawable.BitmapDrawable(app.resources,material))
+            }
             val key="sq:$id"
             if(id.startsWith("module:"))return artworkCache.get(key)?:AppModules.square(app,id)?.let{webp(it)}?.also{artworkCache.put(key,it)}
             val repository=LauncherApps(app)
-            val entry=repository.installed().firstOrNull{it.component.flattenToString()==id}?:return null
+            val entry=(if(id==LauncherApps.STOCK_HOME_ID)repository.stockHomeEntry() else repository.installed().firstOrNull{it.component.flattenToString()==id})?:return null
             val versioned="$key:${entry.updated}"
             artworkCache.get(versioned)?.let{return it}
+            repository.squareIconWebp(entry)?.let { cached ->
+                artworkCache.put(versioned, cached)
+                return cached
+            }
             return runCatching{webp(repository.squareIcon(entry)).also{artworkCache.put(versioned,it)}}.getOrNull()
         }
         fun appsSnapshot(known:String):String{
@@ -53,12 +61,14 @@ object Hub {
             val membership=layout.entries.flatMap{(name,members)->members.map{it to name}}.toMap()
             val arr=org.json.JSONArray()
             ids.forEach{id->
-                val original=modules[id]?.title?:byId[id]?.label?:return@forEach
+                val original=modules[id]?.title?:byId[id]?.label?:if(id==LauncherApps.STOCK_HOME_ID)repository.stockHomeEntry()?.label else null
+                if(original==null)return@forEach
                 val folder=membership[id]
                 arr.put(JSONObject().put("id",id).put("title",repository.displayTitle(id,original))
                     .put("original",original).put("hidden",id in hidden).put("folder",folder?:JSONObject.NULL))
             }
-            val artVersion="sq1:$bundleVersion:${byId.mapValues{it.value.updated}.hashCode()}"
+            val stamps=byId.mapValues{it.value.updated}+listOfNotNull(repository.stockHomeEntry()?.let{LauncherApps.STOCK_HOME_ID to it.updated}).toMap()
+            val artVersion="sq1:$bundleVersion:${stamps.hashCode()}"
             val columns=HomeAppearance.homeColumns(app)
             val version=(arr.toString()+folders.toString()+artVersion+columns).hashCode().toString()
             if(known==version)return ""
@@ -68,6 +78,17 @@ object Hub {
         if(!::adb.isInitialized)adb=AdbRemote(app)
         try{
             server=LanServer(app.filesDir,app.assets.open("remote.html"),onFatal={dead->synchronized(this){if(server===dead)server=null}}){cmd,value->
+                if (cmd == "browserSearchEngine") {
+                    val ok = BrowserSettings.setEngine(app, value)
+                    if (ok) main.post { BrowserActivity.active?.onBrowserSettingsChanged() }
+                    return@LanServer ok
+                }
+                if (cmd == "browserAutoFullscreen") {
+                    if (value !in setOf("true", "false")) return@LanServer false
+                    BrowserSettings.setAutoFullscreen(app, value == "true")
+                    main.post { BrowserActivity.active?.onBrowserSettingsChanged() }
+                    return@LanServer true
+                }
                 if(cmd=="inputText"){
                     textMessage="请先选中电视输入框；控制其他应用需先连接系统遥控"
                     if(!RemoteText.valid(value))return@LanServer false
@@ -82,7 +103,7 @@ object Hub {
                     }
                     return@LanServer done.await(5,TimeUnit.SECONDS)&&played
                 }
-                if(cmd=="adbConnect"){val connected=adb.connect(value.toIntOrNull()?:5555);if(connected)main.post{androidx.core.content.ContextCompat.startForegroundService(app,Intent(app,RemoteHostService::class.java))};return@LanServer connected}
+                if(cmd=="adbConnect"){val connected=adb.connect(value.toIntOrNull()?:5555);if(connected)main.post{runCatching{androidx.core.content.ContextCompat.startForegroundService(app,Intent(app,RemoteHostService::class.java))}};return@LanServer connected}
                 if(cmd=="adbDisconnect"){main.post{GlobalPointer.hide()};adb.disconnect();return@LanServer true}
                 if(cmd=="pointerMode"||cmd in setOf("touchMove","touchClick","touchScroll")) {
                     if(cmd=="pointerMode"&&value=="on"&&adb.enabled()&&!adb.ready)adb.restore()
@@ -170,13 +191,15 @@ object Hub {
                         cmd=="browserOpen"||(cmd=="browserNavigate"||cmd=="browserHome")&&BrowserActivity.active==null->{
                             val intent=Intent(app,BrowserActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             if(cmd=="browserNavigate"){
-                                val url=PlaylistParser.httpUrl(value)?:return@post
+                                val url=BrowserNavigation.resolve(value,BrowserSettings.engine(app))?:return@post
                                 intent.putExtra("address",url)
                             }
                             if(BrowserActivity.active==null)app.startActivity(intent)
                             true
                         }
                         cmd=="home"&&BrowserActivity.active?.returnToOneHome()==true->true
+                        cmd=="browserHistoryDelete"->{BrowserHistory(app).remove(value);true}
+                        cmd=="browserHistoryClear"->{BrowserHistory(app).clear();true}
                         BrowserActivity.active?.remoteCommand(cmd,value)==true->true
                         cmd=="home"&&a?.returnToOneHome()==true->true
                         cmd=="home"&&a?.visible==true->{a.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));true}
@@ -192,11 +215,11 @@ object Hub {
                     return@LanServer false
                 }
                 if(result){return@LanServer true}
-                if(cmd.startsWith("browser"))return@LanServer false
+                if(cmd.startsWith("browser")){return@LanServer false}
                 if(adb.enabled()&&(adb.ready||adb.restore()))return@LanServer adb.command(cmd)
                 false
             }.also{s->
-                s.capabilities{JSONObject().put("browser",JSONObject(BrowserActivity.active?.remotePlaybackState()?:"{}")).put("appearance",if(HomeAppearance.dark(app))"dark"else "light").put("systemRemote",adb.ready).put("adbEnabled",adb.enabled()).put("adbReady",adb.ready).put("adbMessage",adb.message).put("engineNeeded",false).put("engineInstalled",true).put("pointerReady",GlobalPointer.enabled&&adb.ready).put("overlayAllowed",GlobalPointer.permitted(app)).put("foreground",activity?.visible==true||BrowserActivity.active!=null).put("version",app.packageManager.getPackageInfo(app.packageName,0).versionName).put("bootEnabled",app.getSharedPreferences("startup",Context.MODE_PRIVATE).getBoolean("boot",false)).put("bootState",app.getSharedPreferences("startup",Context.MODE_PRIVATE).getString("boot_status","unknown")).toString()}
+                s.capabilities{JSONObject().put("browserSettings",BrowserSettings.snapshot(app)).put("browser",JSONObject(BrowserActivity.active?.remotePlaybackState()?:"{}").apply{if(!has("history"))put("history",BrowserHistory(app).toJson())}).put("appearance",if(HomeAppearance.dark(app))"dark"else "light").put("systemRemote",adb.ready).put("adbEnabled",adb.enabled()).put("adbReady",adb.ready).put("adbMessage",adb.message).put("engineNeeded",false).put("engineInstalled",true).put("pointerReady",GlobalPointer.enabled&&adb.ready).put("overlayAllowed",GlobalPointer.permitted(app)).put("foreground",activity?.visible==true||BrowserActivity.active!=null).put("version",app.packageManager.getPackageInfo(app.packageName,0).versionName).put("bootEnabled",app.getSharedPreferences("startup",Context.MODE_PRIVATE).getBoolean("boot",false)).put("bootState",app.getSharedPreferences("startup",Context.MODE_PRIVATE).getString("boot_status","unknown")).toString()}
                 s.liveData{live.snapshot(it)};s.appsData{appsSnapshot(it)};s.appArtwork{appArtwork(it)};s.liveMessage{live.lastMessage};s.playbackData{PlaybackDiagnostics.snapshot()};s.textMessage{textMessage};s.start()
             };error=""
         }catch(e:Exception){error=e.message.orEmpty();server=null}
