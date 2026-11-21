@@ -30,7 +30,7 @@ internal class BrowserCursorOverlay(
         val toolbar: View
         val homepage: ScrollView
         val address: EditText
-        val customVideoView: View?
+        val hasCustomVideo: Boolean
         val videoBarView: View?
         val videoActive: Boolean
         fun isHomepageVisible(): Boolean
@@ -121,10 +121,10 @@ internal class BrowserCursorOverlay(
             else -> 0f
         }
         val margin = dp(14).toFloat()
-        if (!host.isHomepageVisible() && host.customVideoView == null && py >= host.webView.top && dy != 0f && (py + dy < margin || py + dy > height - margin)) {
+        if (!host.isHomepageVisible() && !host.hasCustomVideo && py >= host.webView.top && dy != 0f && (py + dy < margin || py + dy > height - margin)) {
             scroll(0f, dy * 4)
         }
-        if (host.customVideoView == null && dx != 0f && (px + dx < margin || px + dx > width - margin)) {
+        if (!host.hasCustomVideo && dx != 0f && (px + dx < margin || px + dx > width - margin)) {
             scroll(dx * 4, 0f)
         }
         px = (px + dx).coerceIn(margin, (width - margin).coerceAtLeast(margin))

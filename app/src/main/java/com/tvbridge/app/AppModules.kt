@@ -18,5 +18,11 @@ object AppModules{
         glyph.setBounds(o,o,o+g,o+g);glyph.draw(canvas)
         return android.graphics.drawable.BitmapDrawable(context.resources,bitmap)
     }
-    fun square(context:android.content.Context,id:String)=all.firstOrNull{it.id==id}?.let{square(context,it)}
+    private val cache=java.util.concurrent.ConcurrentHashMap<String,android.graphics.drawable.Drawable>()
+    fun square(context:android.content.Context,id:String):android.graphics.drawable.Drawable?{
+        cache[id]?.let{return it}
+        val made=all.firstOrNull{it.id==id}?.let{square(context,it)} ?: return null
+        cache[id]=made
+        return made
+    }
 }

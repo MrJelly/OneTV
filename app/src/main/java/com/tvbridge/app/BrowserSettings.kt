@@ -23,14 +23,14 @@ internal object BrowserNavigation {
     }
 }
 
-internal object BrowserSettings {
-    private fun prefs(context: Context) = context.applicationContext.getSharedPreferences("browser-settings", Context.MODE_PRIVATE)
-    fun engine(context: Context) = prefs(context).getString("search_engine", "bing")?.takeIf { it in BrowserNavigation.engines } ?: "bing"
-    fun autoFullscreen(context: Context) = prefs(context).getBoolean("auto_fullscreen", false)
-    fun setEngine(context: Context, engine: String): Boolean {
+internal class BrowserSettings(context: Context) {
+    private val prefs = context.applicationContext.getSharedPreferences("browser-settings", Context.MODE_PRIVATE)
+    fun engine() = prefs.getString("search_engine", "bing")?.takeIf { it in BrowserNavigation.engines } ?: "bing"
+    fun autoFullscreen() = prefs.getBoolean("auto_fullscreen", false)
+    fun setEngine(engine: String): Boolean {
         if (engine !in BrowserNavigation.engines) return false
-        prefs(context).edit().putString("search_engine", engine).apply(); return true
+        prefs.edit().putString("search_engine", engine).apply(); return true
     }
-    fun setAutoFullscreen(context: Context, enabled: Boolean) { prefs(context).edit().putBoolean("auto_fullscreen", enabled).apply() }
-    fun snapshot(context: Context) = JSONObject().put("searchEngine", engine(context)).put("autoFullscreen", autoFullscreen(context))
+    fun setAutoFullscreen(enabled: Boolean) { prefs.edit().putBoolean("auto_fullscreen", enabled).apply() }
+    fun snapshot() = JSONObject().put("searchEngine", engine()).put("autoFullscreen", autoFullscreen())
 }

@@ -15,17 +15,6 @@ internal class ProgressiveMediaBuffer(private val limit: Int) {
 
     @Synchronized
     @Throws(IOException::class)
-    fun expectLength(length: Int) {
-        if (length < 0 || length > limit || size != 0 || complete || failure != null)
-            throw IOException("Invalid progressive media length")
-        expectedLen = length
-    }
-
-    @Synchronized
-    fun expectedLength(): Int = expectedLen
-
-    @Synchronized
-    @Throws(IOException::class)
     fun append(ownedBytes: ByteArray) {
         failure?.let { throw it }
         if (complete) throw IOException("Media already complete")

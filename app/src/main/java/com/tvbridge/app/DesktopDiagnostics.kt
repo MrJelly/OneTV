@@ -10,16 +10,8 @@ import android.os.Build
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityManager
 import java.io.File
-import java.util.ArrayDeque
 
 internal object DesktopDiagnostics {
-    private val events = ArrayDeque<String>()
-    @Synchronized fun event(value: String) {
-        if (events.size >= 100) events.removeFirst()
-        events.addLast("${SystemClock.elapsedRealtime()}ms $value")
-    }
-    @Synchronized private fun recentEvents() = events.toList()
-
     fun report(context: Context): String = buildString {
         fun line(key: String, value: Any?) { append(key).append(": ").append(value ?: "unknown").append('\n') }
         append("One 桌面接管诊断 v1\n")
@@ -37,7 +29,6 @@ internal object DesktopDiagnostics {
         line("接管已启用", DesktopTakeover.wanted(context))
         line("守护已授权", DesktopTakeover.enabled(context))
         line("守护已连接", DesktopGuardService.connected)
-        line("UI 性能采样",UiPerformance.report())
         line("开机目标",LauncherApps(context).bootApp())
         line("开机目标已处理",BootReceiver.targetOfferedThisBoot(context))
         if(DesktopPolicy.stockHomeMustRemainDefault(context))line("MIUI 后台弹出界面",DesktopPolicy.stockHomeBackgroundAllowed(context))
@@ -62,8 +53,6 @@ internal object DesktopDiagnostics {
         for (pkg in listOf("com.mitv.tvhome", "com.xiaomi.mitv.settings", "com.tianci.system", "com.hisense.vidaaassistant", "com.jamdeo.tv.vod", "com.tcl.cyberui", "com.tcl.tv", "com.whaley.tv.tvplayer.ui", "com.huanglong.tvui", "com.android.newsettings", "com.konka.tvsettings")) {
             line("  $pkg", DesktopPolicy.installed(context, pkg))
         }
-        append("接管事件（本进程最近 100 条，不包含系统全量日志）:\n")
-        recentEvents().forEach { append(it).append('\n') }
     }
 
     fun show(activity: MainActivity) {

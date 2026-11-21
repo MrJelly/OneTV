@@ -57,8 +57,18 @@ internal class BrowserVideoController(
     @Volatile var playbackState: String = "{}"
         private set
 
+    enum class Mode { NONE, CUSTOM, PAGE, WEB }
+
+    val mode: Mode
+        get() = when {
+            customView != null -> Mode.CUSTOM
+            pagePlayer != null -> Mode.PAGE
+            webVideoActive -> Mode.WEB
+            else -> Mode.NONE
+        }
+
     val isVideoActive: Boolean
-        get() = customView != null || pagePlayer != null || webVideoActive
+        get() = mode != Mode.NONE
 
     val isBusyOrActive: Boolean
         get() = isVideoActive || playbackPhase == "searching" || playbackPhase == "loading"
@@ -75,10 +85,7 @@ internal class BrowserVideoController(
     private var speedButton: Button? = null
     private var loopButton: Button? = null
     private var playlistButton: Button? = null
-    private var sourceButton: Button? = null
-    private var decodeButton: Button? = null
     private var aspectButton: Button? = null
-    private var webFallbackButton: Button? = null
     private var barPlay: Button? = null
     private var barSeek: SeekBar? = null
     private var barTime: TextView? = null

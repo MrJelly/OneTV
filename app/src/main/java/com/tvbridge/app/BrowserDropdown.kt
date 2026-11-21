@@ -128,13 +128,6 @@ internal object BrowserDropdown {
         return hit
     }
 
-    fun onWindowDown() {
-        if (SystemClock.uptimeMillis() - outsideAt >= 500) {
-            outsideAnchor.clear()
-            outsideAt = 0L
-        }
-    }
-
     fun armToggle(anchor: View) {
         var closing = false
         anchor.setOnTouchListener { _, event ->

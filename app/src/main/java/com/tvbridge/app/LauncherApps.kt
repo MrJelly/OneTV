@@ -216,7 +216,7 @@ class LauncherApps(context:Context){
             original.background?.let { it.setBounds(lo, lo, hi, hi); it.draw(canvas) }
             original.foreground?.let { it.setBounds(lo, lo, hi, hi); it.draw(canvas) }
         } else {
-            val bitmap = (icon(entry) as? android.graphics.drawable.BitmapDrawable)?.bitmap
+            val bitmap = raster
             val iw = original.intrinsicWidth.coerceAtLeast(1)
             val ih = original.intrinsicHeight.coerceAtLeast(1)
             val nearSquare = maxOf(iw, ih) <= minOf(iw, ih) * 1.25f
@@ -311,8 +311,8 @@ class LauncherApps(context:Context){
         val order=if(chosen.none{it in modules})modules+chosen else chosen
         writeIds(Defaults.ORDER_KEY,(order+current).distinct())
     }
-    fun move(id:String,offset:Int):Boolean=synchronized(orderLock){
-        val ids=orderedIds().toMutableList()
+    fun move(id:String,offset:Int,known:List<String>?=null):Boolean=synchronized(orderLock){
+        val ids=(known?:orderedIds()).toMutableList()
         val from=ids.indexOf(id)
         if(from<0)return@synchronized false
         ids.removeAt(from)

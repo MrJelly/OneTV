@@ -18,10 +18,6 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.WriterException
-import com.google.zxing.qrcode.QRCodeWriter
 
 class TvHomeView(context:Context,private val liveAction:Runnable,private val filesAction:Runnable,settings:Runnable,refresh:Runnable,private val browseAction:Runnable=Runnable{}):ViewGroup(context){
     private val paint=android.text.TextPaint(Paint.ANTI_ALIAS_FLAG)
@@ -31,7 +27,6 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private val timeFormat=java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault())
     private val dateFormat=java.text.SimpleDateFormat("yyyy年M月d日  EEEE",java.util.Locale.SIMPLIFIED_CHINESE)
     private val tiles=mutableListOf<AppTileView>()
-    private var appMenu:android.widget.ListPopupWindow?=null
     private var moving:String?=null
     private val moveHint=android.widget.TextView(context).apply{
         text="方向键移动，或点击要放入的位置，按确认键完成"
@@ -45,8 +40,6 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         visibility=View.GONE
         isFocusable=false
     }
-    private var menuSelection=0
-    private var menuEntry:String?=null
     private val controlButton=object:Button(context){
         private val icon=AppIcons.Vector("settings"){currentTextColor}
         override fun onDraw(canvas:Canvas){
@@ -56,12 +49,24 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         }
     }
     private val launcherApps=LauncherApps(context)
+    private val connection=HomeConnection(controlButton){invalidate()}
+    private val appMenu=HomeAppMenu(context,launcherApps,object:HomeAppMenu.Host{
+        override val scale get()=this@TvHomeView.scale
+        override val darkHome get()=this@TvHomeView.darkHome
+        override fun tileKey(tile:AppTileView)=this@TvHomeView.tileKey(tile)
+        override fun isMoving()=this@TvHomeView.moving!=null
+        override fun enterMove(id:String)=this@TvHomeView.enterMove(id)
+        override fun refreshApps()=this@TvHomeView.refreshApps()
+        override fun focusEntry(id:String)=this@TvHomeView.focusEntry(id)
+        override fun focusFirst()=this@TvHomeView.focusFirst()
+        override fun invalidate()=this@TvHomeView.invalidate()
+        override fun requestLayout()=this@TvHomeView.requestLayout()
+    })
     private var appRow=android.widget.GridLayout(context).apply{columnCount=6;clipChildren=false;clipToPadding=false}
     private val appRail=android.widget.FrameLayout(context).apply{clipChildren=false;addView(appRow)}
     private var scale=1f;private var gridMargin=0;private var tileGap=0;private var tileWidth=0;private var tileHeight=0;private var oy=0f
     private var styledScale=-1f
     private var styledWidth=-1
-    private var qr:Bitmap?=null;private var payload="";private var address="";private var code="";private var connected=0;private var notice=""
     var drawsBackdrop=true
     private var darkHome=HomeAppearance.dark(context)
     private var appearanceKey=HomeAppearance.key(context)
@@ -82,9 +87,6 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private var focusedTile:AppTileView?=null
     private fun tileKey(tile:AppTileView)=(tile.tag as? LauncherApps.Entry)?.component?.flattenToString() ?: tile.tag as String
     private var lastClockMinute=-1L
-    private var connectionLabel=java.lang.ref.WeakReference<android.widget.TextView>(null)
-    private var connectionImage=java.lang.ref.WeakReference<android.widget.ImageView>(null)
-    private var connectionDot=java.lang.ref.WeakReference<View>(null)
     private val rows get()=maxOf(1,(tiles.size+cols-1)/cols)
     private var cols=6
     private val topRowY get()=992f-tileHeight/scale
@@ -127,6 +129,16 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         invalidate()
     }
     private fun railTopY(): Float = appRail.top + appRail.translationY
+    private fun invalidateTileRegion(tile: AppTileView) {
+        val padX = tile.width * 2
+        val padTop = (64f * scale).toInt()
+        val padBottom = (104f * scale).toInt()
+        val l = (appRail.left + tile.left - padX).coerceAtLeast(0)
+        val t = (railTopY() + tile.top - padTop).toInt().coerceAtLeast(0)
+        val r = (appRail.left + tile.right + padX).coerceAtMost(width)
+        val b = (railTopY() + tile.bottom + padBottom).toInt().coerceAtMost(height)
+        if (r > l && b > t) invalidate(l, t, r, b)
+    }
     private fun invalidateTileShadow(tile: AppTileView) {
         if (liftFrac <= 0.01f || moving != null) return
         val pad = (64f * scale).toInt()
@@ -144,7 +156,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private fun scrollTargetFor(row:Int):Float{
         if(row<=0)return 0f
         val wanted=topRowY+pitchY*row-restY
-        val bottom=topRowY+pitchY*rows+72f-1080f
+        val bottom=topRowY+pitchY*rows+16f-1080f
         return minOf(wanted,maxOf(bottom,topRowY+pitchY-restY))
     }
     private val liftFrac get()=(scrollY/collapseDip).coerceIn(0f,1f)
@@ -235,7 +247,8 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             }
         }
         val builtIns=modules.associateBy{it.id}
-        val signature="B3:"+order.sorted().joinToString{id->val entry=entries[id];"$id:${launcherApps.appTitle(id)}:${entry?.updated}"}+":"+folders.toSortedMap()+":"+darkHome+":"+(stockEntry?.component?.flattenToString()?:"")
+        val moduleTitles=AppModules.all.associate{it.id to it.title}
+        val signature="B3:"+order.sorted().joinToString{id->val entry=entries[id];val fallback=moduleTitles[id]?:entry?.label?:if(id==stockHomeId)stockEntry?.label else null;"$id:${fallback?.let{title->launcherApps.displayTitle(id,title)}}:${entry?.updated}"}+":"+folders.toSortedMap()+":"+darkHome+":"+(stockEntry?.component?.flattenToString()?:"")
         if(appSignature==signature){
             if (tiles.map(::tileKey) != order) {
                 val byId = tiles.associateBy(::tileKey)
@@ -257,7 +270,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         fun baseTile(title:String):AppTileView{
             val tile=AppTileView(context)
             tile.title=title;tile.contentDescription=title;tile.id=generateViewId()
-            tile.focusHook={focus->if(focus){val key=tileKey(tile);rememberedFocus=key;lastGridFocus=key;controlButton.nextFocusDownId=tile.id;focusedTile=tile;onTileFocused(tile)}else if(focusedTile==tile)focusedTile=null;invalidate()}
+            tile.focusHook={focus->if(focus){val key=tileKey(tile);rememberedFocus=key;lastGridFocus=key;controlButton.nextFocusDownId=tile.id;focusedTile=tile;onTileFocused(tile)}else if(focusedTile==tile)focusedTile=null;invalidateTileRegion(tile)}
             tile.focusAnimHook = { invalidateTileShadow(tile) }
             tiles.add(tile);appRow.addView(tile)
             return tile
@@ -270,7 +283,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
                 tile.role="module"
                 tile.banner=folderArtwork(folders.getValue(id))
                 tile.setOnClickListener{if(!placeMovingTile(tile))showFolder(name)}
-                tile.setOnLongClickListener{openerDownTime=heldConfirmDownTime;showAppMenu(tile);true}
+                tile.setOnLongClickListener{appMenu.openerDownTime=appMenu.heldConfirmDownTime;appMenu.show(tile);true}
                 NativeUi.touchClicks(tile);tile.isFocusableInTouchMode=true
                 return@forEach
             }
@@ -281,7 +294,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
                 tile.banner=moduleArtwork(id)
                 tile.tintTop=module.top;tile.tintBottom=module.bottom
                 tile.setOnClickListener{rememberedFocus=id;if(!placeMovingTile(tile))module.run.run()}
-                tile.setOnLongClickListener{openerDownTime=heldConfirmDownTime;showAppMenu(tile);true}
+                tile.setOnLongClickListener{appMenu.openerDownTime=appMenu.heldConfirmDownTime;appMenu.show(tile);true}
                 NativeUi.touchClicks(tile);tile.isFocusableInTouchMode=true
                 return@forEach
             }
@@ -295,7 +308,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
                     if(tile.banner==null)tile.icon=old?.icon?:try{launcherApps.icon(entry)}catch(_:Exception){null}
                     tile.placeholderTint=launcherApps.tileTint(entry)
                     tile.setOnClickListener{rememberedFocus=tileKey(tile);if(!placeMovingTile(tile))openStockHome()}
-                    tile.setOnLongClickListener{openerDownTime=heldConfirmDownTime;showAppMenu(tile);true}
+                    tile.setOnLongClickListener{appMenu.openerDownTime=appMenu.heldConfirmDownTime;appMenu.show(tile);true}
                     NativeUi.touchClicks(tile);tile.isFocusableInTouchMode=true
                 }
                 return@forEach
@@ -308,7 +321,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             if(tile.banner==null)tile.icon=old?.icon?:try{launcherApps.icon(entry)}catch(_:Exception){null}
             tile.placeholderTint=launcherApps.tileTint(entry)
             tile.setOnClickListener{rememberedFocus=tileKey(tile);if(!placeMovingTile(tile)&&!launcherApps.launch(entry))NativeUi.notice(context,"应用已移除或无法打开")}
-            tile.setOnLongClickListener{openerDownTime=heldConfirmDownTime;showAppMenu(tile);true}
+            tile.setOnLongClickListener{appMenu.openerDownTime=appMenu.heldConfirmDownTime;appMenu.show(tile);true}
             NativeUi.touchClicks(tile);tile.isFocusableInTouchMode=true
         }
         updateTileLayout()
@@ -336,7 +349,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
 
     private fun focusEntry(entry:String){tiles.firstOrNull{tileKey(it)==entry}?.requestFocus()}
     private fun finishMove(){val entry=moving?:return;stopWobble();hideMoveHint();moving=null;refreshApps();focusEntry(entry);invalidate()}
-    private fun enterMove(entry:String){appMenu?.dismiss();moving=entry;refreshApps();focusEntry(entry);invalidate();startWobble();showMoveHint()}
+    private fun enterMove(entry:String){appMenu.dismiss();moving=entry;refreshApps();focusEntry(entry);invalidate();startWobble();showMoveHint()}
 
     private var wobbleAnimator:android.animation.ValueAnimator?=null
     private var wobbleTile:AppTileView?=null
@@ -382,8 +395,8 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             else->(from/cols+offset/cols).takeIf{it in 0 until rows}?.let{rowIndex(it,from%cols)}
         }?:return
         val all=launcherApps.orderedIds()
-        val targetId=folderRepresentative(tileKey(tiles[target]))
-        if(target==from||!launcherApps.move(folderRepresentative(entry),all.indexOf(targetId)-all.indexOf(folderRepresentative(entry))))return
+        val targetId=folderRepresentative(tileKey(tiles[target]),all)
+        if(target==from||!launcherApps.move(folderRepresentative(entry,all),all.indexOf(targetId)-all.indexOf(folderRepresentative(entry,all)),all))return
         refreshApps()
         focusEntry(entry)
         startWobble()
@@ -391,12 +404,13 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     }
     private fun placeMovingTile(tile:AppTileView):Boolean{
         val source=moving?:return false
-        launcherApps.swap(folderRepresentative(source),folderRepresentative(tileKey(tile)))
+        val all=launcherApps.orderedIds()
+        launcherApps.swap(folderRepresentative(source,all),folderRepresentative(tileKey(tile),all))
         finishMove()
         return true
     }
-    private fun folderRepresentative(id:String)=if(id.startsWith("folder:"))
-        launcherApps.orderedIds().firstOrNull{it in launcherApps.folderMembers(id.removePrefix("folder:"))}?:id else id
+    private fun folderRepresentative(id:String,order:List<String>?=null)=if(id.startsWith("folder:"))
+        (order?:launcherApps.orderedIds()).firstOrNull{it in launcherApps.folderMembers(id.removePrefix("folder:"))}?:id else id
 
     private fun moduleArtwork(id:String):android.graphics.drawable.Drawable?=AppModules.square(context,id)
 
@@ -558,204 +572,8 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         if(id==LauncherApps.STOCK_HOME_ID){openStockHome();return true}
         return launcherApps.installed().firstOrNull{it.component.flattenToString()==id}?.let(launcherApps::launch)==true
     }
-    private fun chooseFolder(id:String,anchor:AppTileView){
-        val names=launcherApps.folderNames()
-        fun assign(name:String){launcherApps.moveToFolder(id,name);refreshApps();focusFirst()}
-        val rows=android.widget.LinearLayout(context).apply{orientation=android.widget.LinearLayout.VERTICAL}
-        var picker:android.app.AlertDialog?=null
-        fun back(){picker?.dismiss();showAppMenu(anchor)}
-        fun addRow(title:String,glyph:String,action:()->Unit){
-            val row=android.widget.Button(context).apply{
-                text=title;isAllCaps=false;isSingleLine=true
-                gravity=Gravity.START or Gravity.CENTER_VERTICAL
-                setPadding((20*scale).toInt(),0,(20*scale).toInt(),0)
-                NativeUi.textSize(this,30f);setTextColor(GlassUi.colors(context))
-                background=GlassUi.surface(this,16f,border=false,faint=true,plain=true)
-                if(android.os.Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null}
-                val size=(32*scale).toInt()
-                val icon=AppIcons.Vector(glyph){currentTextColor}.apply{setBounds(0,0,size,size)}
-                setCompoundDrawablesRelative(icon,null,null,null);compoundDrawablePadding=(16*scale).toInt()
-                setOnClickListener{picker?.dismiss();action()};NativeUi.touchClicks(this)
-            }
-            rows.addView(row,android.widget.LinearLayout.LayoutParams(-1,(76*scale).toInt()).apply{bottomMargin=(8*scale).toInt()})
-        }
-        addRow("新建文件夹","plus"){
-            val field=android.widget.EditText(android.view.ContextThemeWrapper(context,R.style.FolderInput)).apply{
-                hint="文件夹名称";isSingleLine=true
-                val defaultName=if("文件夹" !in names)"文件夹" else
-                    generateSequence(2){it+1}.map{"文件夹 $it"}.first{it !in names}
-                setText(defaultName)
-                setSelectAllOnFocus(true)
-                if(android.os.Build.VERSION.SDK_INT>=29){
-                    textCursorDrawable=GradientDrawable().apply{
-                        setColor(if(darkHome)0xffa9d5ff.toInt() else 0xff245a94.toInt())
-                        setSize((4*scale).toInt().coerceAtLeast(2),-1)
-                    }
-                }
-                filters=arrayOf(android.text.InputFilter.LengthFilter(20))
-                NativeUi.textSize(this,32f);setTextColor(GlassUi.ink(context))
-                setHintTextColor(GlassUi.ink(context) and 0x75ffffff)
-                background=GlassUi.surface(this,14f,faint=true,plain=true)
-                setPadding((20*scale).toInt(),(14*scale).toInt(),(20*scale).toInt(),(14*scale).toInt())
-            }
-            val editor=NativeUi.show(android.app.AlertDialog.Builder(context).setTitle("新建文件夹").setView(field)
-                .setPositiveButton("创建",null).setNegativeButton("取消",null),widthDp=280,initialFocus=field)
-            editor.getButton(android.app.AlertDialog.BUTTON_POSITIVE)?.setOnClickListener{
-                val name=field.text.toString().trim()
-                if(name.isBlank())field.error="请输入文件夹名称"
-                else if(name in names)field.error="文件夹已存在"
-                else{editor.dismiss();assign(name)}
-            }
-        }
-        names.forEach{name->addRow(name,"folder"){assign(name)}}
-        val scroll=android.widget.ScrollView(context).apply{isVerticalScrollBarEnabled=false;addView(rows)}
-        picker=NativeUi.show(android.app.AlertDialog.Builder(context).setTitle("移到文件夹").setView(scroll)
-            .setNegativeButton("返回"){_,_->back()},widthDp=220,anchor=anchor,initialFocus=rows.getChildAt(0))
-        picker.setOnCancelListener{showAppMenu(anchor)}
-    }
 
-    private var menuChoices:List<String> = emptyList()
-    private fun showAppMenu(anchor:AppTileView){
-        if(appMenu?.isShowing==true||moving!=null)return
-        val id=tileKey(anchor)
-        val entry=anchor.tag as? LauncherApps.Entry
-        val bootAction=if(launcherApps.bootApp()==id)"取消开机时打开" else "开机时打开"
-        val folder=id.takeIf{it.startsWith("folder:")}?.removePrefix("folder:")
-        val choices=if(folder!=null)mutableListOf("移动","重命名文件夹","解散文件夹")
-            else mutableListOf("移动","移到文件夹","从主屏幕隐藏","应用信息",bootAction)
-        if(entry!=null){
-            val flags=try{context.packageManager.getApplicationInfo(entry.component.packageName,0).flags}catch(_:Exception){android.content.pm.ApplicationInfo.FLAG_SYSTEM}
-            if(flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM==0)choices.add("卸载应用")else if(flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP!=0)choices.add("卸载更新")
-        }
-        menuChoices=choices
-        val popup=android.widget.ListPopupWindow(context);appMenu=popup;menuEntry=id;moving=null;menuSelection=0
-        popup.anchorView=anchor
-        popup.isModal=false
-        val rowHeight=(76*scale).toInt()
-        val menuPadding=(10*scale).toInt()
-        val menuHeight=rowHeight*choices.size+2*menuPadding
-        val inset=(12*scale).toInt()
-        val frame=android.graphics.Rect().also{anchor.getWindowVisibleDisplayFrame(it)}
-        val location=IntArray(2).also{anchor.getLocationOnScreen(it)}
-        popup.width=(320*scale).toInt().coerceAtMost((frame.width()-2*inset).coerceAtLeast(1))
-        popup.height=menuHeight
-        val left=(location[0]+(anchor.width-popup.width)/2).coerceIn(frame.left+inset,(frame.right-popup.width-inset).coerceAtLeast(frame.left+inset))
-        val above=location[1]-menuHeight-inset
-        val below=location[1]+anchor.height+inset
-        val top=(if(above>=frame.top+inset)above else below).coerceIn(frame.top+inset,(frame.bottom-menuHeight-inset).coerceAtLeast(frame.top+inset))
-        popup.horizontalOffset=left-location[0]
-        popup.verticalOffset=top-location[1]-anchor.height
-        popup.setAnimationStyle(0)
-        GlassUi.invalidateScene();UiPerformance.section("menu.capture"){GlassUi.prepareScene(context)}
-        popup.setBackgroundDrawable(GlassUi.sceneGlass(anchor,20f,screenLeft=left,screenTop=top))
-        popup.setAdapter(object:android.widget.ArrayAdapter<String>(context,android.R.layout.simple_list_item_1,choices){
-            override fun getView(position:Int,convert:View?,parent:ViewGroup):View=android.widget.TextView(context).apply{
-                text=getItem(position)
-                NativeUi.textSize(this,30f)
-                gravity=Gravity.CENTER_VERTICAL
-                val horizontal=(28*scale).toInt()
-                layoutParams=android.widget.AbsListView.LayoutParams(-1,rowHeight)
-                setPadding(horizontal,0,horizontal,0)
-                isSingleLine=true
-                styleMenuRow(this,position,position==menuSelection)
-            }
-        })
-        popup.setOnItemClickListener{_,_,position,_->when(choices[position]){
-            "移动"->enterMove(id)
-            "重命名文件夹"->{popup.dismiss();if(folder!=null)renameFolder(folder)}
-            "解散文件夹"->{
-                popup.dismiss()
-                if(folder!=null)NativeUi.show(android.app.AlertDialog.Builder(context).setTitle("解散文件夹")
-                    .setMessage("文件夹内的应用会回到首页。")
-                    .setPositiveButton("解散"){_,_->launcherApps.dissolveFolder(folder);refreshApps();focusFirst()}
-                    .setNegativeButton("取消",null))
-            }
-            "移到文件夹"->{popup.dismiss();chooseFolder(id,anchor)}
-            "从主屏幕隐藏"->{popup.dismiss();launcherApps.setHidden(id,true);refreshApps();focusFirst()}
-            bootAction->{popup.dismiss();val on=launcherApps.toggleBootApp(id);NativeUi.notice(context,if(on)"开机时打开 ${anchor.title}" else "已取消开机打开")}
-            "应用信息"->{popup.dismiss();if(entry==null){showModuleDetails(anchor);return@setOnItemClickListener};try{context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+entry.component.packageName)))}catch(_:Exception){NativeUi.notice(context,"无法打开应用信息")}}
-            else->{if(entry==null)return@setOnItemClickListener;popup.dismiss();try{context.startActivity(Intent(Intent.ACTION_DELETE,Uri.parse("package:"+entry.component.packageName)))}catch(_:Exception){NativeUi.notice(context,"系统未提供卸载入口")}}
-        }}
-        popup.setOnDismissListener{appMenu=null;menuEntry=null;moving=null;UiPerformance.section("menu.refresh"){refreshApps()};focusEntry(id);invalidate()}
-        UiPerformance.section("menu.show"){popup.show()};popup.listView?.let{it.setPadding(menuPadding,menuPadding,menuPadding,menuPadding);it.divider=null;it.dividerHeight=0;it.setHeaderDividersEnabled(false);it.setFooterDividersEnabled(false);it.selector=ColorDrawable(Color.TRANSPARENT)};post{if(popup.isShowing)popup.setSelection(0)}
-        popup.listView?.setOnItemSelectedListener(object:android.widget.AdapterView.OnItemSelectedListener{
-            override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){
-                menuSelection=position
-                styleMenuRows(popup)
-            }
-            override fun onNothingSelected(parent:android.widget.AdapterView<*>?){ }
-        })
-        requestLayout();invalidate()
-    }
-    private fun renameFolder(name:String){
-        val field=android.widget.EditText(context).apply{
-            setText(name);selectAll();isSingleLine=true
-            filters=arrayOf(android.text.InputFilter.LengthFilter(20))
-            setTextColor(GlassUi.ink(context))
-        }
-        val dialog=NativeUi.show(android.app.AlertDialog.Builder(context).setTitle("重命名文件夹").setView(field)
-            .setPositiveButton("保存",null).setNegativeButton("取消",null),widthDp=280,initialFocus=field)
-        dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE)?.setOnClickListener{
-            val next=field.text.toString().trim()
-            if(next==name){dialog.dismiss();return@setOnClickListener}
-            if(!launcherApps.renameFolder(name,next)){field.error="请输入未使用的名称";return@setOnClickListener}
-            dialog.dismiss()
-            refreshApps()
-            focusEntry("folder:"+next)
-        }
-    }
-    private fun showModuleDetails(tile:AppTileView){
-        val description=when(tileKey(tile)){
-            "module:live"->"观看直播频道。"
-            "module:files"->"查看和管理手机发送到 One 的文件。"
-            LauncherApps.STOCK_HOME_ID->"打开电视自带的原厂桌面。"
-            else->"浏览网页和播放网页视频。"
-        }
-        NativeUi.show(android.app.AlertDialog.Builder(context).setTitle(tile.title).setMessage(description).setPositiveButton("关闭",null))
-    }
-    private fun menuItemBackground(selected:Boolean)=GradientDrawable().apply{
-        cornerRadius=10*scale
-        setColor(if(selected)0x339dc4ed else Color.TRANSPARENT)
-        if(selected)setStroke((2*scale).toInt().coerceAtLeast(1),0x759dc4ed)
-    }
-    private fun styleMenuRow(row:android.widget.TextView,position:Int,selected:Boolean){
-        row.isSelected=selected
-        row.background=menuItemBackground(selected)
-        row.setTypeface(null,if(selected)Typeface.BOLD else Typeface.NORMAL)
-        val destructive=menuChoices.getOrNull(position)?.startsWith("卸载")==true
-        row.setTextColor(if(destructive)0xffffa3ad.toInt() else 0xffedf2fa.toInt())
-    }
-    private fun styleMenuRows(popup:android.widget.ListPopupWindow){
-        val list=popup.listView?:return
-        for(i in 0 until list.childCount){
-            val row=list.getChildAt(i) as? android.widget.TextView?:continue
-            val position=list.firstVisiblePosition+i
-            styleMenuRow(row,position,position==menuSelection)
-        }
-    }
-    private fun selectMenuItem(popup:android.widget.ListPopupWindow,index:Int){
-        menuSelection=index
-        popup.setSelection(index)
-        styleMenuRows(popup)
-    }
-    private var openerDownTime:Long?=null
-    private var heldConfirmDownTime:Long?=null
-
-    fun consumeMenuConfirm(event:KeyEvent):Boolean {
-        if(event.keyCode!=KeyEvent.KEYCODE_DPAD_CENTER&&event.keyCode!=KeyEvent.KEYCODE_ENTER&&event.keyCode!=KeyEvent.KEYCODE_NUMPAD_ENTER)return false
-        if(event.action==KeyEvent.ACTION_UP){
-            heldConfirmDownTime=null
-            val consume=openerDownTime==event.downTime
-            openerDownTime=null
-            return consume
-        }
-        if(openerDownTime==event.downTime)return true
-        if(event.action==KeyEvent.ACTION_DOWN&&event.repeatCount==0){
-            openerDownTime=null
-            heldConfirmDownTime=event.downTime
-        }
-        return false
-    }
+    fun consumeMenuConfirm(event:KeyEvent):Boolean=appMenu.consumeMenuConfirm(event)
 
     fun handleKey(code:Int):Boolean{
         moving?.let{entry->
@@ -768,17 +586,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
                 else->return false
             };return true
         }
-        appMenu?.takeIf{it.isShowing}?.let{popup->
-            val selected=menuSelection;val entry=menuEntry?:return false
-            when(code){
-                KeyEvent.KEYCODE_BACK,KeyEvent.KEYCODE_MENU->popup.dismiss()
-                KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER->if(selected==0)enterMove(entry)else popup.performItemClick(selected)
-                KeyEvent.KEYCODE_DPAD_UP->selectMenuItem(popup,(menuSelection-1).coerceAtLeast(0))
-                KeyEvent.KEYCODE_DPAD_DOWN->selectMenuItem(popup,(menuSelection+1).coerceAtMost(menuChoices.lastIndex))
-                KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT->if(selected==0)enterMove(entry)
-                else->return false
-            };return true
-        }
+        if(appMenu.handleKey(code))return true
         if(code==KeyEvent.KEYCODE_BACK&&(scrollY>1f||(findFocus() as? AppTileView)?.let{tiles.indexOf(it)>=cols}==true)){
             val focused=findFocus() as? AppTileView
             val column=focused?.let{tiles.indexOf(it)%cols}?:0
@@ -786,7 +594,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             animateScrollTo(0f)
             return true
         }
-        if(code==KeyEvent.KEYCODE_MENU){val tile=findFocus() as? AppTileView;if(tile!=null){showAppMenu(tile);return true}}
+        if(code==KeyEvent.KEYCODE_MENU){val tile=findFocus() as? AppTileView;if(tile!=null){appMenu.show(tile);return true}}
         return false
     }
     private var touchDownX=0f;private var touchDownY=0f;private var touchStartScroll=0f
@@ -849,8 +657,8 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         }
         return super.onGenericMotionEvent(ev)
     }
-    override fun onVisibilityChanged(changedView:View,visibility:Int){super.onVisibilityChanged(changedView,visibility);if(visibility!=View.VISIBLE){appMenu?.dismiss();moving=null;moveHint.animate().cancel();moveHint.visibility=View.GONE}}
-    override fun onDetachedFromWindow(){appMenu?.dismiss();stopWobble();cancelSpring();mainHandler.removeCallbacksAndMessages(null);super.onDetachedFromWindow()}
+    override fun onVisibilityChanged(changedView:View,visibility:Int){super.onVisibilityChanged(changedView,visibility);if(visibility!=View.VISIBLE){appMenu.dismiss();moving=null;moveHint.animate().cancel();moveHint.visibility=View.GONE}}
+    override fun onDetachedFromWindow(){appMenu.dismiss();stopWobble();cancelSpring();mainHandler.removeCallbacksAndMessages(null);super.onDetachedFromWindow()}
 
     override fun onMeasure(width:Int,height:Int){
         val w=MeasureSpec.getSize(width);val h=MeasureSpec.getSize(height);setMeasuredDimension(w,h)
@@ -965,7 +773,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         p.color = 0xb3000000.toInt()
         p.maskFilter = android.graphics.BlurMaskFilter(blur, android.graphics.BlurMaskFilter.Blur.NORMAL)
         bc.drawPath(GlassUi.SmoothCorners.smoothRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), h * 0.225f, h * 0.225f), p)
-        return BakedShadow(bitmap, ext).also { bakedShadow = it; bakedShadowW = w; bakedShadowH = h }
+        return BakedShadow(bitmap, ext).also { bakedShadow?.bitmap?.takeIf{!it.isRecycled}?.recycle(); bakedShadow = it; bakedShadowW = w; bakedShadowH = h }
     }
     override fun dispatchDraw(canvas: Canvas) {
         super.dispatchDraw(canvas)
@@ -973,15 +781,21 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         val focused = focusedTile
         selectedTitleBounds.setEmpty()
         if (focused != null && moving == null && scrollTarget > 0f) {
-            val label=fullTileLabel(focused)
-            selectedTitlePaint.color=ink
-            selectedTitlePaint.setShadowLayer(9f*scale,0f,3f*scale,if(darkHome)0x99000000.toInt() else 0x70ffffff)
-            val cx = appRail.left + focused.left + focused.width / 2f
-            val bottom = railY + focused.top + focused.height
-            val left=(cx-label.width/2f).coerceIn(24f*scale,(width-label.width-24f*scale).coerceAtLeast(24f*scale))
-            val top=(bottom+12f*scale).coerceAtMost(height-label.height-8f*scale)
-            selectedTitleBounds.set(left,top,left+label.width,top+label.height)
-            val save=canvas.save();canvas.translate(left,top);label.draw(canvas);canvas.restoreToCount(save)
+            val focusedIndex = tiles.indexOf(focused)
+            val fade = liftFrac * (if (focusedIndex in 0 until cols) 1f else gridAlpha())
+            val fadeAlpha = (fade * 255).toInt().coerceIn(0, 255)
+            if (fadeAlpha > 2) {
+                val label=fullTileLabel(focused)
+                selectedTitlePaint.color=ink
+                selectedTitlePaint.alpha=fadeAlpha
+                selectedTitlePaint.setShadowLayer(9f*scale,0f,3f*scale,if(darkHome)Color.argb((0x99*fade).toInt(),0,0,0) else Color.argb((0x70*fade).toInt(),255,255,255))
+                val cx = appRail.left + focused.left + focused.width / 2f
+                val bottom = railY + focused.top + focused.height
+                val left=(cx-label.width/2f).coerceIn(24f*scale,(width-label.width-24f*scale).coerceAtLeast(24f*scale))
+                val top=bottom+12f*scale
+                selectedTitleBounds.set(left,top,left+label.width,top+label.height)
+                val save=canvas.save();canvas.translate(left,top);label.draw(canvas);canvas.restoreToCount(save)
+            }
         }
 
         val lift = liftFrac
@@ -1049,25 +863,10 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     }
     fun update(base:String,pin:String,invite:String,count:Int,message:String){
         val minute=System.currentTimeMillis()/60000
-        val connectionChanged=address!=base||code!=pin||payload!=invite||connected!=count
-        val changed=connectionChanged||lastClockMinute!=minute
+        val minuteChanged=lastClockMinute!=minute
         lastClockMinute=minute
-        address=base;code=pin;connected=count;controlButton.contentDescription="控制中心"+(if(count>0)"，手机已连接" else "");notice=message
-        if(payload!=invite){
-            payload=invite;qr=null
-            if(invite.isNotEmpty())AppThreads.onIo{
-                val image=try{
-                    val matrix=QRCodeWriter().encode(invite,BarcodeFormat.QR_CODE,480,480,mapOf(EncodeHintType.MARGIN to 2))
-                    val pixels=IntArray(480*480){i->if(matrix[i%480,i/480])0xff191727.toInt()else Color.WHITE}
-                    Bitmap.createBitmap(pixels,480,480,Bitmap.Config.ARGB_8888)
-                }catch(_:WriterException){null}
-                mainHandler.post{
-                    if(payload==invite){qr=image;connectionImage.get()?.setImageBitmap(image);invalidate()}
-                }
-            }
-        }
-        if(connectionChanged){connectionLabel.get()?.text=connectionLine();connectionImage.get()?.setImageBitmap(qr);connectionDot.get()?.background=GradientDrawable().apply{shape=GradientDrawable.OVAL;setColor(if(connected>0)0xff4caf50.toInt() else Color.WHITE)}}
-        if(changed)invalidate()
+        val connectionChanged=connection.update(base,pin,invite,count,message)
+        if(connectionChanged||minuteChanged)invalidate()
     }
     fun focusFirst(){
         val entry=rememberedFocus
@@ -1149,24 +948,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             c.restore()
         }
     }
-    private fun connectionSummary()=listOf(if(connected>0)"手机已连接" else "扫码连接",address.ifEmpty{"请先联网"},if(code.isNotEmpty())"配对码  $code" else "").filter{it.isNotEmpty()}.joinToString("\n")
-    private fun connectionLine()=listOf(address.ifEmpty{"请先联网"},if(code.isNotEmpty())"配对码  $code" else "").filter{it.isNotEmpty()}.joinToString("    ")
-    fun qrBitmap()=qr
-    fun connectionSummaryText()=connectionSummary()
-    fun connectionLineText()=connectionLine()
-    fun connectionCount()=connected
-    fun showConnection(refresh:Runnable){
-        val body=android.widget.LinearLayout(context).apply{orientation=android.widget.LinearLayout.VERTICAL;gravity=Gravity.CENTER_HORIZONTAL}
-        val titleRow=android.widget.LinearLayout(context).apply{orientation=android.widget.LinearLayout.HORIZONTAL;gravity=Gravity.CENTER_VERTICAL}
-        val dot=View(context).apply{background=GradientDrawable().apply{shape=GradientDrawable.OVAL;setColor(if(connected>0)0xff4caf50.toInt() else Color.WHITE)}}
-        titleRow.addView(dot,android.widget.LinearLayout.LayoutParams((12*scale).toInt(),(12*scale).toInt()))
-        titleRow.addView(android.widget.TextView(context).apply{text="手机连接";NativeUi.textSize(this,30f);setTypeface(null,Typeface.BOLD);setTextColor(GlassUi.ink(context))},android.widget.LinearLayout.LayoutParams(-2,-2).apply{leftMargin=(10*scale).toInt()})
-        body.addView(titleRow,android.widget.LinearLayout.LayoutParams(-2,-2).apply{bottomMargin=(14*scale).toInt()});connectionDot=java.lang.ref.WeakReference(dot)
-        val size=minOf((320*scale).toInt(),(resources.displayMetrics.heightPixels*.36f).toInt()).coerceAtLeast(1)
-        val image=android.widget.ImageView(context).apply{setImageBitmap(qr);scaleType=android.widget.ImageView.ScaleType.FIT_CENTER;background=GradientDrawable().apply{setColor(Color.WHITE);cornerRadius=16*scale}}
-        body.addView(image,android.widget.LinearLayout.LayoutParams(size,size))
-        val label=android.widget.TextView(context).apply{text=connectionLine();gravity=Gravity.CENTER;NativeUi.textSize(this,28f);setTextColor(GlassUi.ink(context));setPadding(0,(18*scale).toInt(),0,0);maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END}
-        body.addView(label,android.widget.LinearLayout.LayoutParams(-1,-2));connectionLabel=java.lang.ref.WeakReference(label);connectionImage=java.lang.ref.WeakReference(image)
-        NativeUi.show(android.app.AlertDialog.Builder(context).setView(body).setPositiveButton("刷新"){_,_->refresh.run();showConnection(refresh)}.setNegativeButton("关闭",null),widthDp=280,anchor=controlButton)
-    }
+    fun qrBitmap()=connection.qrBitmap()
+    fun connectionLineText()=connection.lineText()
+    fun connectionCount()=connection.count()
 }

@@ -58,11 +58,6 @@ internal class BrowserVideoSniffer {
         entries.values.count { it.seenAtMs >= cutoff }
     }
 
-    fun hasHighConfidence(nowMs: Long): Boolean = synchronized(entries) {
-        val cutoff = nowMs - ENTRY_TTL_MS
-        entries.values.any { it.seenAtMs >= cutoff && it.kind.priority <= StreamKind.DIRECT_VIDEO.priority }
-    }
-
     fun mimeHint(url: String): String? {
         val kind = synchronized(entries) { entries[url]?.kind } ?: classify(url) ?: return null
         return when (kind) {

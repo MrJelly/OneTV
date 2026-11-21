@@ -27,7 +27,6 @@ class OneApplication : MultiDexApplication() {
 
     override fun onCreate() {
         super.onCreate()
-        UiPerformance.start(this)
         installCrashRecorder(this)
     }
 

@@ -68,8 +68,7 @@ class BrowserActivity : Activity() {
     private lateinit var historyButton: ToolbarButton
 
     private val sniffer = BrowserVideoSniffer()
-    private val bookmarks by lazy { BrowserBookmarks(this) }
-    private val browserHistory by lazy { BrowserHistory(this) }
+    private val stores by lazy { BrowserStores(this) }
 
     private var editingAddress = false
     private var toolsCollapsed = false
@@ -97,8 +96,8 @@ class BrowserActivity : Activity() {
 
     fun remotePlaybackState(): String {
         val state = runCatching { org.json.JSONObject(if (::videoController.isInitialized) videoController.playbackState else "{}") }.getOrElse { org.json.JSONObject() }
-        return state.put("desktop", desktop).put("pageOpen", webInstance != null && ::homepage.isInitialized && homepage.visibility != View.VISIBLE).put("settings", BrowserSettings.snapshot(this))
-            .put("history", browserHistory.toJson())
+        return state.put("desktop", desktop).put("pageOpen", webInstance != null && ::homepage.isInitialized && homepage.visibility != View.VISIBLE).put("settings", stores.settings.snapshot())
+            .put("history", stores.history.toJson())
             .put("discovery", org.json.JSONObject(if (::pageTools.isInitialized) pageTools.remoteSnapshot else "{}")).toString()
     }
 
@@ -113,7 +112,7 @@ class BrowserActivity : Activity() {
     private fun dp(n: Int) = (resources.displayMetrics.density * n).toInt()
 
     private fun pageScrolled(y: Int, oldY: Int) {
-        if (videoController.customView != null || !::homepage.isInitialized) return
+        if (videoController.mode == BrowserVideoController.Mode.CUSTOM || !::homepage.isInitialized) return
         if (y >= dp(24)) {
             scrolledAwayFromTop = true
             if (y > oldY) setToolsCollapsed(true)
@@ -124,7 +123,7 @@ class BrowserActivity : Activity() {
     }
 
     private fun setToolsCollapsed(collapsed: Boolean) {
-        if (toolsCollapsed == collapsed || videoController.customView != null) return
+        if (toolsCollapsed == collapsed || videoController.mode == BrowserVideoController.Mode.CUSTOM) return
         toolsCollapsed = collapsed
         toolbar.visibility = if (collapsed) View.GONE else View.VISIBLE
         updateInsets()
@@ -132,7 +131,7 @@ class BrowserActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
-        observedAutoFullscreen = BrowserSettings.autoFullscreen(this)
+        observedAutoFullscreen = stores.settings.autoFullscreen()
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
         if (Build.VERSION.SDK_INT >= 28) {
             window.attributes = window.attributes.apply {
@@ -152,7 +151,7 @@ class BrowserActivity : Activity() {
             override val toolbar: View get() = this@BrowserActivity.toolbar
             override val homepage: ScrollView get() = this@BrowserActivity.homepage
             override val address: EditText get() = this@BrowserActivity.address
-            override val customVideoView: View? get() = videoController.customView
+            override val hasCustomVideo: Boolean get() = videoController.mode == BrowserVideoController.Mode.CUSTOM
             override val videoBarView: View? get() = videoController.videoBarView
             override val videoActive: Boolean get() = videoController.isVideoActive
             override fun onVideoTap(x: Float, y: Float) = videoController.handleTouchDown(x, y)
@@ -277,7 +276,7 @@ class BrowserActivity : Activity() {
             }
         }.apply {
             setSingleLine()
-            hint = "网址或关键词 · ${BrowserNavigation.engines[BrowserSettings.engine(this@BrowserActivity)]}"
+            hint = "网址或关键词 · ${BrowserNavigation.engines[stores.settings.engine()]}"
             textSize = BrowserChromeStyle.TEXT_SP
             minWidth = 0
             minimumWidth = 0
@@ -466,7 +465,7 @@ class BrowserActivity : Activity() {
                     address.setText(url)
                 }
                 if (view === webInstance && url.startsWith("http")) {
-                    if (homepage.visibility != View.VISIBLE) browserHistory.record(url, view.title.orEmpty())
+                    if (homepage.visibility != View.VISIBLE) stores.history.record(url, view.title.orEmpty())
                     view.evaluateJavascript(BrowserVideoSniffer.INJECT_SNIFF_JS, null)
                     view.evaluateJavascript(VIEWPORT_ZOOM_JS, null)
                     if (view.url == url) schedulePageScale()
@@ -577,7 +576,7 @@ class BrowserActivity : Activity() {
             uri.scheme in listOf("http", "https") && !uri.host.isNullOrEmpty()
         bookmarkButton.isEnabled = usable
         bookmarkButton.alpha = if (usable) 1f else 0.35f
-        bookmarkButton.isSelected = usable && bookmarks.contains(currentPageUrl)
+        bookmarkButton.isSelected = usable && stores.bookmarks.contains(currentPageUrl)
         bookmarkButton.isActivated = bookmarkButton.isSelected
         bookmarkButton.contentDescription = if (bookmarkButton.isSelected) "取消收藏网页" else "收藏网页"
         bookmarkButton.invalidate()
@@ -586,7 +585,7 @@ class BrowserActivity : Activity() {
     private fun toggleBookmark() {
         if (!bookmarkButton.isEnabled || homepage.visibility == View.VISIBLE) return
         val title = web.title.orEmpty().ifBlank { Uri.parse(currentPageUrl).host.orEmpty() }
-        val result = bookmarks.toggle(currentPageUrl, title)
+        val result = stores.bookmarks.toggle(currentPageUrl, title)
         updateBookmarkButton()
         val message = when (result) {
             BrowserBookmarks.Result.ADDED -> "已收藏网页"
@@ -600,15 +599,15 @@ class BrowserActivity : Activity() {
     private fun showHistory() {
         if (BrowserDropdown.consumeOutsideDismiss(historyButton)) return
         if (BrowserDropdown.isShowingFor(historyButton)) { BrowserDropdown.dismiss(); return }
-        val entries = browserHistory.all()
+        val entries = stores.history.all()
         if (entries.isEmpty()) { NativeUi.notice(this, "暂无历史记录"); return }
         val rows = entries.take(50).map { entry ->
             BrowserDropdown.Row(
                 entry.title.ifBlank { entry.url },
                 actionLabel = "×",
-                onAction = { browserHistory.remove(entry.url); BrowserDropdown.dismiss(); showHistory() }
+                onAction = { stores.history.remove(entry.url); BrowserDropdown.dismiss(); showHistory() }
             ) { navigate(entry.url) }
-        } + BrowserDropdown.Row("清空全部", footer = true) { browserHistory.clear(); NativeUi.notice(this, "已清空历史记录") }
+        } + BrowserDropdown.Row("清空全部", footer = true) { stores.history.clear(); NativeUi.notice(this, "已清空历史记录") }
         BrowserDropdown.show(this, historyButton, 176, rows)
     }
 
@@ -619,7 +618,7 @@ class BrowserActivity : Activity() {
         bookmarkLayoutWidth = available
         val columns = (available / dp(216)).coerceAtLeast(1)
         val cardWidth = minOf(dp(248), (available - dp(12) * (columns - 1)) / columns)
-        bookmarks.all().chunked(columns).forEach { items ->
+        stores.bookmarks.all().chunked(columns).forEach { items ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.TOP
@@ -673,7 +672,7 @@ class BrowserActivity : Activity() {
                     setTextColor(GlassUi.ink(this@BrowserActivity))
                     background = GlassUi.surface(this, GlassUi.CIRCLE_RADIUS, faint = true)
                     setOnClickListener {
-                        bookmarks.remove(item.url)
+                        stores.bookmarks.remove(item.url)
                         renderBookmarks()
                         NativeUi.notice(this@BrowserActivity, "已删除收藏")
                     }
@@ -751,8 +750,8 @@ class BrowserActivity : Activity() {
     }
 
     fun onBrowserSettingsChanged() {
-        if (::address.isInitialized) address.hint = "网址或关键词 · ${BrowserNavigation.engines[BrowserSettings.engine(this)]}"
-        val enabled = BrowserSettings.autoFullscreen(this)
+        if (::address.isInitialized) address.hint = "网址或关键词 · ${BrowserNavigation.engines[stores.settings.engine()]}"
+        val enabled = stores.settings.autoFullscreen()
         if (enabled == observedAutoFullscreen) return
         observedAutoFullscreen = enabled
         cancelAutoFullscreen()
@@ -763,12 +762,12 @@ class BrowserActivity : Activity() {
     private fun cancelAutoFullscreen() { autoFullscreenTask?.let(root::removeCallbacks); autoFullscreenTask = null }
 
     private fun scheduleAutoFullscreen(attempt: Int = 0) {
-        if (!BrowserSettings.autoFullscreen(this) || autoFullscreenEpoch == pageEpoch || webInstance == null ||
+        if (!stores.settings.autoFullscreen() || autoFullscreenEpoch == pageEpoch || webInstance == null ||
             active !== this || homepage.visibility == View.VISIBLE || videoController.isBusyOrActive) return
         cancelAutoFullscreen()
         val epoch = pageEpoch
         autoFullscreenTask = Runnable {
-            if (epoch != pageEpoch || active !== this || webInstance == null || !BrowserSettings.autoFullscreen(this) || videoController.isBusyOrActive) return@Runnable
+            if (epoch != pageEpoch || active !== this || webInstance == null || !stores.settings.autoFullscreen() || videoController.isBusyOrActive) return@Runnable
             pageTools.autoVideoProbe { found ->
                 if (epoch != pageEpoch) return@autoVideoProbe
                 if (found) autoFullscreenEpoch = epoch else scheduleAutoFullscreen((attempt + 1).coerceAtMost(5))
@@ -844,7 +843,7 @@ class BrowserActivity : Activity() {
         }
 
     private fun navigate(value: String) {
-        val candidate = BrowserNavigation.resolve(value, BrowserSettings.engine(this))
+        val candidate = BrowserNavigation.resolve(value, stores.settings.engine())
         if (candidate == null) { NativeUi.notice(this, "请输入有效的网址或搜索关键词"); return }
         val uri = Uri.parse(candidate)
         if (uri.scheme !in listOf("http", "https") || uri.host.isNullOrEmpty()) {
@@ -903,7 +902,6 @@ class BrowserActivity : Activity() {
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            BrowserDropdown.onWindowDown()
             videoController.handleTouchDown(event.rawX, event.rawY)
             swallowVideoTouch = false
             if (videoController.isVideoActive) {
@@ -913,7 +911,7 @@ class BrowserActivity : Activity() {
                 if (!overBar) swallowVideoTouch = true
             }
             swipeStartY = event.y
-            swipeOnPage = !videoController.isVideoActive && videoController.customView == null && (toolsCollapsed || event.y > toolbar.bottom)
+            swipeOnPage = !videoController.isVideoActive && (toolsCollapsed || event.y > toolbar.bottom)
             if (swallowVideoTouch) return true
         } else if (swallowVideoTouch) {
             if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) swallowVideoTouch = false
@@ -930,7 +928,7 @@ class BrowserActivity : Activity() {
         return super.dispatchTouchEvent(event)
     }
 
-    override fun dispatchKeyEvent(event:KeyEvent):Boolean = UiPerformance.key(event){dispatchBrowserKey(event)}
+    override fun dispatchKeyEvent(event:KeyEvent):Boolean = dispatchBrowserKey(event)
     private fun dispatchBrowserKey(event: KeyEvent): Boolean {
         if (videoController.handleKeyEvent(event)) return true
         if(event.keyCode in DPAD_KEYS&&address.hasFocus())return super.dispatchKeyEvent(event)
@@ -1027,8 +1025,8 @@ class BrowserActivity : Activity() {
             }
             "browserPageTools" -> { pageTools.menu(toolsButton); return true }
             "browserPlay" -> { playDetectedVideo {}; return true }
-            "browserHistoryDelete" -> { browserHistory.remove(value); return true }
-            "browserHistoryClear" -> { browserHistory.clear(); return true }
+            "browserHistoryDelete" -> { stores.history.remove(value); return true }
+            "browserHistoryClear" -> { stores.history.clear(); return true }
             "browserPlaylist" -> { pageTools.playlist(toolsButton); return true }
             "browserFit" -> { fitPageWidth(); return true }
             "browserOriginal" -> { originalPageScale(); return true }
@@ -1041,7 +1039,7 @@ class BrowserActivity : Activity() {
                 return true
             }
             "browserNavigate" -> {
-                val url = BrowserNavigation.resolve(value, BrowserSettings.engine(this)) ?: return false
+                val url = BrowserNavigation.resolve(value, stores.settings.engine()) ?: return false
                 navigate(url)
                 return true
             }
@@ -1093,7 +1091,7 @@ class BrowserActivity : Activity() {
             val dx = parts[0].toFloatOrNull() ?: return false
             val dy = parts[1].toFloatOrNull() ?: return false
             if (!dx.isFinite() || !dy.isFinite()) return false
-            if (videoController.customView != null) return false
+            if (videoController.mode == BrowserVideoController.Mode.CUSTOM) return false
             if (command == "touchMove") {
                 if (!GlobalPointer.enabled) {
                     cursor.visibility = View.VISIBLE
@@ -1108,7 +1106,7 @@ class BrowserActivity : Activity() {
             return true
         }
         if (command == "touchClick") {
-            if (videoController.customView != null) {
+            if (videoController.mode == BrowserVideoController.Mode.CUSTOM) {
                 val bar = videoController.videoBarView
                 if (bar != null && bar.visibility == View.VISIBLE && cursor.isOver(bar)) {
                     cursor.click()

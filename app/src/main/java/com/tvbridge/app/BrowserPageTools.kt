@@ -47,6 +47,7 @@ internal class BrowserPageTools(private val activity: Activity, private val host
     fun dismiss() { request++; BrowserDropdown.dismiss(); dialog?.dismiss(); dialog = null; clearRemote() }
 
     fun menu(anchor: android.view.View) {
+        val stores = BrowserStores(activity)
         if (BrowserDropdown.consumeOutsideDismiss(anchor)) return
         if (BrowserDropdown.isShowingFor(anchor)) { BrowserDropdown.dismiss(); return }
         dismiss()
@@ -55,11 +56,11 @@ internal class BrowserPageTools(private val activity: Activity, private val host
         rows += pageRow("适配屏幕宽度") { host.fitPage() }
         rows += pageRow("原始比例") { host.originalScale() }
         rows += BrowserDropdown.Row("桌面网页", value = if (host.desktopMode()) "开" else "关") { host.setDesktopMode(!host.desktopMode()) }
-        rows += BrowserDropdown.Row("自动全屏", value = if (BrowserSettings.autoFullscreen(activity)) "开" else "关") { BrowserSettings.setAutoFullscreen(activity, !BrowserSettings.autoFullscreen(activity)); host.settingsChanged() }
-        rows += BrowserDropdown.Row("搜索引擎", value = BrowserNavigation.engines[BrowserSettings.engine(activity)] + " ›") {
-            val current = BrowserSettings.engine(activity)
+        rows += BrowserDropdown.Row("自动全屏", value = if (stores.settings.autoFullscreen()) "开" else "关") { stores.settings.setAutoFullscreen(!stores.settings.autoFullscreen()); host.settingsChanged() }
+        rows += BrowserDropdown.Row("搜索引擎", value = BrowserNavigation.engines[stores.settings.engine()] + " ›") {
+            val current = stores.settings.engine()
             val choices = BrowserNavigation.engines.map { (key, name) ->
-                BrowserDropdown.Row(name, checked = key == current) { BrowserSettings.setEngine(activity, key); host.settingsChanged() }
+                BrowserDropdown.Row(name, checked = key == current) { stores.settings.setEngine(key); host.settingsChanged() }
             }
             BrowserDropdown.show(activity, anchor, 176, choices)
         }

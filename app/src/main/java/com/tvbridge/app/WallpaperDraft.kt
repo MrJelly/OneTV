@@ -22,7 +22,6 @@ internal class WallpaperDraft(private val owner: Context) {
     init {
         OnlineWallpapers.copyMetadata(context,owner)
         context.getSharedPreferences("appearance", 0).edit()
-            .putString("custom_theme", HomeAppearance.customTheme(owner))
             .putInt("bing_idx", HomeAppearance.bingIdx(owner)).apply()
     }
     private fun source(mode: String): Context = when (mode) {

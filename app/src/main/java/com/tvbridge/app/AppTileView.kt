@@ -87,15 +87,17 @@ class AppTileView(context:Context):View(context) {
             applyFocusFrac()
             return
         }
-        focusAnimator = android.animation.ValueAnimator.ofFloat(focusFrac, target).apply {
-            duration = if (focused) 180L else 140L
-            interpolator = android.view.animation.DecelerateInterpolator()
-            addUpdateListener {
+        val animator = focusAnimator ?: android.animation.ValueAnimator().also { created ->
+            created.interpolator = android.view.animation.DecelerateInterpolator()
+            created.addUpdateListener {
                 focusFrac = it.animatedValue as Float
                 applyFocusFrac()
             }
-            start()
+            focusAnimator = created
         }
+        animator.duration = if (focused) 180L else 140L
+        animator.setFloatValues(focusFrac, target)
+        animator.start()
     }
 
     private fun applyFocusFrac() {

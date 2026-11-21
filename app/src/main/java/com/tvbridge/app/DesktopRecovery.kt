@@ -49,11 +49,6 @@ object DesktopRecovery {
         if(inFront)leftForAnApp=false
         startupPrefs(context).edit().putBoolean(HOME_FRONT,inFront).putLong(HOME_FRONT_AT,SystemClock.elapsedRealtime()).putLong(HOME_FRONT_BOOT,bootStamp()).putString(HOME_FRONT_BOOT_ID,BOOT_ID).apply()
     }
-    fun homeInFrontThisBoot(context:Context):Boolean?{
-        val prefs=startupPrefs(context);val at=prefs.getLong(HOME_FRONT_AT,-1L)
-        if(!thisBoot(prefs,at,HOME_FRONT_BOOT,HOME_FRONT_BOOT_ID))return null
-        return prefs.getBoolean(HOME_FRONT,false)
-    }
     fun homeLeftAt(context:Context):Long?{
         val prefs=startupPrefs(context);val at=prefs.getLong(HOME_FRONT_AT,-1L)
         if(!thisBoot(prefs,at,HOME_FRONT_BOOT,HOME_FRONT_BOOT_ID)||prefs.getBoolean(HOME_FRONT,false))return null
@@ -110,7 +105,7 @@ object DesktopRecovery {
         return runCatching{context.startActivity(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra("show_home",true));true}.getOrDefault(false)
     }
     fun noteHomeKey(context:Context){
-        startupPrefs(context).edit().putLong(HOME_KEY_AT,SystemClock.elapsedRealtime()).putLong(HOME_KEY_BOOT,bootStamp()).putString(HOME_KEY_BOOT_ID,BOOT_ID).commit()
+        startupPrefs(context).edit().putLong(HOME_KEY_AT,SystemClock.elapsedRealtime()).putLong(HOME_KEY_BOOT,bootStamp()).putString(HOME_KEY_BOOT_ID,BOOT_ID).apply()
     }
     fun homeKeyWithin(context:Context,ms:Long):Boolean{
         val prefs=startupPrefs(context);val at=prefs.getLong(HOME_KEY_AT,-1L)
@@ -130,7 +125,7 @@ object DesktopRecovery {
         val me=ComponentName(context,DesktopRevivalService::class.java)
         return Settings.Secure.getString(context.contentResolver,"enabled_notification_listeners").orEmpty().split(':').any{ComponentName.unflattenFromString(it)==me}
     }
-    private fun listenerListed(context:Context)=if(DesktopState.hasDataFor(context))DesktopState.listenerListed else listenerEnabled(context)
+    private fun listenerListed(context:Context)=listenerEnabled(context)
     @Synchronized fun ensure(context:Context){
         if(!DesktopTakeover.wanted(context))return
         val now=SystemClock.elapsedRealtime();val app=context.applicationContext

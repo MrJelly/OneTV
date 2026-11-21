@@ -15,6 +15,10 @@ object TakeoverPolicy {
         val bootStockMs: Int
     )
 
+    fun configured(context: Context): Boolean =
+        DesktopTakeover.defaultHome(context)?.packageName == context.packageName ||
+            (DesktopTakeover.wanted(context) && (DesktopGuardService.connected || (DesktopTakeover.enabled(context) && DesktopPolicy.stockHomeBackgroundAllowed(context))))
+
     fun resolve(context: Context): Policy {
         DeviceProfile.ensure(context)
         val rules = DeviceAdapters.profile(context)

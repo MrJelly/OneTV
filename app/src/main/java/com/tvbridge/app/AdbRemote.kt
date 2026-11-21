@@ -216,10 +216,6 @@ class AdbRemote(context:Context){
         if(!enabled()||!ready)return false
         return try{val output=shell(command,port(),false);check(!output.contains("Exception",true)&&!output.contains("Permission denied",true)&&!output.contains("Error:",true));true}catch(e:Exception){ready=false;message="系统输入失败，请重新连接";false}
     }
-    fun setHome(component:ComponentName):Boolean {
-        val target=component.flattenToString();if(!target.matches(Regex("[A-Za-z0-9_.$]+/[A-Za-z0-9_.$]+"))||!enabled())return false
-        return try{shell("cmd package set-home-activity "+target,port(),false);val result=shell("cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME",port(),false);result.lineSequence().mapNotNull{ComponentName.unflattenFromString(it.trim())}.any{it==component}}catch(e:Exception){message="桌面设置失败：${e.message.orEmpty()}";false}
-    }
     fun installApk(file:File):Boolean {
         if(!enabled()||!ready)return false
         return try{

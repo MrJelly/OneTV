@@ -20,13 +20,14 @@ object AppIcons {
         override fun getIntrinsicWidth()=24
         override fun getIntrinsicHeight()=24
         private val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.STROKE;strokeWidth=1.7f;strokeCap=Paint.Cap.ROUND;strokeJoin=Paint.Join.ROUND}
+        private val work=Path()
         override fun isStateful()=true
         override fun onStateChange(state:IntArray):Boolean{invalidateSelf();return true}
         override fun draw(c:Canvas){c.save();c.translate(bounds.left.toFloat(),bounds.top.toFloat());c.scale(bounds.width()/24f,bounds.height()/24f);
             paint.color=tint();paint.strokeWidth=when(key){"globe"->1.8f;"tv"->1.85f;"folder"->2f;else->1.7f}
-            fun line(vararg xy:Float){val p=Path();p.moveTo(xy[0],xy[1]);for(i in 2 until xy.size step 2)p.lineTo(xy[i],xy[i+1]);c.drawPath(p,paint)}
+            fun line(vararg xy:Float){work.reset();work.moveTo(xy[0],xy[1]);for(i in 2 until xy.size step 2)work.lineTo(xy[i],xy[i+1]);c.drawPath(work,paint)}
             fun box(l:Float,t:Float,r:Float,b:Float,rad:Float=3f){c.drawPath(roundedRectPath(l,t,r,b,rad),paint)}
-            fun path(x:Float,y:Float,a:Float,b:Float,d:Float,e:Float,f:Float,g:Float){val p=Path();p.moveTo(x,y);p.cubicTo(a,b,d,e,f,g);c.drawPath(p,paint)}
+            fun path(x:Float,y:Float,a:Float,b:Float,d:Float,e:Float,f:Float,g:Float){work.reset();work.moveTo(x,y);work.cubicTo(a,b,d,e,f,g);c.drawPath(work,paint)}
             when(key){
                 "move"->{line(12f,3f,12f,21f);line(3f,12f,21f,12f);line(9f,6f,12f,3f,15f,6f);line(9f,18f,12f,21f,15f,18f);line(6f,9f,3f,12f,6f,15f);line(18f,9f,21f,12f,18f,15f)}
                 "hidden"->{path(3f,12f,8f,5f,16f,5f,21f,12f);path(3f,12f,8f,19f,16f,19f,21f,12f);line(4f,4f,20f,20f)}
@@ -60,16 +61,16 @@ object AppIcons {
                 "sun"->{c.drawCircle(12f,12f,4f,paint);for(i in 0..7){val a=Math.toRadians(i*45.0);line((12+7*kotlin.math.cos(a)).toFloat(),(12+7*kotlin.math.sin(a)).toFloat(),(12+9*kotlin.math.cos(a)).toFloat(),(12+9*kotlin.math.sin(a)).toFloat())}}
 
                 "globe"->{c.drawCircle(12f,12f,9f,paint);c.drawOval(RectF(9.1f,3f,14.9f,21f),paint)
-                    val top=Path();top.moveTo(3.9f,9f);top.quadTo(12f,10.8f,20.1f,9f);c.drawPath(top,paint)
-                    val bottom=Path();bottom.moveTo(3.9f,14.8f);bottom.quadTo(12f,13f,20.1f,14.8f);c.drawPath(bottom,paint)}
+                    work.reset();work.moveTo(3.9f,9f);work.quadTo(12f,10.8f,20.1f,9f);c.drawPath(work,paint)
+                    work.reset();work.moveTo(3.9f,14.8f);work.quadTo(12f,13f,20.1f,14.8f);c.drawPath(work,paint)}
                 "settings"->{c.drawCircle(12f,12f,7.5f,paint);c.drawCircle(12f,12f,2.75f,paint);for(i in 0..7){val a=Math.toRadians(i*45.0);line((12+7.5*kotlin.math.cos(a)).toFloat(),(12+7.5*kotlin.math.sin(a)).toFloat(),(12+10*kotlin.math.cos(a)).toFloat(),(12+10*kotlin.math.sin(a)).toFloat())}}
                 "tv"->{line(7.5f,2.3f,11.8f,7f);line(16.4f,2.3f,12.2f,7f);box(2.6f,7f,21.4f,19.9f,1.4f)
                     val tri=Path();tri.moveTo(9.9f,10.4f);tri.lineTo(9.9f,16.2f);tri.lineTo(15.2f,13.3f);tri.close()
                     paint.style=Paint.Style.FILL;c.drawPath(tri,paint);paint.style=Paint.Style.STROKE
                     line(7f,19.9f,7f,21.6f);line(16.9f,19.9f,16.9f,21.6f)}
-                "folder"->{val p=Path();p.moveTo(2.2f,7f);p.lineTo(2.2f,4.9f);p.quadTo(2.2f,3.1f,3.9f,3.1f);p.lineTo(8.3f,3.1f);p.lineTo(10.6f,6.1f);p.lineTo(19.9f,6.1f);p.quadTo(21.8f,6.1f,21.8f,7.9f);p.lineTo(21.8f,19.1f);p.quadTo(21.8f,20.9f,19.9f,20.9f);p.lineTo(4.1f,20.9f);p.quadTo(2.2f,20.9f,2.2f,19.1f);p.close();c.drawPath(p,paint);line(2.2f,9.6f,21.8f,9.6f)}
+                "folder"->{work.reset();work.moveTo(2.2f,7f);work.lineTo(2.2f,4.9f);work.quadTo(2.2f,3.1f,3.9f,3.1f);work.lineTo(8.3f,3.1f);work.lineTo(10.6f,6.1f);work.lineTo(19.9f,6.1f);work.quadTo(21.8f,6.1f,21.8f,7.9f);work.lineTo(21.8f,19.1f);work.quadTo(21.8f,20.9f,19.9f,20.9f);work.lineTo(4.1f,20.9f);work.quadTo(2.2f,20.9f,2.2f,19.1f);work.close();c.drawPath(work,paint);line(2.2f,9.6f,21.8f,9.6f)}
                 "remote"->{box(6f,2f,18f,22f);c.drawCircle(12f,9f,3f,paint);line(9f,16f,10f,16f);line(14f,16f,15f,16f);line(9f,19f,10f,19f);line(14f,19f,15f,19f)}
-                "star"->{val p=Path();for(i in 0..9){val angle=Math.toRadians((i*36-90).toDouble());val radius=if(i%2==0)9.0 else 4.3;val x=(12+radius*kotlin.math.cos(angle)).toFloat();val y=(12+radius*kotlin.math.sin(angle)).toFloat();if(i==0)p.moveTo(x,y)else p.lineTo(x,y)};p.close();c.drawPath(p,paint)}
+                "star"->{work.reset();for(i in 0..9){val angle=Math.toRadians((i*36-90).toDouble());val radius=if(i%2==0)9.0 else 4.3;val x=(12+radius*kotlin.math.cos(angle)).toFloat();val y=(12+radius*kotlin.math.sin(angle)).toFloat();if(i==0)work.moveTo(x,y)else work.lineTo(x,y)};work.close();c.drawPath(work,paint)}
                 "back"->line(14f,5f,7f,12f,14f,19f)
                 "check"->line(5f,12f,10f,17f,20f,7f)
                 "chevron-right"->line(9f,5f,16f,12f,9f,19f)

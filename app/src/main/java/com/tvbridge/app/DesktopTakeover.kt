@@ -16,8 +16,16 @@ object DesktopTakeover {
     private var lastRescan = -60000L
     @Volatile private var rebinding = false
     private val handoverRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var setupPending=false
+    @Volatile private var setupStep:String?=null
+    private val setupSkipped=mutableSetOf<String>()
     private var enabledObserver: ContentObserver? = null
     private var lastWatchWrite = -60000L
+    @Volatile private var homesCache:Set<ComponentName>?=null
+    @Volatile private var homesCacheAt=0L
+    @Volatile private var defaultHomeCache:ComponentName?=null
+    @Volatile private var defaultHomeCacheAt=0L
+    @Volatile private var defaultHomeCached=false
 
     fun watchEnabledList(context: Context) {
         if (androidx.core.content.ContextCompat.checkSelfPermission(
@@ -36,10 +44,9 @@ object DesktopTakeover {
                     }
                     toUnregister?.let { runCatching { app.contentResolver.unregisterContentObserver(it) } }
                 } else {
-                    DesktopState.refreshNow(app)
                     DeviceProfile.invalidate(app)
                     val shouldWrite = synchronized(stateLock) {
-                        !rebinding && !standbyOut && !DesktopState.guardListed &&
+                        !rebinding && !standbyOut && !enabled(app) &&
                             SystemClock.elapsedRealtime() - lastWatchWrite >= 60000
                     }
                     if (shouldWrite && ensureGuard(app)) {
@@ -118,7 +125,7 @@ object DesktopTakeover {
     private fun removeGuard(context:Context){
         val resolver=context.contentResolver;val me=ComponentName(context,DesktopGuardService::class.java)
         if(androidx.core.content.ContextCompat.checkSelfPermission(context,android.Manifest.permission.WRITE_SECURE_SETTINGS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)return
-        runCatching{val others=Settings.Secure.getString(resolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().split(':').filter{it.isNotBlank()&&ComponentName.unflattenFromString(it)!=me};Settings.Secure.putString(resolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,others.joinToString(":"));DesktopState.noteGuardWrite(context,false)}
+        runCatching{val others=Settings.Secure.getString(resolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().split(':').filter{it.isNotBlank()&&ComponentName.unflattenFromString(it)!=me};Settings.Secure.putString(resolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,others.joinToString(":"))}
     }
     fun stepOutForShutdown(service:AccessibilityService){
         if(!wanted(service)||!DesktopPolicy.dangbeiStandbyDisable())return
@@ -208,7 +215,6 @@ object DesktopTakeover {
     }
     fun recover(context: Context) {
         val app = context.applicationContext
-        DesktopState.refresh(app)
         DeviceProfile.warm(app)
         if (!unlocked(app)) { afterUnlock(app); return }
         reopenAdb(app)
@@ -218,7 +224,8 @@ object DesktopTakeover {
         if(DesktopPolicy.stockHomeMustRemainDefault(app)&&!DesktopPolicy.stockHomeBackgroundAllowed(app)){
             val p=prefs(app)
             if(!p.getBoolean("miui_home_setup_offered",false)){
-                p.edit().putBoolean("miui_home_setup_offered",true).putBoolean("desktop_setup_pending",true).apply()
+                p.edit().putBoolean("miui_home_setup_offered",true).apply()
+                setupPending=true
             }
         }
         restoreHomeEntry(app)
@@ -265,13 +272,11 @@ object DesktopTakeover {
         runCatching {
             val reset = unresponsive && Build.VERSION.SDK_INT <= 23 && others().isEmpty()
             Settings.Secure.putString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, others().joinToString(":"))
-            DesktopState.noteGuardWrite(context, false)
             if (reset) Settings.Secure.putInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 0)
             recovery.postDelayed({
                 rebinding = false
                 if (wanted(context) && !standbyOut) runCatching {
                     Settings.Secure.putString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, (others() + me.flattenToString()).joinToString(":"))
-                    DesktopState.noteGuardWrite(context, true)
                 }
                 if (reset && Settings.Secure.getString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().isNotBlank()) {
                     runCatching { Settings.Secure.putInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1) }
@@ -286,44 +291,35 @@ object DesktopTakeover {
     private fun prefs(context:Context)=context.getSharedPreferences("startup",0)
     fun wanted(context:Context)=unlocked(context)&&prefs(context).let{it.getBoolean("boot",true)&&it.getBoolean("desktop_guard",false)}
     fun enabled(context:Context):Boolean {
-        if(DesktopState.hasDataFor(context))return DesktopState.guardListed
         val component=ComponentName(context,DesktopGuardService::class.java)
         return Settings.Secure.getString(context.contentResolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().split(':').any{ComponentName.unflattenFromString(it)==component}
     }
-    fun configured(context:Context)=defaultHome(context)?.packageName==context.packageName||
-        (wanted(context)&&enabled(context)&&DesktopPolicy.stockHomeBackgroundAllowed(context))
-    fun label(context:Context)=when{!wanted(context)->"标准启动";!enabled(context)||!DesktopPolicy.stockHomeBackgroundAllowed(context)->"待授权";DesktopGuardService.connected->"兼容接管已连接";else->"兼容接管待连接"}
-    private fun defaultHome(context:Context)=if(DesktopState.hasDataFor(context))DesktopState.defaultHome else context.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.let{ComponentName(it.packageName,it.name)}
-    fun wideHome(context:Context):ComponentName? = runCatching{context.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),0)?.activityInfo?.let{ComponentName(it.packageName,it.name)}}.getOrNull()
+    fun configured(context:Context)=TakeoverPolicy.configured(context)
+    fun defaultHome(context:Context):ComponentName? {
+        val now=SystemClock.elapsedRealtime()
+        if(defaultHomeCached&&now-defaultHomeCacheAt<2000)return defaultHomeCache
+        val found=runCatching{context.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.let{ComponentName(it.packageName,it.name)}}.getOrNull()
+        defaultHomeCache=found;defaultHomeCacheAt=now;defaultHomeCached=true
+        return found
+    }
     private fun restoreHomeEntry(context:Context){
         if(DesktopPolicy.stockHomeMustRemainDefault(context)){
             if(DesktopPolicy.stockHomeBackgroundAllowed(context))homeEntry(context,false)
             return
         }
-        if(DesktopState.hasDataFor(context)&&DesktopState.homeEntryEnabled)return
         val pm=context.packageManager;val entry=ComponentName(context,"com.tvbridge.app.DesktopActivity")
         runCatching{
             if(pm.getComponentEnabledSetting(entry)!=android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED){
                 pm.setComponentEnabledSetting(entry,android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,android.content.pm.PackageManager.DONT_KILL_APP)
-                DesktopState.refresh(context)
             }
         }
     }
     private fun restoreDisabledComponent(context:Context,component:ComponentName){
-        if(DesktopState.hasDataFor(context)){
-            val knownEnabled=when(component){
-                ComponentName(context,"com.tvbridge.app.DesktopActivity")->DesktopState.homeEntryEnabled
-                ComponentName(context,BootReceiver::class.java)->DesktopState.bootReceiverEnabled
-                else->null
-            }
-            if(knownEnabled==true)return
-        }
         val pm=context.packageManager
         runCatching{
             val state=pm.getComponentEnabledSetting(component)
             if(state!=android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DEFAULT&&state!=android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED){
                 pm.setComponentEnabledSetting(component,android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,android.content.pm.PackageManager.DONT_KILL_APP)
-                DesktopState.refresh(context)
             }
         }
     }
@@ -402,7 +398,8 @@ object DesktopTakeover {
         setupButton=addRow("一键设置桌面"){
             if(!handoverRunning.get()){
                 enableHomeEntry(activity)
-                preferences.edit().putBoolean("boot",true).putBoolean("desktop_guard",true).putBoolean("desktop_setup_pending",true).remove("desktop_setup_step").remove("desktop_setup_skipped").apply()
+                preferences.edit().putBoolean("boot",true).putBoolean("desktop_guard",true).apply()
+                setupPending=true;setupStep=null;synchronized(setupSkipped){setupSkipped.clear()}
                 handover(activity){finishSetup(activity,::refresh)}
                 refresh()
             }
@@ -417,27 +414,26 @@ object DesktopTakeover {
         dialog.window?.decorView?.viewTreeObserver?.addOnWindowFocusChangeListener{focused->if(focused&&dialog.isShowing)refresh()}
     }
     fun finishSetup(activity:Activity,changed:()->Unit){
-        if(handoverRunning.get()||!prefs(activity).getBoolean("desktop_setup_pending",false))return
+        if(handoverRunning.get()||!setupPending)return
         val ready=ensureGuard(activity)||enabled(activity)
         val homeIsOne=runCatching{activity.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName==activity.packageName}.getOrDefault(false)
         changed()
         fun request(step:String,intent:Intent,message:String){
-            val p=prefs(activity)
             fun skip(){
-                val skipped=(p.getStringSet("desktop_setup_skipped",emptySet())?:emptySet())+step
-                p.edit().putStringSet("desktop_setup_skipped",skipped).remove("desktop_setup_step").apply()
+                synchronized(setupSkipped){setupSkipped+=step}
+                setupStep=null
                 finishSetup(activity,changed)
             }
             if(intent.resolveActivity(activity.packageManager)==null){skip();return}
-            if(p.getString("desktop_setup_step",null)==step){p.edit().putBoolean("desktop_setup_pending",false).apply();NativeUi.notice(activity,"授权尚未完成，可再次设置桌面");return}
-            p.edit().putString("desktop_setup_step",step).apply();NativeUi.notice(activity,message)
+            if(setupStep==step){setupPending=false;setupStep=null;NativeUi.notice(activity,"授权尚未完成，可再次设置桌面");return}
+            setupStep=step;NativeUi.notice(activity,message)
             try{if(step=="home")activity.startActivityForResult(intent,7043) else activity.startActivity(intent)}catch(_:RuntimeException){
                 if(step=="home"&&intent.action!=Settings.ACTION_HOME_SETTINGS){
                     try{activity.startActivityForResult(Intent(Settings.ACTION_HOME_SETTINGS),7043)}catch(_:RuntimeException){skip()}
                 }else skip()
             }
         }
-        val skipped=prefs(activity).getStringSet("desktop_setup_skipped",emptySet())?:emptySet()
+        val skipped=synchronized(setupSkipped){setupSkipped.toSet()}
         if(!ready&&"accessibility" !in skipped){
             request("accessibility",Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),"请开启 One 桌面接管")
         }else if(DesktopPolicy.stockHomeMustRemainDefault(activity)&&!DesktopPolicy.stockHomeBackgroundAllowed(activity)&&"miui_background" !in skipped){
@@ -454,7 +450,7 @@ object DesktopTakeover {
         }else if(Build.VERSION.SDK_INT>=21&&!DesktopPolicy.usageAllowed(activity)&&"usage" !in skipped){
             request("usage",Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS),"请开启 One 的使用情况访问，用于前台检测兜底")
         }else {
-            prefs(activity).edit().putBoolean("desktop_setup_pending",false).remove("desktop_setup_step").apply()
+            setupPending=false;setupStep=null
             recover(activity)
             NativeUi.notice(activity,when{
                 homeIsOne->"One 已是系统默认桌面"
@@ -483,12 +479,12 @@ object DesktopTakeover {
                 }}
             };return
         }
-        prefs(activity).edit().putBoolean("boot",false).putBoolean("desktop_guard",false).remove("desktop_setup_pending").apply()
+        prefs(activity).edit().putBoolean("boot",false).putBoolean("desktop_guard",false).apply()
+        setupPending=false;setupStep=null;synchronized(setupSkipped){setupSkipped.clear()}
         watchAdb(activity)
         cancel(activity);DesktopGuardService.allowStockLauncher()
         activity.packageManager.clearPackagePreferredActivities(activity.packageName)
         homeEntry(activity,false)
-        DesktopState.refresh(activity)
         AppThreads.onIo{
             val adbUp=runCatching{Hub.adb.ready||(Hub.adb.enabled()&&Hub.adb.restore())}.getOrDefault(false)
             val bootRestored=!Hub.adb.bootAppPending()||(adbUp&&runCatching{Hub.adb.restoreBootApp()}.getOrDefault(false))
@@ -562,6 +558,13 @@ object DesktopTakeover {
     }
     fun isStockHome(context:Context,component:ComponentName)=homes(context).contains(component)
     fun homes(context:Context):Set<ComponentName> {
+        val now=SystemClock.elapsedRealtime()
+        homesCache?.let{if(now-homesCacheAt<30000)return it}
+        val found=computeHomes(context)
+        homesCache=found;homesCacheAt=now
+        return found
+    }
+    private fun computeHomes(context:Context):Set<ComponentName> {
         val pm=context.packageManager
         val standard=pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),0)
         val vendor=runCatching{pm.queryIntentActivities(Intent(Intent.ACTION_MAIN),android.content.pm.PackageManager.GET_RESOLVED_FILTER).filter{entry->
@@ -591,14 +594,13 @@ object DesktopTakeover {
             if(!(if(Build.VERSION.SDK_INT>=21)power.isInteractive else power.isScreenOn)){suspendForStandby(context);return false}
         }
         if(!wanted(context)||androidx.core.content.ContextCompat.checkSelfPermission(context,android.Manifest.permission.WRITE_SECURE_SETTINGS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)return false
-        if(DesktopState.hasDataFor(context)&&DesktopState.guardListed&&DesktopState.accessibilityOn)return true
         val resolver=context.contentResolver;val me=ComponentName(context,DesktopGuardService::class.java)
+        val entries=Settings.Secure.getString(resolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().split(':').filter{it.isNotBlank()}
+        if(entries.any{ComponentName.unflattenFromString(it)==me}&&runCatching{Settings.Secure.getInt(resolver,Settings.Secure.ACCESSIBILITY_ENABLED,0)==1}.getOrDefault(false))return true
         val written=runCatching{
-            val entries=Settings.Secure.getString(resolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().split(':').filter{it.isNotBlank()}
             if(entries.none{ComponentName.unflattenFromString(it)==me})Settings.Secure.putString(resolver,Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,(entries+me.flattenToString()).joinToString(":"))
             Settings.Secure.putInt(resolver,Settings.Secure.ACCESSIBILITY_ENABLED,1);true
         }.getOrDefault(false)
-        if(written){DesktopState.noteGuardWrite(context,true,true);DesktopState.refresh(context)}
         return written
     }
 

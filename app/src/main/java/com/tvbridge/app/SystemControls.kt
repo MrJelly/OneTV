@@ -48,22 +48,20 @@ object SystemControls {
         ).filter{it.component==ChanghongSettings.component||resolves(context,it)}.distinctBy{context.packageManager.resolveActivity(it,0)?.activityInfo?.let{a->a.packageName+"/"+a.name}}
     }
     private fun resolves(context:Context,intent:Intent)=runCatching{context.packageManager.resolveActivity(intent,0)?.activityInfo?.exported==true}.getOrDefault(false)
+    private val specialOpeners=listOf<(Context,Intent)->Boolean>(
+        {context,intent->runCatching{HisenseInputAdapter.open(context,intent)}.getOrDefault(false)},
+        {context,intent->intent.component==ChanghongSettings.component&&ChanghongSettings.open(context,intent)},
+        {context,intent->HisenseInputAdapter.openLegacy(context,intent)}
+    )
     fun open(context:Context,options:List<Intent>,reportFailure:Boolean=true):Boolean {
-        for(intent in options)if(runCatching{HisenseInputAdapter.open(context,intent)}.getOrDefault(false))return true
-        for(intent in options)if(intent.component==ChanghongSettings.component&&ChanghongSettings.open(context,intent))return true
-        for(intent in options)if(HisenseInputAdapter.openLegacy(context,intent))return true
+        for(opener in specialOpeners)for(intent in options)if(opener(context,intent))return true
         for(intent in options)if(resolves(context,intent))try{context.startActivity(Intent(intent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));return true}catch(_:RuntimeException){}
         if(reportFailure)NativeUi.notice(context,"系统未提供此入口");return false
     }
     fun sources(context:Context):List<Input> {
         val standard=if(Build.VERSION.SDK_INT>=21)InputFramework.list(context)else emptyList()
         if(standard.any{it.kind!=Kind.Tuner})return standard.take(64)
-        val vendor=XgimiInputAdapter.load(context).ifEmpty{KonkaInputAdapter.load(context)}
-            .ifEmpty{HisenseInputAdapter.load(context)}.ifEmpty{HisenseInputAdapter.loadLegacy(context)}
-            .ifEmpty{if(standard.isEmpty())VendorInputFallbacks.tcl(context) else emptyList()}
-            .ifEmpty{if(standard.isEmpty())VendorInputFallbacks.whaley(context) else emptyList()}
-            .ifEmpty{if(standard.isEmpty())VendorInputFallbacks.dangbei(context) else emptyList()}
-            .ifEmpty{InputRoutes.skyworth(context)}
+        val vendor=VendorSources.load(context,standard.isEmpty())
         return (vendor+standard).distinctBy{it.id}.take(64)
     }
     fun openSources(activity:Activity){

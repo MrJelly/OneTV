@@ -4,6 +4,8 @@
 
 [下载最新版](https://github.com/MrJelly/OneTV/releases/latest) · [更新日志](CHANGELOG.md) · [反馈问题](https://github.com/MrJelly/OneTV/issues)
 
+界面效果图：
+
 | 首页 | 设置 | 直播源设置 |
 | --- | --- | --- |
 | ![首页](docs/screenshots/home.png) | ![设置](docs/screenshots/settings.png) | ![直播源设置](docs/screenshots/live-setup.png) |

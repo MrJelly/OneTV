@@ -63,7 +63,6 @@ class LanServer(base:File,html:InputStream,private val onFatal: ((LanServer) -> 
     @Synchronized fun scanSecret():String {pin();return scan}
     private fun newPin(){code=String.format(Locale.US,"%06d",random.nextInt(1000000));scan=randomToken();codeExpires=System.currentTimeMillis()+600000}
     @Synchronized fun refreshInvite(){newPin();failures=0;blockedUntil=0}
-    @Synchronized fun resetPairing(){sessions.clear();saveSessions();refreshInvite()}
     fun sessionCount():Int=sessions.size
     fun lastAction()=lastAction
     fun capabilities(value:TextSource){capabilities=value}

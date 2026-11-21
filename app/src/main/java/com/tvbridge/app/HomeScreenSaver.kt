@@ -20,7 +20,6 @@ internal class HomeScreenSaver(private val activity:Activity,private val homeVis
         if(resumed&&homeVisible()&&SystemClock.uptimeMillis()-lastInput>=idleMs){
             component?.let{target->runCatching{
                 activity.startActivity(Intent(Intent.ACTION_MAIN).setComponent(target))
-                DesktopDiagnostics.event("screensaver idle_start")
             }}
         }
     }
@@ -32,14 +31,14 @@ internal class HomeScreenSaver(private val activity:Activity,private val homeVis
                 val resolver=activity.contentResolver
                 val dream=Settings.Secure.getString(resolver,"screensaver_components").orEmpty()
                 val timeout=Settings.System.getLong(resolver,Settings.System.SCREEN_OFF_TIMEOUT,0L)
-                if(dream.isBlank()||Settings.Secure.getInt(resolver,"screensaver_enabled",0)!=1||timeout<=30*60_000L)null
+                if(!dream.startsWith("com.dangbei.")||Settings.Secure.getInt(resolver,"screensaver_enabled",0)!=1||timeout<=30*60_000L)null
                 else{
                     val entry=ComponentName("com.android.systemui","com.android.systemui.Somnambulator")
                     activity.packageManager.getActivityInfo(entry,0).takeIf{it.enabled&&it.exported&&
                         (it.permission.isNullOrEmpty()||activity.checkCallingOrSelfPermission(it.permission)==PackageManager.PERMISSION_GRANTED)}?.let{entry}
                 }
-            }.onFailure{DesktopDiagnostics.event("screensaver policy_error ${it.javaClass.simpleName}")}.getOrNull()
-            ui.post{if(resumed&&ticket==generation){component=target;DesktopDiagnostics.event("screensaver idle_enabled=${target!=null}");arm()}}
+            }.getOrNull()
+            ui.post{if(resumed&&ticket==generation){component=target;arm()}}
         }
     }
     fun pause(){resumed=false;generation++;ui.removeCallbacks(check)}

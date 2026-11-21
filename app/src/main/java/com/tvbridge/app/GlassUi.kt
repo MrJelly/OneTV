@@ -112,9 +112,7 @@ object GlassUi {
         val h = size.heightPixels.coerceAtLeast(1)
         val key = "${HomeAppearance.key(app)}:$w:$h:0:0"
         if (cachedWallpaperFrost?.key == key) return
-        val targetH = (h * 320f / w).toInt().coerceAtLeast(1)
-        val image = HomeAppearance.backdrop(app, 320, targetH, HomeAppearance.dark(app))
-        val blurred = Frost(frost(image), w, h, 0, 0)
+        val blurred = buildWallpaper(app, w, h, 0, 0)
         synchronized(this) {
             wallpaperFrost = blurred
             frostKey = key
@@ -343,7 +341,22 @@ object GlassUi {
         }
     }
 
+    private var videoMemoActivity: WeakReference<Activity>? = null
+    private var videoMemoAt = 0L
+    private var videoMemoValue = false
+
     fun video(context: Context): Boolean {
+        val host = activity(context) ?: return computeVideo(context)
+        val now = android.os.SystemClock.uptimeMillis()
+        if (videoMemoActivity?.get() === host && now - videoMemoAt < 50) return videoMemoValue
+        val value = computeVideo(context)
+        videoMemoActivity = WeakReference(host)
+        videoMemoAt = now
+        videoMemoValue = value
+        return value
+    }
+
+    private fun computeVideo(context: Context): Boolean {
         if (activity(context)?.javaClass?.name == "com.tvbridge.app.BrowserActivity") return false
         if (context.packageName == "com.tvbridge.engine") return true
         fun contains(view: View): Boolean {
@@ -567,8 +580,15 @@ object GlassUi {
             return false
         }
 
+        private fun frostSource(context:Context):Frost{
+            detail?.get()?.let{detailFrost(it)}?.let{return it}
+            if(captured!=null)return captured
+            if(scene)return sceneFrost(context)
+            return try{wallpaper(context)}catch(_:Exception){staticFrost(context)}
+        }
+
         private fun drawHomeGlass(canvas:Canvas,view:View){
-            val source=try{if(scene)sceneFrost(view.context) else wallpaper(view.context)}catch(_:Exception){staticFrost(view.context)}
+            val source=try{frostSource(view.context)}catch(_:Exception){staticFrost(view.context)}
             view.getLocationOnScreen(point)
             val x=(screenLeft ?: (point[0]+(view.width*(view.scaleX-1f)/2f-view.translationX).toInt()))-source.left
             val y=(screenTop ?: (point[1]+(view.height*(view.scaleY-1f)/2f-view.translationY).toInt()))-source.top
@@ -611,7 +631,7 @@ object GlassUi {
                 paint.color = if (dark) Color.argb(alpha, 18, 20, 24) else Color.argb(alpha, 233, 237, 240)
                 canvas.drawRect(rect, paint)
             } else {
-                val source = detail?.get()?.let{detailFrost(it)} ?: captured ?: if (scene) sceneFrost(view.context) else try { wallpaper(view.context) } catch (_: Exception) { staticFrost(view.context) }
+                val source = frostSource(view.context)
                 view.getLocationOnScreen(point)
                 if (sampled !== source.bitmap) {
                     sampled = source.bitmap

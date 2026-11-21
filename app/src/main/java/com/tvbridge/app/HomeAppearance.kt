@@ -14,7 +14,7 @@ object HomeAppearance {
     private class CachedBackdrop(val key: String, val bitmap: Bitmap)
     @Volatile private var lastBackdrop: CachedBackdrop? = null
     private val pendingDraws=mutableMapOf<String,MutableList<()->Unit>>()
-    private val backdropCache = object : android.util.LruCache<String, Bitmap>(16 * 1024 * 1024) {
+    private val backdropCache = object : android.util.LruCache<String, Bitmap>(12 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
     fun trimMemory() {
@@ -29,7 +29,8 @@ object HomeAppearance {
     }
     @Volatile private var photoShade: PhotoShade? = null
     fun drawBackdrop(context:Context,canvas:Canvas,width:Int,height:Int,dark:Boolean,paint:Paint,onReady:()->Unit){
-        val w=if(mode(context)=="custom"&&hasCustom(context))width.coerceAtLeast(1) else width.coerceIn(1,1280)
+        val currentMode=mode(context)
+        val w=if(currentMode=="custom"&&hasCustom(context))width.coerceIn(1,1920) else width.coerceIn(1,1280)
         val h=(height.toFloat()*w/width.coerceAtLeast(1)).toInt().coerceAtLeast(1)
         val requested="${key(context)}:$w:$h:$dark"
         val image=synchronized(backdropCache){backdropCache.get(requested)?.takeUnless{it.isRecycled}}
@@ -50,14 +51,11 @@ object HomeAppearance {
                 }
             }
         }
-        if(mode(context)=="bing"&&hasBing(context)){
+        if(currentMode=="bing"&&hasBing(context)){
             val shade=photoShade?.takeIf{it.height==height}?:PhotoShade(height).also{photoShade=it}
             canvas.drawRect(0f,0f,width.toFloat(),height*0.28f,shade.top)
             canvas.drawRect(0f,height*0.62f,width.toFloat(),height.toFloat(),shade.bottom)
         }
-    }
-    fun isLowEnd(context:Context):Boolean {
-        return try{(context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).isLowRamDevice||android.os.Build.VERSION.SDK_INT<=21}catch(_:Exception){false}
     }
     private fun modeRaw(context:Context):String{
         val prefs=context.getSharedPreferences("appearance",0)
@@ -65,13 +63,11 @@ object HomeAppearance {
             null,"light","dark"->"gradient";else->raw
         }
     }
-    fun setEngineDark(context:Context,value:Boolean){context.getSharedPreferences("appearance",0).edit().putBoolean("engine_dark_override",value).apply()}
     fun dark(context:Context):Boolean{
         val prefs=context.getSharedPreferences("appearance",0)
-        if(prefs.contains("engine_dark_override"))return prefs.getBoolean("engine_dark_override",true)
         return when(modeRaw(context)){
             "bing"->true
-            "custom"->customDark(context,prefs.getBoolean("custom_dark",prefs.getBoolean("dark_home",true)))
+            "custom"->prefs.getBoolean("custom_dark",prefs.getBoolean("dark_home",true))
             else->true
         }
     }
@@ -139,21 +135,20 @@ object HomeAppearance {
             .putString("bing_date",bingDate(draft)).putInt("bing_idx",bingIdx(draft)).apply()
     }
     fun label(context:Context)=when(mode(context)){"custom"->"自定义";"bing"->"壁纸";else->"默认"}
-    fun key(context:Context)="${context.packageName}:${mode(context)}:${dark(context)}:${context.getSharedPreferences("appearance",0).getLong("wallpaper_revision",0)}:cols${homeColumns(context)}"
+    @Volatile private var keyMemo:String?=null
+    @Volatile private var keyMemoInputs:String?=null
+    fun key(context:Context):String{
+        val mode=mode(context);val dark=dark(context);val revision=context.getSharedPreferences("appearance",0).getLong("wallpaper_revision",0);val cols=homeColumns(context)
+        val inputs="$mode|$dark|$revision|$cols"
+        keyMemo?.let{if(keyMemoInputs==inputs)return it}
+        val built="${context.packageName}:$mode:$dark:$revision:cols$cols"
+        keyMemoInputs=inputs;keyMemo=built
+        return built
+    }
     fun homeColumns(context:Context)=context.getSharedPreferences("appearance",0).getInt("home_columns",6).takeIf{it in 4..7}?:6
     fun setHomeColumns(context:Context,value:Int){context.getSharedPreferences("appearance",0).edit().putInt("home_columns",value).apply()}
     fun setGradient(context:Context){context.getSharedPreferences("appearance",0).edit().putString("wallpaper_mode","gradient").putLong("wallpaper_revision",System.nanoTime()).apply()}
-    fun setDark(context:Context,value:Boolean)=setGradient(context)
-    fun customTheme(context:Context)=context.getSharedPreferences("appearance",0).getString("custom_theme","auto").orEmpty().takeIf{it in listOf("auto","light","dark")}?:"auto"
-    fun customThemeLabel(context:Context)=when(customTheme(context)){"light"->"浅色";"dark"->"深色";else->"自动"}
-    private fun customDark(context:Context,automatic:Boolean)=when(customTheme(context)){"light"->false;"dark"->true;else->automatic}
-    fun setCustomTheme(context:Context,value:String){
-        require(value in listOf("auto","light","dark"));require(hasCustom(context))
-        val prefs=context.getSharedPreferences("appearance",0)
-        val resolved=when(value){"light"->false;"dark"->true;else->prefs.getBoolean("custom_dark",dark(context))}
-        prefs.edit().putString("custom_theme",value).putBoolean("dark_home",resolved).putString("wallpaper_mode","custom").putLong("wallpaper_revision",System.nanoTime()).apply()
-    }
-    fun useCustom(context:Context){require(hasCustom(context));val prefs=context.getSharedPreferences("appearance",0);prefs.edit().putBoolean("dark_home",customDark(context,prefs.getBoolean("custom_dark",dark(context)))).putString("wallpaper_mode","custom").putLong("wallpaper_revision",System.nanoTime()).apply()}
+    fun useCustom(context:Context){require(hasCustom(context));val prefs=context.getSharedPreferences("appearance",0);prefs.edit().putBoolean("dark_home",prefs.getBoolean("custom_dark",dark(context))).putString("wallpaper_mode","custom").putLong("wallpaper_revision",System.nanoTime()).apply()}
     fun importImage(context:Context,input:InputStream)=synchronized(importLock){
         val directory=File(context.filesDir,"wallpapers").apply{check(isDirectory||mkdirs())}
         val temp=File.createTempFile("import-",".image",directory)
@@ -162,7 +157,7 @@ object HomeAppearance {
             input.use{source->temp.outputStream().use{out->val bytes=ByteArray(65536);var total=0;while(true){val n=source.read(bytes);if(n<0)break;total+=n;require(total<=MAX_IMAGE_BYTES){"图片最大 20 MB"};out.write(bytes,0,n)}}}
             val options=BitmapFactory.Options().apply{inJustDecodeBounds=true};BitmapFactory.decodeFile(temp.path,options)
             require(options.outWidth in 1..24000&&options.outHeight in 1..24000){"无法读取图片"}
-            options.inSampleSize=1;while(options.outWidth/options.inSampleSize>3840||options.outHeight/options.inSampleSize>2160)options.inSampleSize*=2
+            options.inSampleSize=1;while(options.outWidth/options.inSampleSize>2560||options.outHeight/options.inSampleSize>1440)options.inSampleSize*=2
             options.inJustDecodeBounds=false
             decoded=BitmapFactory.decodeFile(temp.path,options)?:error("无法读取图片")
             val orientation=try{ExifInterface(temp.path).getAttributeInt(ExifInterface.TAG_ORIENTATION,ExifInterface.ORIENTATION_NORMAL)}catch(_:Throwable){ExifInterface.ORIENTATION_NORMAL}
@@ -176,7 +171,7 @@ object HomeAppearance {
             val customTarget=customFile(context)
             val file=AtomicFile(customTarget);writingImagePath=customTarget.path
             try{val output=file.startWrite();try{check(target!!.compress(Bitmap.CompressFormat.JPEG,90,output));file.finishWrite(output)}catch(e:Exception){file.failWrite(output);throw e}}finally{writingImagePath=null}
-            context.getSharedPreferences("appearance",0).edit().putBoolean("dark_home",customDark(context,luminance/count<.48)).putBoolean("custom_dark",luminance/count<.48).putString("wallpaper_mode","custom").putLong("wallpaper_revision",System.nanoTime()).apply()
+            context.getSharedPreferences("appearance",0).edit().putBoolean("dark_home",luminance/count<.48).putBoolean("custom_dark",luminance/count<.48).putString("wallpaper_mode","custom").putLong("wallpaper_revision",System.nanoTime()).apply()
         }finally{target?.recycle();if(oriented!==decoded)oriented?.recycle();decoded?.recycle();temp.delete()}
     }
     fun prewarm(context:Context){
@@ -198,7 +193,9 @@ object HomeAppearance {
         }
     }
     fun backdrop(context: Context, width: Int, height: Int, dark: Boolean): Bitmap {
-        val requested = "${key(context)}:$width:$height:$dark"
+        val capW = width.coerceIn(1, 1920)
+        val capH = if (width > 1920) (height.toLong() * 1920 / width).toInt().coerceAtLeast(1) else height.coerceAtLeast(1)
+        val requested = "${key(context)}:$capW:$capH:$dark"
         lastBackdrop?.let { if (it.key == requested && !it.bitmap.isRecycled) return it.bitmap }
         synchronized(backdropCache) {
             backdropCache.get(requested)?.takeUnless { it.isRecycled }?.let { hit ->
@@ -206,7 +203,7 @@ object HomeAppearance {
                 return hit
             }
         }
-        val target = renderBackdrop(context, width, height, dark)
+        val target = renderBackdrop(context, capW, capH, dark)
         synchronized(backdropCache) {
             backdropCache.put(requested, target)
             lastBackdrop = CachedBackdrop(requested, target)

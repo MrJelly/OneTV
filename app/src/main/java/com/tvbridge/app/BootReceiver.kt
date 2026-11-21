@@ -17,7 +17,6 @@ open class BootReceiver : BroadcastReceiver() {
     }
     private fun onBoot(context: Context, intent: Intent) {
         val app=context.applicationContext
-        DesktopState.refresh(app)
         DeviceProfile.warm(app)
         if(!DesktopTakeover.unlocked(app)){DesktopTakeover.afterUnlock(app);return}
         val prefs=app.getSharedPreferences("startup",Context.MODE_PRIVATE)

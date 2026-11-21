@@ -28,7 +28,7 @@ object AppThreads {
         8,
         30L,
         TimeUnit.SECONDS,
-        LinkedBlockingQueue(),
+        LinkedBlockingQueue(256),
         ThreadFactory { runnable ->
             Thread(runnable, "app-io-${ioSeq.getAndIncrement()}").apply { isDaemon = true }
         }
@@ -39,5 +39,5 @@ object AppThreads {
     fun onState(block: () -> Unit) = state.execute(block)
     fun onBoot(block: () -> Unit) = boot.execute(block)
     fun onPersist(block: () -> Unit) = persist.execute(block)
-    fun onIo(block: () -> Unit) = io.execute(block)
+    fun onIo(block: () -> Unit) = try { io.execute(block) } catch (_: java.util.concurrent.RejectedExecutionException) {}
 }

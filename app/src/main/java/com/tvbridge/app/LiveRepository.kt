@@ -92,8 +92,7 @@ class LiveRepository(private val context:Context) {
                 }
             }
             root.optJSONArray("favorites")?.let { a -> for (i in 0 until a.length()) loadedFavorites.add(a.getString(i)) }
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
         val playedAt = playback.getLong("time", 0)
         val playedId = playback.getString("channel", "").orEmpty()
         val playedSource = loadedSources.firstOrNull { source -> source.channels.any { it.id == playedId } }
@@ -289,11 +288,6 @@ class LiveRepository(private val context:Context) {
         private set
     var onPersist: ((String) -> Unit)? = null
 
-    fun exportStore(): String {
-        awaitLoaded()
-        return encodeStore(synchronized(this){captureStore()})
-    }
-
     private data class Store(val sources:List<Source>,val favorites:List<String>,val active:String,val lastChannel:String,val lastPlayedAt:Long,val sequence:Long)
     private fun captureStore()=Store(sources.toList(),favorites.toList(),active,lastChannel,lastPlayedAt,persistSeq)
     private fun encodeStore(store:Store): String {
@@ -376,55 +370,6 @@ class LiveRepository(private val context:Context) {
                 },
                 item.optLong("updated")
             )
-        }
-    }
-
-    fun restoreSnapshot(text: String) {
-        awaitLoaded()
-        synchronized(this) {
-            val root = JSONObject(text)
-            val next = decodedSources(root)
-            require(next.sumOf { it.channels.size } <= 20000)
-            sources.clear()
-            sources.addAll(next)
-            favorites.clear()
-            root.optJSONArray("favorites")?.let { a ->
-                for (i in 0 until minOf(a.length(), 20000)) favorites.add(a.getString(i))
-            }
-            active = root.getString("active")
-            lastChannel = root.optString("lastChannel")
-            lastPlayedAt = root.optLong("lastPlayedAt")
-            snapshotKey = null
-        }
-    }
-
-    fun mergeSnapshot(before: String, after: String) {
-        awaitLoaded()
-        synchronized(this) {
-            val old = JSONObject(before)
-            val next = JSONObject(after)
-            val previous = decodedSources(old).associateBy { it.url }
-            val incoming = decodedSources(next).associateBy { it.url }
-            val result = sources.filter { it.url !in previous || it.url in incoming }.associateBy { it.url }.toMutableMap()
-            incoming.forEach { (key, value) -> if (previous[key] != value) result[key] = value }
-            require(result.size <= 11 && result.values.sumOf { it.channels.size } <= 20000)
-            fun ids(root: JSONObject): Set<String> {
-                val a = root.optJSONArray("favorites") ?: JSONArray()
-                require(a.length() <= 20000)
-                return (0 until a.length()).map { a.getString(it) }.toSet()
-            }
-            val oldIds = ids(old)
-            val newIds = ids(next)
-            sources.clear()
-            sources.addAll(result.values)
-            favorites.removeAll(oldIds - newIds)
-            favorites.addAll(newIds - oldIds)
-            if (old.optString("active") != next.optString("active")) active = next.getString("active")
-            if (old.optString("lastChannel") != next.optString("lastChannel") && next.optLong("lastPlayedAt") > lastPlayedAt) {
-                lastChannel = next.optString("lastChannel")
-                lastPlayedAt = next.optLong("lastPlayedAt")
-            }
-            saveAsync()
         }
     }
 

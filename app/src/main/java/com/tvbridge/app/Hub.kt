@@ -79,13 +79,13 @@ object Hub {
         try{
             server=LanServer(app.filesDir,app.assets.open("remote.html"),onFatal={dead->synchronized(this){if(server===dead)server=null}}){cmd,value->
                 if (cmd == "browserSearchEngine") {
-                    val ok = BrowserSettings.setEngine(app, value)
+                    val ok = BrowserStores(app).settings.setEngine(value)
                     if (ok) main.post { BrowserActivity.active?.onBrowserSettingsChanged() }
                     return@LanServer ok
                 }
                 if (cmd == "browserAutoFullscreen") {
                     if (value !in setOf("true", "false")) return@LanServer false
-                    BrowserSettings.setAutoFullscreen(app, value == "true")
+                    BrowserStores(app).settings.setAutoFullscreen(value == "true")
                     main.post { BrowserActivity.active?.onBrowserSettingsChanged() }
                     return@LanServer true
                 }
@@ -191,15 +191,15 @@ object Hub {
                         cmd=="browserOpen"||(cmd=="browserNavigate"||cmd=="browserHome")&&BrowserActivity.active==null->{
                             val intent=Intent(app,BrowserActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             if(cmd=="browserNavigate"){
-                                val url=BrowserNavigation.resolve(value,BrowserSettings.engine(app))?:return@post
+                                val url=BrowserNavigation.resolve(value,BrowserStores(app).settings.engine())?:return@post
                                 intent.putExtra("address",url)
                             }
                             if(BrowserActivity.active==null)app.startActivity(intent)
                             true
                         }
                         cmd=="home"&&BrowserActivity.active?.returnToOneHome()==true->true
-                        cmd=="browserHistoryDelete"->{BrowserHistory(app).remove(value);true}
-                        cmd=="browserHistoryClear"->{BrowserHistory(app).clear();true}
+                        cmd=="browserHistoryDelete"->{BrowserStores(app).history.remove(value);true}
+                        cmd=="browserHistoryClear"->{BrowserStores(app).history.clear();true}
                         BrowserActivity.active?.remoteCommand(cmd,value)==true->true
                         cmd=="home"&&a?.returnToOneHome()==true->true
                         cmd=="home"&&a?.visible==true->{a.startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME));true}
@@ -219,7 +219,7 @@ object Hub {
                 if(adb.enabled()&&(adb.ready||adb.restore()))return@LanServer adb.command(cmd)
                 false
             }.also{s->
-                s.capabilities{JSONObject().put("browserSettings",BrowserSettings.snapshot(app)).put("browser",JSONObject(BrowserActivity.active?.remotePlaybackState()?:"{}").apply{if(!has("history"))put("history",BrowserHistory(app).toJson())}).put("appearance",if(HomeAppearance.dark(app))"dark"else "light").put("systemRemote",adb.ready).put("adbEnabled",adb.enabled()).put("adbReady",adb.ready).put("adbMessage",adb.message).put("engineNeeded",false).put("engineInstalled",true).put("pointerReady",GlobalPointer.enabled&&adb.ready).put("overlayAllowed",GlobalPointer.permitted(app)).put("foreground",activity?.visible==true||BrowserActivity.active!=null).put("version",app.packageManager.getPackageInfo(app.packageName,0).versionName).put("bootEnabled",app.getSharedPreferences("startup",Context.MODE_PRIVATE).getBoolean("boot",false)).put("bootState",app.getSharedPreferences("startup",Context.MODE_PRIVATE).getString("boot_status","unknown")).toString()}
+                s.capabilities{JSONObject().put("browserSettings",BrowserStores(app).settings.snapshot()).put("browser",JSONObject(BrowserActivity.active?.remotePlaybackState()?:"{}").apply{if(!has("history"))put("history",BrowserStores(app).history.toJson())}).put("appearance",if(HomeAppearance.dark(app))"dark"else "light").put("systemRemote",adb.ready).put("adbEnabled",adb.enabled()).put("adbReady",adb.ready).put("adbMessage",adb.message).put("engineNeeded",false).put("engineInstalled",true).put("pointerReady",GlobalPointer.enabled&&adb.ready).put("overlayAllowed",GlobalPointer.permitted(app)).put("foreground",activity?.visible==true||BrowserActivity.active!=null).put("version",app.packageManager.getPackageInfo(app.packageName,0).versionName).put("bootEnabled",app.getSharedPreferences("startup",Context.MODE_PRIVATE).getBoolean("boot",false)).put("bootState",app.getSharedPreferences("startup",Context.MODE_PRIVATE).getString("boot_status","unknown")).toString()}
                 s.liveData{live.snapshot(it)};s.appsData{appsSnapshot(it)};s.appArtwork{appArtwork(it)};s.liveMessage{live.lastMessage};s.playbackData{PlaybackDiagnostics.snapshot()};s.textMessage{textMessage};s.start()
             };error=""
         }catch(e:Exception){error=e.message.orEmpty();server=null}
