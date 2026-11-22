@@ -87,6 +87,7 @@ internal class BrowserVideoController(
     private var playlistButton: Button? = null
     private var aspectButton: Button? = null
     private var barPlay: Button? = null
+    private var lastBarFocus: View? = null
     private var barSeek: SeekBar? = null
     private var barTime: TextView? = null
     private var barSeeking = false
@@ -777,6 +778,7 @@ internal class BrowserVideoController(
             isFocusable = true
             isFocusableInTouchMode = true
             NativeUi.touchClicks(this)
+            setOnKeyListener { view, key, event -> if (event.action == KeyEvent.ACTION_DOWN && (key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT)) moveBarFocus(view, key == KeyEvent.KEYCODE_DPAD_LEFT) else false }
             setOnClickListener { run(); showVideoBar() }
         }
     }
@@ -832,7 +834,7 @@ internal class BrowserVideoController(
                         if (event.action == KeyEvent.ACTION_DOWN) {
                             val left = key == KeyEvent.KEYCODE_DPAD_LEFT
                             if (seekEditing) seekVideoBy(if (left) -10_000 else 10_000)
-                            else focusSearch(if (left) View.FOCUS_LEFT else View.FOCUS_RIGHT)?.requestFocus()
+                            else moveBarFocus(this, left)
                         }
                         true
                     }
@@ -892,6 +894,17 @@ internal class BrowserVideoController(
         videoBarView = bar
     }
 
+    private fun moveBarFocus(from: View, left: Boolean): Boolean {
+        val bar = videoBarView ?: return false
+        val items = (0 until bar.childCount).map { bar.getChildAt(it) }.filter { it.visibility == View.VISIBLE && it.isFocusable }
+        if (items.isEmpty()) return false
+        val index = items.indexOf(from)
+        if (index < 0) return false
+        val next = if (left) (index - 1 + items.size) % items.size else (index + 1) % items.size
+        items[next].requestFocus()
+        return true
+    }
+
     fun showVideoBar() {
         if (!isVideoActive) return
         createVideoBar()
@@ -903,7 +916,7 @@ internal class BrowserVideoController(
         loopButton?.isActivated = loopVideo
         bar.findViewWithTag<View>("native-settings")?.visibility = if (pagePlayer!=null) View.VISIBLE else View.GONE
         bar.visibility = View.VISIBLE
-        if (opening) barPlay?.requestFocus()
+        if (opening) (lastBarFocus?.takeIf { it.isAttachedToWindow && it.visibility == View.VISIBLE && it.isFocusable } ?: barPlay)?.requestFocus()
         root.removeCallbacks(barHide)
         if (speedRow == null) root.postDelayed(barHide, BAR_AUTO_HIDE_MS)
         startBarPoll()
@@ -911,6 +924,7 @@ internal class BrowserVideoController(
     }
 
     fun hideVideoBar() {
+        videoBarView?.findFocus()?.let { lastBarFocus = it }
         BrowserDropdown.dismiss()
         closeSpeedRow(false)
         seekEditing = false

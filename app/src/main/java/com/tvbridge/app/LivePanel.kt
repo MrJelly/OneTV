@@ -67,6 +67,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     private val overlay=LinearLayout(context).apply{orientation=LinearLayout.VERTICAL}
     private val fullTitle=TextView(context)
     private val controls=LinearLayout(context).apply{gravity=Gravity.CENTER}
+    private var lastControlTag:String?=null
     private var favoriteAction:Button?=null
     private var lineAction:Button?=null
     private var decoderAction:Button?=null
@@ -177,7 +178,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     private var openedAt=0L
     private var bufferingAt=0L
     private var mediaProgressAt=0L
-    private val hide=Runnable{if(drawer.visibility!=View.VISIBLE&&(touchDevice||!controls.hasFocus())){overlay.visibility=View.GONE;fullTitle.visibility=View.GONE;isFocusableInTouchMode=true;requestFocus()}}
+    private val hide=Runnable{if(drawer.visibility!=View.VISIBLE&&(touchDevice||!controls.hasFocus())){noteControlFocus();overlay.visibility=View.GONE;fullTitle.visibility=View.GONE;isFocusableInTouchMode=true;requestFocus()}}
     private val timeout=object:Runnable{override fun run(){
         if(released||paused||current==null)return
         if(player.playbackState==Player.STATE_READY){
@@ -407,21 +408,21 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
     private fun buildControls(cast:Boolean){
         controls.removeAllViews();favoriteAction=null;lineAction=null;decoderAction=null;aspectAction=null
         if(cast){
-            action(controls,"后退 10 秒",true){command("videoBack","")}
-            action(controls,"播放 / 暂停",true){command("videoToggle","")}
-            action(controls,"前进 10 秒",true){command("videoForward","")}
+            action(controls,"后退 10 秒",true){command("videoBack","")}.also{it.tag="videoBack"}
+            action(controls,"播放 / 暂停",true){command("videoToggle","")}.also{it.tag="videoToggle"}
+            action(controls,"前进 10 秒",true){command("videoForward","")}.also{it.tag="videoForward"}
         }else{
-            if(touchDevice)action(controls,"上一台",true){stepChannel(-1)}
-            action(controls,"频道列表",true){showDrawer()}
-            favoriteAction=action(controls,"收藏",true){current?.let{repo.toggleFavorite(it.id);refreshTitle();refresh()}}
-            lineAction=action(controls,"切换线路",true){nextLine()}
+            if(touchDevice)action(controls,"上一台",true){stepChannel(-1)}.also{it.tag="prev"}
+            action(controls,"频道列表",true){showDrawer()}.also{it.tag="channels"}
+            favoriteAction=action(controls,"收藏",true){current?.let{repo.toggleFavorite(it.id);refreshTitle();refresh()}}.also{it.tag="favorite"}
+            lineAction=action(controls,"切换线路",true){nextLine()}.also{it.tag="line"}
             if(NativePlayback.softwareAvailable()){
-                decoderAction=action(controls,if(manualSoftwareDecode)"软解" else "硬解",true){toggleManualDecoder()}
+                decoderAction=action(controls,if(manualSoftwareDecode)"软解" else "硬解",true){toggleManualDecoder()}.also{it.tag="decoder"}
             }
-            aspectAction=action(controls,"画面:${aspectLabel()}",true){cycleAspectMode()}
-            if(touchDevice)action(controls,"下一台",true){stepChannel(1)}
+            aspectAction=action(controls,"画面:${aspectLabel()}",true){cycleAspectMode()}.also{it.tag="aspect"}
+            if(touchDevice)action(controls,"下一台",true){stepChannel(1)}.also{it.tag="next"}
         }
-        if(touchDevice)action(controls,"返回",true){exit()}
+        if(touchDevice)action(controls,"返回",true){exit()}.also{it.tag="back"}
         val buttons = (0 until controls.childCount).map { controls.getChildAt(it) as Button }
         for (button in buttons) {
             button.setCompoundDrawablesRelative(null, null, null, null)
@@ -609,10 +610,11 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
             else->showLiveDialog(AlertDialog.Builder(context).setMessage("删除当前直播源？").setPositiveButton("删除"){_,_->repo.removeSource(repo.activeSource());refresh();all.firstOrNull()?.let{play(it,true)}}.setNegativeButton("取消",null))
         }};popup.show();popup.listView?.let{it.background=GlassUi.surface(it,20f,video=true,dark=true,dense=true,alphaBoost=0x20);it.setPadding(dp(8),dp(8),dp(8),dp(8));it.divider=null;it.dividerHeight=0;setupList(it,false);it.selector=android.graphics.drawable.ColorDrawable(Color.TRANSPARENT);it.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{override fun onNothingSelected(parent:AdapterView<*>?){} override fun onItemSelected(parent:AdapterView<*>?,child:View?,position:Int,id:Long){for(i in 0 until it.childCount){val row=it.getChildAt(i) as? TextView ?: continue;val selected=it.firstVisiblePosition+i==position;row.setTypeface(null,if(selected)Typeface.BOLD else Typeface.NORMAL);row.setTextColor(Color.WHITE)}}};it.post{it.requestFocusFromTouch();it.setSelection(entries.indexOfFirst{it.url==repo.activeSource()}.coerceAtLeast(0))}}
     }
+    private fun noteControlFocus(){val focused=controls.findFocus();if(focused?.tag is String)lastControlTag=focused.tag as String}
     private fun closePanels(){drawer.visibility=View.GONE;hideControls()}
-    private fun showControls(focus:Boolean=!touchDevice){fullTitle.visibility=View.VISIBLE;overlay.visibility=View.VISIBLE;ui.removeCallbacks(hide);if(focus){if(!controls.hasFocus())controls.getChildAt(0)?.requestFocus()}else ui.postDelayed(hide,5000)}
-    private fun hideControls(){ui.removeCallbacks(hide);overlay.visibility=View.GONE;fullTitle.visibility=View.GONE;isFocusableInTouchMode=true;requestFocus()}
-    private fun showDrawer(){ui.removeCallbacks(hide);overlay.visibility=View.GONE;fullTitle.visibility=View.GONE;current?.let{ch->if(all.any{it.group==ch.group}&&(favoritesOnly||category!=ch.group)){favoritesOnly=false;category=ch.group;refresh()}};drawer.visibility=View.VISIBLE;val playingIndex=shown.indexOfFirst{it.id==current?.id};if(playingIndex>=0)drawerList.setSelectionFromTop(playingIndex,dp(6)) else drawerList.setSelection(0);drawerList.requestFocus()}
+    private fun showControls(focus:Boolean=!touchDevice){fullTitle.visibility=View.VISIBLE;overlay.visibility=View.VISIBLE;ui.removeCallbacks(hide);if(focus){if(!controls.hasFocus()){val remembered=lastControlTag?.let{tag->(0 until controls.childCount).map{controls.getChildAt(it)}.firstOrNull{it.tag==tag&&it.visibility==View.VISIBLE}};(remembered?:controls.getChildAt(0))?.requestFocus()}}else ui.postDelayed(hide,5000)}
+    private fun hideControls(){noteControlFocus();ui.removeCallbacks(hide);overlay.visibility=View.GONE;fullTitle.visibility=View.GONE;isFocusableInTouchMode=true;requestFocus()}
+    private fun showDrawer(){noteControlFocus();ui.removeCallbacks(hide);overlay.visibility=View.GONE;fullTitle.visibility=View.GONE;current?.let{ch->if(all.any{it.group==ch.group}&&(favoritesOnly||category!=ch.group)){favoritesOnly=false;category=ch.group;refresh()}};drawer.visibility=View.VISIBLE;val playingIndex=shown.indexOfFirst{it.id==current?.id};if(playingIndex>=0)drawerList.setSelectionFromTop(playingIndex,dp(6)) else drawerList.setSelection(0);drawerList.requestFocus()}
     fun back():Boolean{if(groupPopup?.isShowing==true){groupPopup?.dismiss();return true};if(drawer.visibility==View.VISIBLE){drawer.visibility=View.GONE;hideControls();return true};if(overlay.visibility==View.VISIBLE){hideControls();return true};return false}
     private var channelDigits=""
     private val selectNumber=Runnable{
@@ -676,8 +678,8 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         if(buttons.isEmpty())return true
         val index=buttons.indexOfFirst{it.hasFocus()}.coerceAtLeast(0)
         when(code){
-            KeyEvent.KEYCODE_DPAD_LEFT->buttons[(index-1).coerceAtLeast(0)].requestFocus()
-            KeyEvent.KEYCODE_DPAD_RIGHT->buttons[(index+1).coerceAtMost(buttons.size-1)].requestFocus()
+            KeyEvent.KEYCODE_DPAD_LEFT->buttons[(index-1+buttons.size)%buttons.size].requestFocus()
+            KeyEvent.KEYCODE_DPAD_RIGHT->buttons[(index+1)%buttons.size].requestFocus()
             KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER->buttons[index].performClick()
         }
         return true

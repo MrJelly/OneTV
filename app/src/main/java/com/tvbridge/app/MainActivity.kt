@@ -288,7 +288,7 @@ class MainActivity:Activity() {
         header.getChildAt(0).nextFocusDownId=desktop.id
         desktopButton=desktop;desktopConnectionChanged();desktop.requestFocus()
     }
-    override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);if(intent.getBooleanExtra("from_boot",false))BootReceiver.markArrived(this);if(intent.getBooleanExtra("pointer_setup",false)){requestGlobalPointer();return};if(::home.isInitialized){if(intent.getBooleanExtra("open_live",false))openSelectedLive()else if(intent.getBooleanExtra("show_home",false)||intent.hasCategory(Intent.CATEGORY_HOME)||(intent.action==null&&intent.component?.className?.endsWith(".DesktopActivity")==true))showHome()else scheduleBootApp()}}
+    override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);if(intent.getBooleanExtra("from_boot",false))BootReceiver.markArrived(this);if(intent.getBooleanExtra("pointer_setup",false)){requestGlobalPointer();return};if(::home.isInitialized){if(intent.getBooleanExtra("open_live",false))openSelectedLive()else if(intent.getBooleanExtra("show_home",false)||intent.hasCategory(Intent.CATEGORY_HOME)||(intent.action==null&&intent.component?.className?.endsWith(".DesktopActivity")==true))showHome(resetHome=screen=="home")else scheduleBootApp()}}
     private fun addresses(): List<String> = ConnectionState.addresses(
         this,
         Hub.server?.port()?.takeIf { it > 0 } ?: 8888
@@ -334,7 +334,7 @@ class MainActivity:Activity() {
         showHome()
         return true
     }
-    fun showHome(keepDialog:Boolean=false){screenSaver.input();liveOpenGeneration++;liveOpenPending=false;sceneBackground(false);appsPanel?.let{root.removeView(it)};appsPanel=null;controlQr=null;controlQrLabel=null;controlQrDot=null;lastControlQr=null;lastControlSummary="";if(!keepDialog)NativeUi.dialogCommand("back");screen="home";livePanel?.stop();livePanel?.let{root.removeView(it)};livePanel=null;home.visibility=View.VISIBLE;home.refreshAppearance();home.refreshApps();home.focusFirst();window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);updateHome();if(HomeAppearance.mode(this)=="bing")HomeAppearance.refreshBingIfStale(this){if(!isDestroyed){home.refreshAppearance();home.invalidate()}}}
+    fun showHome(keepDialog:Boolean=false,resetHome:Boolean=false){screenSaver.input();liveOpenGeneration++;liveOpenPending=false;sceneBackground(false);appsPanel?.let{root.removeView(it)};appsPanel=null;controlQr=null;controlQrLabel=null;controlQrDot=null;lastControlQr=null;lastControlSummary="";if(!keepDialog)NativeUi.dialogCommand("back");screen="home";livePanel?.stop();livePanel?.let{root.removeView(it)};livePanel=null;home.visibility=View.VISIBLE;home.refreshAppearance();home.refreshApps();if(resetHome)home.resetToInitial() else home.focusFirst();window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);updateHome();if(HomeAppearance.mode(this)=="bing")HomeAppearance.refreshBingIfStale(this){if(!isDestroyed){home.refreshAppearance();home.invalidate()}}}
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     fun showLive(autoPlay:Boolean=true){
         if(!Hub.live.isLoaded){

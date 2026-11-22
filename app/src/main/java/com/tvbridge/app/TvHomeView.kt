@@ -877,6 +877,10 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         }
         (target?:tiles.firstOrNull())?.requestFocus()
     }
+    fun resetToInitial(){
+        animateScrollTo(0f)
+        tiles.firstOrNull()?.requestFocus()
+    }
     private fun text(c:Canvas,value:String,x:Float,y:Float,size:Float,color:Int=ink,strong:Boolean=false){paint.shader=null;paint.color=color;paint.textSize=size;paint.typeface=if(strong)bold else regular;c.drawText(value,x,y,paint)}
     private fun ensureClockStrings() {
         val nowMs = System.currentTimeMillis()
