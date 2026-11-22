@@ -382,7 +382,7 @@ class LivePanel(context:Context,private val repo:LiveRepository,private val exit
         val counts=all.groupingBy{it.group}.eachCount()
         railGroups().filter{it.isNotEmpty()}.forEach{group->item(group,group,counts[group]?:0,!favoritesOnly&&category==group){if(favoritesOnly||category!=group){category=group;favoritesOnly=false;refresh(false)}}}
         if(counts.containsKey(""))item("","默认",counts[""]?:0,!favoritesOnly&&category==""){if(favoritesOnly||category!=""){category="";favoritesOnly=false;refresh(false)}}
-        val railTarget=railNeeded.coerceIn(dp(96),dp(176));railColumn?.let{column->val lp=column.layoutParams as? LinearLayout.LayoutParams;if(lp!=null&&lp.width!=railTarget){lp.width=railTarget;column.layoutParams=lp}}
+        val railTarget=railNeeded.coerceIn(dp(96),dp(150));railColumn?.let{column->val lp=column.layoutParams as? LinearLayout.LayoutParams;if(lp!=null&&lp.width!=railTarget){lp.width=railTarget;column.layoutParams=lp}}
         if(focusedTag!=null&&!isInTouchMode)rail.findViewWithTag<View>(focusedTag)?.requestFocus()
     }
     private var outsideDrawerGesture=false
