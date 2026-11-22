@@ -28,6 +28,7 @@ class OneApplication : MultiDexApplication() {
     override fun onCreate() {
         super.onCreate()
         installCrashRecorder(this)
+        getSharedPreferences("startup",0).edit().remove("focus_trace").apply()
     }
 
     companion object {
@@ -52,13 +53,11 @@ class OneApplication : MultiDexApplication() {
             }
         }
 
-        fun consumeLastCrash(context: Context): String? {
+        fun lastCrash(context: Context): String? {
             return try {
                 val file = File(context.applicationContext.filesDir, CRASH_FILE)
                 if (!file.isFile) return null
-                val text = file.readText()
-                file.delete()
-                text.takeIf { it.isNotBlank() }
+                file.readText().takeIf { it.isNotBlank() }
             } catch (_: Throwable) {
                 null
             }

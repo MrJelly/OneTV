@@ -16,7 +16,6 @@ internal object DesktopDiagnostics {
         fun line(key: String, value: Any?) { append(key).append(": ").append(value ?: "unknown").append('\n') }
         append("One 桌面接管诊断 v1\n")
         line("生成时间", java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date()))
-        line("应用", context.packageName)
         line("版本", runCatching { context.packageManager.getPackageInfo(context.packageName, 0).let { "${it.versionName} (${it.versionCode})" } }.getOrNull())
         line("设备", "${Build.MANUFACTURER} / ${Build.BRAND} / ${Build.MODEL}")
         line("系统", "Android ${Build.VERSION.RELEASE}, API ${Build.VERSION.SDK_INT}, ${Build.DISPLAY}")
@@ -30,11 +29,10 @@ internal object DesktopDiagnostics {
         line("守护已授权", DesktopTakeover.enabled(context))
         line("守护已连接", DesktopGuardService.connected)
         line("开机目标",LauncherApps(context).bootApp())
-        line("开机目标已处理",BootReceiver.targetOfferedThisBoot(context))
+        line("开机打开状态",BootOpen.label(context))
         if(DesktopPolicy.stockHomeMustRemainDefault(context))line("MIUI 后台弹出界面",DesktopPolicy.stockHomeBackgroundAllowed(context))
         line("守护运行状态", DesktopGuardService.diagnosticState())
         line("使用情况访问", DesktopPolicy.usageAllowed(context))
-        line("前台检测", if(DesktopPolicy.usageAllowed(context))"无障碍事件 + UsageStats 后台轮询（通常 2 秒）" else "无障碍事件；UsageStats 兜底待授权")
         line("原桌面豁免剩余毫秒", DesktopRecovery.stockVisitLeftMs(context))
         line("系统屏保组件", android.provider.Settings.Secure.getString(context.contentResolver,"screensaver_components"))
         line("系统屏保启用", android.provider.Settings.Secure.getInt(context.contentResolver,"screensaver_enabled",0))
@@ -44,7 +42,6 @@ internal object DesktopDiagnostics {
                 .getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
                 .firstOrNull { it.resolveInfo.serviceInfo.packageName == context.packageName && it.resolveInfo.serviceInfo.name.endsWith("DesktopGuardService") }
         }.getOrNull()
-        line("守护服务 flags", service?.flags)
         line("请求过滤按键", service?.let { it.flags and AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS != 0 })
         val policy = TakeoverPolicy.resolve(context)
         line("策略", policy)
@@ -53,6 +50,8 @@ internal object DesktopDiagnostics {
         for (pkg in listOf("com.mitv.tvhome", "com.xiaomi.mitv.settings", "com.tianci.system", "com.hisense.vidaaassistant", "com.jamdeo.tv.vod", "com.tcl.cyberui", "com.tcl.tv", "com.whaley.tv.tvplayer.ui", "com.huanglong.tvui", "com.android.newsettings", "com.konka.tvsettings")) {
             line("  $pkg", DesktopPolicy.installed(context, pkg))
         }
+        append("上次崩溃记录:\n")
+        append(OneApplication.lastCrash(context) ?: "无").append('\n')
     }
 
     fun show(activity: MainActivity) {
@@ -67,8 +66,9 @@ internal object DesktopDiagnostics {
                         NativeUi.notice(activity, "诊断已复制")
                     }
                     .setNeutralButton("保存") { _, _ ->
-                        val file = File(activity.cacheDir, "one-desktop-${System.currentTimeMillis()}.txt")
-                        runCatching { file.writeText(report); activity.exportFile(file) }.onFailure { NativeUi.notice(activity, "诊断保存失败") }
+                        val dir = File(activity.filesDir, "received").apply { mkdirs() }
+                        val name = "one-desktop-diagnostics-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date()) + ".txt"
+                        runCatching { File(dir, name).writeText(report); dir.listFiles { f -> f.name.startsWith("one-desktop-diagnostics-") && f.name != name }?.forEach { it.delete() } }.onSuccess { NativeUi.notice(activity, "已保存到文件管理·接收目录：$name") }.onFailure { NativeUi.notice(activity, "诊断保存失败") }
                     }
                     .setNegativeButton("关闭", null), widthDp = 600)
             }

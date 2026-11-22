@@ -558,7 +558,7 @@ object GlassUi {
                     intArrayOf(0x8cffffff.toInt(),0x14ffffff,0x14ffffff,0x57ffffff),
                     floatArrayOf(0f,.4f,.6f,1f),Shader.TileMode.CLAMP)
                 if (rect.width() > 0 && rect.height() > 0) {
-                    topHighlight = LinearGradient(0f, rect.top, 0f, rect.centerY(), 0x1affffff, 0x00ffffff, Shader.TileMode.CLAMP)
+                    topHighlight = LinearGradient(0f, rect.top, 0f, rect.top+rect.height()*0.45f, 0x12ffffff, 0x00ffffff, Shader.TileMode.CLAMP)
                     bottomHighlight = LinearGradient(0f, rect.bottom, 0f, rect.top+rect.height()*0.55f, 0x12ffffff, 0x00ffffff, Shader.TileMode.CLAMP)
                 }
             }

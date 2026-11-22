@@ -270,6 +270,31 @@ class LanServer(base:File,html:InputStream,private val onFatal: ((LanServer) -> 
                     reply(out, if (deleted) 200 else 409, if (deleted) "已删除文件" else "无法删除文件", keepAlive)
                     return keepAlive
                 }
+                "/files/download" -> {
+                    if (length !in 1..1024) return reject(400, "无效文件名")
+                    val name = read(input, length.toInt())
+                    if (name.any { it == '\\' || it.isISOControl() }) {
+                        reply(out, 400, "无效文件名", keepAlive)
+                        return keepAlive
+                    }
+                    val file = File(directory, name)
+                    val canonical = file.canonicalFile
+                    if (file.name != name || name.endsWith(".part") || canonical.parentFile != directory.canonicalFile || canonical.name != name) {
+                        reply(out, 400, "无效文件名", keepAlive)
+                        return keepAlive
+                    }
+                    if (!file.isFile) {
+                        reply(out, 404, "文件已不存在", keepAlive)
+                        return keepAlive
+                    }
+                    val conn = if (keepAlive) "keep-alive\r\nKeep-Alive: timeout=15, max=64" else "close"
+                    val encoded = java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20")
+                    val head = "HTTP/1.1 200 Response\r\nContent-Type: application/octet-stream\r\nContent-Length: ${file.length()}\r\nContent-Disposition: attachment; filename*=UTF-8''$encoded\r\nConnection: $conn\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n\r\n"
+                    out.write(head.toByteArray(Charsets.US_ASCII))
+                    file.inputStream().use { it.copyTo(out, 65536) }
+                    out.flush()
+                    return keepAlive
+                }
                 "/live/import", "/live/subscribe" -> {
                     if (length > if (path.endsWith("import")) 20 * 1024 * 1024 else 8192) {
                         reply(out, 413, "节目单超过大小限制", keepAlive = false)

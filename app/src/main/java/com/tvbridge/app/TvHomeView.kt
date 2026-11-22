@@ -83,6 +83,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private val mainHandler=android.os.Handler(android.os.Looper.getMainLooper())
     private val labelCache=java.util.WeakHashMap<AppTileView,Array<Any?>>()
     private var rememberedFocus=""
+    var focusMemoryFrozen=false
     private var lastGridFocus=""
     private var focusedTile:AppTileView?=null
     private fun tileKey(tile:AppTileView)=(tile.tag as? LauncherApps.Entry)?.component?.flattenToString() ?: tile.tag as String
@@ -270,7 +271,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         fun baseTile(title:String):AppTileView{
             val tile=AppTileView(context)
             tile.title=title;tile.contentDescription=title;tile.id=generateViewId()
-            tile.focusHook={focus->if(focus){val key=tileKey(tile);rememberedFocus=key;lastGridFocus=key;controlButton.nextFocusDownId=tile.id;focusedTile=tile;onTileFocused(tile)}else if(focusedTile==tile)focusedTile=null;invalidateTileRegion(tile)}
+            tile.focusHook={focus->if(focus){val key=tileKey(tile);if(!focusMemoryFrozen){rememberedFocus=key;lastGridFocus=key};controlButton.nextFocusDownId=tile.id;focusedTile=tile;onTileFocused(tile)}else if(focusedTile==tile)focusedTile=null;invalidateTileRegion(tile)}
             tile.focusAnimHook = { invalidateTileShadow(tile) }
             tiles.add(tile);appRow.addView(tile)
             return tile
@@ -329,7 +330,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             initialGridFocusPending=false
             rememberedFocus=tileKey(tiles.first())
             tiles.first().requestFocus()
-        }else if(focused!=null)(tiles.firstOrNull{tileKey(it)==focused}?:tiles.firstOrNull())?.requestFocus()
+        }else if(focused!=null){val wasFrozen=focusMemoryFrozen;focusMemoryFrozen=true;(tiles.firstOrNull{tileKey(it)==focused}?:tiles.firstOrNull())?.requestFocus();focusMemoryFrozen=wasFrozen}
     }
 
     private fun updateTileLayout() {
@@ -348,6 +349,8 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
     private fun rowIndex(row:Int,column:Int)=(row*cols+column).coerceAtMost(tiles.lastIndex)
 
     private fun focusEntry(entry:String){tiles.firstOrNull{tileKey(it)==entry}?.requestFocus()}
+    fun focusedKey():String?=(findFocus() as? AppTileView)?.let(::tileKey)?:focusedTile?.let(::tileKey)
+    fun focusKey(key:String)=focusEntry(key)
     private fun finishMove(){val entry=moving?:return;stopWobble();hideMoveHint();moving=null;refreshApps();focusEntry(entry);invalidate()}
     private fun enterMove(entry:String){appMenu.dismiss();moving=entry;refreshApps();focusEntry(entry);invalidate();startWobble();showMoveHint()}
 
@@ -399,6 +402,8 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         if(target==from||!launcherApps.move(folderRepresentative(entry,all),all.indexOf(targetId)-all.indexOf(folderRepresentative(entry,all)),all))return
         refreshApps()
         focusEntry(entry)
+        val landed=tiles.indexOfFirst{tileKey(it)==entry}
+        if(landed>=0)animateScrollTo(scrollTargetFor(landed/cols))
         startWobble()
         invalidate()
     }
@@ -838,6 +843,7 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
         arrowPaint.color = ink
         arrowPaint.strokeWidth = 2.5f * scale
         fun arrow(center: Float, left: Boolean, enabled: Boolean) {
+            if (center < 0f || center > width) return
             arrowPaint.alpha = if (enabled) 255 else 65
             val sign = if (left) -1 else 1
             arrowPath.reset()
@@ -846,10 +852,11 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             arrowPath.lineTo(center - sign * 3 * scale, y + 6 * scale)
             canvas.drawPath(arrowPath, arrowPaint)
         }
-        arrow(x + 13 * scale, true, index % cols > 0)
-        arrow(x + tile.width - 13 * scale, false, index % cols < cols - 1 && index < tiles.lastIndex)
+        arrow(x + 7 * scale, true, index % cols > 0)
+        arrow(x + tile.width - 7 * scale, false, index % cols < cols - 1 && index < tiles.lastIndex)
         val cx = x + tile.width / 2f
         fun vArrow(centerY: Float, up: Boolean, enabled: Boolean) {
+            if (centerY < 0f || centerY > height) return
             arrowPaint.alpha = if (enabled) 255 else 65
             val sign = if (up) -1 else 1
             arrowPath.reset()
@@ -858,8 +865,9 @@ class TvHomeView(context:Context,private val liveAction:Runnable,private val fil
             arrowPath.lineTo(cx + 6 * scale, centerY - sign * 3 * scale)
             canvas.drawPath(arrowPath, arrowPaint)
         }
-        vArrow(railY + tile.top + 13 * scale, true, index >= cols)
-        vArrow(railY + tile.top + tile.height - 13 * scale, false, index / cols + 1 < rows)
+        vArrow(railY + tile.top + 7 * scale, true, index >= cols)
+        vArrow(railY + tile.top + tile.height - 7 * scale, false, index / cols + 1 < rows)
+
     }
     fun update(base:String,pin:String,invite:String,count:Int,message:String){
         val minute=System.currentTimeMillis()/60000
