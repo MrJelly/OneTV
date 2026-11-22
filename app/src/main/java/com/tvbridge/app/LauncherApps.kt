@@ -361,6 +361,11 @@ class LauncherApps(context:Context){
         val startup=context.getSharedPreferences("startup",0)
         return startup.getString("boot_app",null)?:if(startup.getBoolean("live",false))"module:live" else null
     }
+    fun clearBootAppOfPackage(pkg:String){
+        val startup=context.getSharedPreferences("startup",0)
+        val id=startup.getString("boot_app",null)?:return
+        if(!id.startsWith("module:")&&id.substringBefore("/")==pkg)startup.edit().remove("boot_app").apply()
+    }
     fun toggleBootApp(id:String):Boolean{
         val enable=bootApp()!=id
         context.getSharedPreferences("startup",0).edit().putString("boot_app",if(enable)id else null).remove("live").apply()
@@ -395,6 +400,7 @@ class LauncherApps(context:Context){
         val opened=if(stock)DesktopGuardService.openStock(context,entry.component,::direct)else direct()
         if(opened&&!stock)DesktopRecovery.noteLeftForApp()
         if(!opened)DesktopGuardService.allowStockLauncher(false)
+        if(opened)BootOpen.noteOpened(context,entry.component.flattenToString())
         return opened
     }
 }

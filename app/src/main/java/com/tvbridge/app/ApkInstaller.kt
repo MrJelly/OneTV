@@ -52,12 +52,21 @@ class ApkInstaller(private val activity:Activity){
     val allowed get()=if(android.os.Build.VERSION.SDK_INT>=26)activity.packageManager.canRequestPackageInstalls()else android.provider.Settings.Secure.getInt(activity.contentResolver,android.provider.Settings.Secure.INSTALL_NON_MARKET_APPS,0)==1
     private val useInstallSession get()=android.os.Build.VERSION.SDK_INT>=28
     fun request(file:File){
-        if((sessionId>=0||openingInstaller)&&activity.hasWindowFocus()&&
-            (installerSeen||android.os.SystemClock.uptimeMillis()-pendingInstallAt>=10000))resetStaleInstall()
+        if(sessionId>=0||openingInstaller)reconcileInstallState()
         if(sessionId>=0||openingInstaller){message("安装正在进行，请先完成或取消安装");return}
         if(!valid(file)){message("文件已不存在或不是 APK");return}
         if(allowed){launch(file);return}
         openPermissionSettings(file)
+    }
+    private fun reconcileInstallState(){
+        if(!homeInFront)return
+        val age=android.os.SystemClock.uptimeMillis()-pendingInstallAt
+        if(sessionId>=0&&android.os.Build.VERSION.SDK_INT>=21){
+            val live=try{activity.packageManager.packageInstaller.allSessions.any{it.sessionId==sessionId}}catch(_:Exception){true}
+            if(!live||age>=60000)resetStaleInstall()
+            return
+        }
+        if(openingInstaller&&age>=10000)resetStaleInstall()
     }
     private fun resetStaleInstall(){
         val id=sessionId

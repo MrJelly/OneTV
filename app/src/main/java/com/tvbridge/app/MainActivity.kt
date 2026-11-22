@@ -67,7 +67,7 @@ class MainActivity:Activity() {
         root=FrameLayout(this);sceneBackground(false);setContentView(root);UiSounds.attach(this)
         val packages=IntentFilter().apply{addAction(Intent.ACTION_PACKAGE_ADDED);addAction(Intent.ACTION_PACKAGE_REMOVED);addAction(Intent.ACTION_PACKAGE_CHANGED);addAction(Intent.ACTION_PACKAGE_REPLACED);addDataScheme("package")}
         if(Build.VERSION.SDK_INT>=33)registerReceiver(catalogReceiver,packages,Context.RECEIVER_NOT_EXPORTED)else registerReceiver(catalogReceiver,packages);catalogReceiverRegistered=true
-        home=TvHomeView(this,{openTelevision()},{showFiles()},{showAppSettings()},{Hub.server?.refreshInvite();updateHome()},{startActivity(Intent(this,BrowserActivity::class.java))}).apply{drawsBackdrop=false}
+        home=TvHomeView(this,{openTelevision()},{showFiles()},{showAppSettings()},{Hub.server?.refreshInvite();updateHome()},{BootOpen.noteOpened(this,"module:browser");startActivity(Intent(this,BrowserActivity::class.java))}).apply{drawsBackdrop=false}
         root.addView(home,FrameLayout.LayoutParams(-1,-1));updateHome();home.focusFirst()
         root.post{
             Hub.activity=this;Hub.start(this)
@@ -83,34 +83,52 @@ class MainActivity:Activity() {
     }
     private var startupDialog:AlertDialog?=null
     private var bootLookupPending=false
+    private var bootStability:Runnable?=null
+    private var bootSecondsLeft=3
+    private var bootDialogGoneAt=0L
+    private var homeReturnKey:String?=null
+    private var homeEnteredAt=0L
     internal fun onBootSignal(){if(visible&&screen=="home")scheduleBootApp(fromSignal=true)}
     private fun scheduleBootApp(fromSignal:Boolean=false){
         if(startupDialog?.isShowing==true||bootLookupPending)return
-        val reopen=intent.getBooleanExtra("reopen_boot",false)&&!fromSignal
-        val earlyHome=intent.hasCategory(Intent.CATEGORY_HOME)&&isDefaultHome()&&android.os.SystemClock.elapsedRealtime()<180000&&!BootReceiver.arrivedThisBoot(this)
-        if(!BootLaunchPolicy.shouldOffer(fromSignal||intent.getBooleanExtra("from_boot",false),reopen,earlyHome,BootReceiver.targetOfferedThisBoot(this)))return
         val apps=LauncherApps(this)
         val target=apps.bootApp()?:return
-        bootLookupPending=true
-        AppThreads.onIo{
-            val title=runCatching{apps.appTitle(target)}.getOrNull()
-            handler.post{
-                bootLookupPending=false
-                if(title!=null&&!isFinishing&&!isDestroyed&&visible&&screen=="home"&&apps.bootApp()==target){
-                    showBootCountdown(apps,target,title,reopen)
+        val reopen=intent.getBooleanExtra("reopen_boot",false)&&!fromSignal&&target=="module:live"
+        if(!reopen){
+            if(!BootOpen.pending(this))return
+            val goneAt=bootDialogGoneAt
+            if(goneAt>0L&&android.os.SystemClock.elapsedRealtime()-goneAt<5000L){handler.postDelayed({scheduleBootApp(fromSignal)},5000L-(android.os.SystemClock.elapsedRealtime()-goneAt));return}
+        }
+        if(!visible||screen!="home")return
+        bootStability?.let{handler.removeCallbacks(it)}
+        val pump=Runnable{
+            bootStability=null
+            if(isFinishing||isDestroyed||!visible||screen!="home")return@Runnable
+            if(!reopen&&!BootOpen.pending(this@MainActivity))return@Runnable
+            if(apps.bootApp()!=target)return@Runnable
+            bootLookupPending=true
+            AppThreads.onIo{
+                val title=runCatching{apps.appTitle(target)}.getOrNull()
+                handler.post{
+                    bootLookupPending=false
+                    if(title!=null&&!isFinishing&&!isDestroyed&&visible&&screen=="home"&&apps.bootApp()==target){
+                        showBootCountdown(apps,target,title,reopen)
+                    }
                 }
             }
         }
+        bootStability=pump
+        handler.postDelayed(pump,1200)
     }
     private fun showBootCountdown(apps:LauncherApps,target:String,title:String,reopen:Boolean){
         if(screen=="live"&&target=="module:live")return
-        BootReceiver.markTargetOffered(this)
-        var seconds=3
+        if(startupDialog?.isShowing==true)return
+        var seconds=bootSecondsLeft
         val row=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
         val notice=TextView(this).apply{gravity=Gravity.CENTER_VERTICAL;isSingleLine=true;NativeUi.textSize(this,30f);setTextColor(GlassUi.ink(this@MainActivity))}
         row.addView(notice,LinearLayout.LayoutParams(0,dp(32),1f))
         var countdown:AlertDialog?=null
-        val cancel=Button(this).apply{text="取消";isAllCaps=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;setPadding(0,0,0,0);NativeUi.textSize(this,28f);setTextColor(GlassUi.colors(this@MainActivity));if(Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null;elevation=0f};background=GlassUi.surface(this);setOnClickListener{countdown?.dismiss()};NativeUi.touchClicks(this)}
+        val cancel=Button(this).apply{text="取消";isAllCaps=false;minWidth=0;minimumWidth=0;minHeight=0;minimumHeight=0;setPadding(0,0,0,0);NativeUi.textSize(this,28f);setTextColor(GlassUi.colors(this@MainActivity));if(Build.VERSION.SDK_INT>=21){backgroundTintList=null;stateListAnimator=null;elevation=0f};background=GlassUi.surface(this);setOnClickListener{BootOpen.done(this@MainActivity);bootSecondsLeft=3;countdown?.dismiss()};NativeUi.touchClicks(this)}
         row.addView(cancel,LinearLayout.LayoutParams(dp(58),dp(32)).apply{leftMargin=dp(12)})
         fun update(){notice.text="${seconds} 秒后打开 $title"}
         update()
@@ -120,8 +138,10 @@ class MainActivity:Activity() {
         val tick=object:Runnable{override fun run(){
             if(!dialog.isShowing||isFinishing||isDestroyed)return
             seconds--
+            bootSecondsLeft=seconds
             if(seconds<=0){
                 dialog.dismiss()
+                BootOpen.done(this@MainActivity);bootSecondsLeft=3
                 DesktopRecovery.noteBootTargetOpened(this@MainActivity)
                 when(target){
                     "module:live"->{if(reopen)nudgeVolumeAfterReopen();openTelevision()}
@@ -131,7 +151,8 @@ class MainActivity:Activity() {
                 }
             }else{update();handler.postDelayed(this,1000)}
         }}
-        dialog.setOnDismissListener{NativeUi.handleExternalDismiss(dialog);handler.removeCallbacks(tick);if(startupDialog===dialog)startupDialog=null}
+        dialog.setOnDismissListener{NativeUi.handleExternalDismiss(dialog);handler.removeCallbacks(tick);if(BootOpen.pending(this@MainActivity)){bootSecondsLeft=seconds;bootDialogGoneAt=android.os.SystemClock.elapsedRealtime()};if(startupDialog===dialog)startupDialog=null}
+        dialog.setOnCancelListener{BootOpen.done(this@MainActivity);bootSecondsLeft=3}
         handler.postDelayed(tick,1000)
     }
     private fun nudgeVolumeAfterReopen(){
@@ -161,11 +182,12 @@ class MainActivity:Activity() {
     internal fun desktopConnectionChanged(){runOnUiThread{if(!isDestroyed)desktopButton?.let{val label=desktopLabel();it.setCompoundDrawablesRelative(null,null,NativeUi.trailing(it,label,ink=true),null);it.contentDescription="桌面应用，"+label}}}
     internal fun openSelectedLive(){showHome();openTelevision()}
     private fun openTelevision(){
+        BootOpen.noteOpened(this,"module:live")
         startupDialog?.dismiss()
         showLive()
     }
     private fun showAppSettings(keepDialog:Boolean=false){
-        showHome(keepDialog);screen="settings";home.visibility=View.GONE
+        showHome(keepDialog);homeReturnKey=home.focusedKey();screen="settings";home.visibility=View.GONE
         val page=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(48),dp(28),dp(48),dp(28))}
         appsPanel=page;root.addView(page,FrameLayout.LayoutParams(-1,-1))
         val header=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
@@ -288,7 +310,7 @@ class MainActivity:Activity() {
         header.getChildAt(0).nextFocusDownId=desktop.id
         desktopButton=desktop;desktopConnectionChanged();desktop.requestFocus()
     }
-    override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);if(intent.getBooleanExtra("from_boot",false))BootReceiver.markArrived(this);if(intent.getBooleanExtra("pointer_setup",false)){requestGlobalPointer();return};if(::home.isInitialized){if(intent.getBooleanExtra("open_live",false))openSelectedLive()else if(intent.getBooleanExtra("show_home",false)||intent.hasCategory(Intent.CATEGORY_HOME)||(intent.action==null&&intent.component?.className?.endsWith(".DesktopActivity")==true))showHome(resetHome=screen=="home")else scheduleBootApp()}}
+    override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);if(intent.getBooleanExtra("from_boot",false))BootReceiver.markArrived(this);if(intent.getBooleanExtra("pointer_setup",false)){requestGlobalPointer();return};if(::home.isInitialized){if(intent.getBooleanExtra("open_live",false))openSelectedLive()else if(intent.getBooleanExtra("show_home",false)||intent.hasCategory(Intent.CATEGORY_HOME)||(intent.action==null&&intent.component?.className?.endsWith(".DesktopActivity")==true)){showHome(resetHome=screen=="home"&&android.os.SystemClock.elapsedRealtime()-homeEnteredAt>800);scheduleBootApp()}else scheduleBootApp()}}
     private fun addresses(): List<String> = ConnectionState.addresses(
         this,
         Hub.server?.port()?.takeIf { it > 0 } ?: 8888
@@ -334,7 +356,7 @@ class MainActivity:Activity() {
         showHome()
         return true
     }
-    fun showHome(keepDialog:Boolean=false,resetHome:Boolean=false){screenSaver.input();liveOpenGeneration++;liveOpenPending=false;sceneBackground(false);appsPanel?.let{root.removeView(it)};appsPanel=null;controlQr=null;controlQrLabel=null;controlQrDot=null;lastControlQr=null;lastControlSummary="";if(!keepDialog)NativeUi.dialogCommand("back");screen="home";livePanel?.stop();livePanel?.let{root.removeView(it)};livePanel=null;home.visibility=View.VISIBLE;home.refreshAppearance();home.refreshApps();if(resetHome)home.resetToInitial() else home.focusFirst();window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);updateHome();if(HomeAppearance.mode(this)=="bing")HomeAppearance.refreshBingIfStale(this){if(!isDestroyed){home.refreshAppearance();home.invalidate()}}}
+    fun showHome(keepDialog:Boolean=false,resetHome:Boolean=false){home.focusMemoryFrozen=true;screenSaver.input();liveOpenGeneration++;liveOpenPending=false;sceneBackground(false);appsPanel?.let{root.removeView(it)};appsPanel=null;controlQr=null;controlQrLabel=null;controlQrDot=null;lastControlQr=null;lastControlSummary="";if(!keepDialog&&startupDialog?.isShowing!=true)NativeUi.dialogCommand("back");if(screen!="home")homeEnteredAt=android.os.SystemClock.elapsedRealtime();screen="home";livePanel?.stop();livePanel?.let{root.removeView(it)};livePanel=null;home.visibility=View.VISIBLE;home.refreshAppearance();home.refreshApps();if(resetHome){homeReturnKey=null;home.resetToInitial()}else{val key=homeReturnKey;homeReturnKey=null;if(key!=null&&key!="控制中心")home.focusKey(key)else home.focusFirst()};handler.post{home.focusMemoryFrozen=false};window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);updateHome();if(HomeAppearance.mode(this)=="bing")HomeAppearance.refreshBingIfStale(this){if(!isDestroyed){home.refreshAppearance();home.invalidate()}}}
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     fun showLive(autoPlay:Boolean=true){
         if(!Hub.live.isLoaded){
@@ -353,6 +375,7 @@ class MainActivity:Activity() {
         if(autoPlay&&previous==null){showLiveSetup();return}
         if(screen=="live")return
         if(screen!="home"){showHome()}
+        homeReturnKey=home.focusedKey()
         sceneBackground(true)
         home.visibility=View.GONE
         screen="live"
@@ -437,6 +460,7 @@ class MainActivity:Activity() {
     }
     private fun installApk(file:File){apkInstaller.request(file)}
     private fun showFiles(){
+        BootOpen.noteOpened(this,"module:files")
         val receivedDir=File(filesDir,"received").apply{if(!isDirectory)mkdirs()}
         fun currentFiles()=receivedDir.listFiles{f->!f.name.endsWith(".part")}.orEmpty().sortedByDescending{it.lastModified()}
         var files=currentFiles()
@@ -504,11 +528,11 @@ class MainActivity:Activity() {
     override fun onSaveInstanceState(state:Bundle){super.onSaveInstanceState(state);apkInstaller.save(state)}
     override fun onUserInteraction(){super.onUserInteraction();screenSaver.input()}
     override fun onPostResume(){super.onPostResume();if(SystemClock.elapsedRealtime()<180000)onBootSignal()}
-    override fun onResume(){super.onResume();screenSaver.resume();Hub.activity=this;GlassUi.invalidateScene();resumeTakeover();apkInstaller.onResume();apkInstaller.checkInstallStatus();resumeLiveEntry();visible=true;resumeHomeFront();if(::home.isInitialized&&screen=="home"){home.refreshApps();home.focusFirst()};if(::home.isInitialized){handler.removeCallbacks(ticker);handler.post(ticker)};livePanel?.resume()}
+    override fun onResume(){super.onResume();screenSaver.resume();Hub.activity=this;GlassUi.invalidateScene();resumeTakeover();apkInstaller.onResume();apkInstaller.checkInstallStatus();resumeLiveEntry();visible=true;resumeHomeFront();if(::home.isInitialized&&screen=="home"){home.refreshApps();home.focusFirst()};if(::home.isInitialized){handler.removeCallbacks(ticker);handler.post(ticker)};livePanel?.resume();if(screen=="home")scheduleBootApp()}
     private fun resumeTakeover(){DesktopTakeover.recover(this);DesktopTakeover.finishSetup(this){}}
     private fun resumeLiveEntry(){if(::home.isInitialized&&screen=="liveSetup"&&Hub.live.isLoaded&&Hub.live.resumeChannel()!=null){showLive(false);livePanel?.command("liveFull","")}}
     private fun resumeHomeFront(){DesktopRecovery.setHomeInFront(this,true);if(startupPrefs.getBoolean("boot",false)&&!BootReceiver.arrivedThisBoot(this))BootReceiver.markArrived(this);DesktopGuardService.onOneResumed();desktopConnectionChanged()}
-    override fun onPause(){screenSaver.pause();apkInstaller.onPause();startupDialog?.dismiss();visible=false;DesktopRecovery.setHomeInFront(this,false);DesktopGuardService.onOnePaused();handler.removeCallbacks(ticker);livePanel?.pause();super.onPause()}
+    override fun onPause(){screenSaver.pause();apkInstaller.onPause();bootStability?.let{handler.removeCallbacks(it)};bootStability=null;startupDialog?.dismiss();visible=false;DesktopRecovery.setHomeInFront(this,false);DesktopGuardService.onOnePaused();handler.removeCallbacks(ticker);livePanel?.pause();super.onPause()}
     private fun isInHome(view:View):Boolean{var current:View?=view;while(current!=null){if(current===home)return true;current=current.parent as? View};return false}
     override fun onWindowFocusChanged(hasFocus:Boolean){
         super.onWindowFocusChanged(hasFocus)

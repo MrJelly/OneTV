@@ -220,14 +220,13 @@ class HomeAppMenu(private val context:Context,private val launcherApps:LauncherA
         NativeUi.show(android.app.AlertDialog.Builder(context).setTitle(tile.title).setMessage(description).setPositiveButton("关闭",null))
     }
     private fun menuItemBackground(selected:Boolean)=GradientDrawable().apply{
-        cornerRadius=10*host.scale
-        setColor(if(selected)0x339dc4ed else Color.TRANSPARENT)
-        if(selected)setStroke((2*host.scale).toInt().coerceAtLeast(1),0x759dc4ed)
+        cornerRadius=18*host.scale
+        setColor(if(selected)0x33ffffff else Color.TRANSPARENT)
+        if(selected)setStroke((2*host.scale).toInt().coerceAtLeast(1),0xf0ffffff.toInt())
     }
     private fun styleMenuRow(row:android.widget.TextView,position:Int,selected:Boolean){
         row.isSelected=selected
         row.background=menuItemBackground(selected)
-        row.setTypeface(null,if(selected)Typeface.BOLD else Typeface.NORMAL)
         val destructive=choices.getOrNull(position)?.startsWith("卸载")==true
         row.setTextColor(if(destructive)0xffffa3ad.toInt() else 0xffedf2fa.toInt())
     }

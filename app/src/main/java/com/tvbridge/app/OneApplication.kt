@@ -28,6 +28,7 @@ class OneApplication : MultiDexApplication() {
     override fun onCreate() {
         super.onCreate()
         installCrashRecorder(this)
+        getSharedPreferences("startup",0).edit().remove("focus_trace").apply()
     }
 
     companion object {

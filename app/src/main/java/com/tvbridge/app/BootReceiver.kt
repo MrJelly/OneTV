@@ -79,8 +79,6 @@ open class BootReceiver : BroadcastReceiver() {
             val arrived=prefs.getLong("${prefix}_at",0);val now=System.currentTimeMillis()
             return arrived>0&&arrived in (now-SystemClock.elapsedRealtime())..now
         }
-        fun targetOfferedThisBoot(context:Context)=seenThisBoot(context,"boot_target_offered")
-        fun markTargetOffered(context:Context){context.getSharedPreferences("startup",Context.MODE_PRIVATE).edit().putLong("boot_target_offered_at",System.currentTimeMillis()).putInt("boot_target_offered_count",bootCount(context)).putString("boot_target_offered_id",DesktopRecovery.BOOT_ID).apply()}
         fun markArrived(context:Context){DesktopTakeover.cancel(context);context.getSharedPreferences("startup",Context.MODE_PRIVATE).edit().putString("boot_status","activity_arrived").putLong("boot_arrived_at",System.currentTimeMillis()).putInt("boot_arrived_count",bootCount(context)).putString("boot_arrived_id",DesktopRecovery.BOOT_ID).apply()}
     }
 }

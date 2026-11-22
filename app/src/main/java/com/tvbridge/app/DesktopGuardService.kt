@@ -279,7 +279,10 @@ class DesktopGuardService:AccessibilityService(){
     }
     private var lastScreenOn=Long.MIN_VALUE
     private fun onWake(){
+        val sp=getSharedPreferences("startup",0)
+        val wasOff=screenOff||sp.getBoolean("screen_off_seen",false)
         screenOff=false
+        if(wasOff){sp.edit().putBoolean("screen_off_seen",false).apply();BootOpen.armWake(this);AppThreads.main.post{Hub.activity?.onBootSignal()}}
         lastScreenOn=SystemClock.elapsedRealtime()
         refresh(force=true)
         configureKeys()
@@ -356,6 +359,7 @@ class DesktopGuardService:AccessibilityService(){
     private val packageRefresh=Runnable{refresh(force=true)}
     private val packageReceiver=object:BroadcastReceiver(){override fun onReceive(context:Context,intent:Intent){
         if(!connected)return
+        if(intent.action==Intent.ACTION_PACKAGE_REMOVED)intent.data?.schemeSpecificPart?.let{LauncherApps(context).clearBootAppOfPackage(it)}
         homesCache=null
         DeviceProfile.invalidate(this@DesktopGuardService)
         ui.removeCallbacks(packageRefresh);ui.postDelayed(packageRefresh,1500)
@@ -387,6 +391,7 @@ class DesktopGuardService:AccessibilityService(){
             Intent.ACTION_USER_UNLOCKED->onUserUnlocked()
             Intent.ACTION_SCREEN_OFF->{
                 screenOff=true
+                getSharedPreferences("startup",0).edit().putBoolean("screen_off_seen",true).apply()
                 DesktopRecovery.noteScreenOff(this@DesktopGuardService)
                 bootChecks.values.forEach{ui.removeCallbacks(it)};ui.removeCallbacks(recheck);ui.removeCallbacks(wakeCheck);ui.removeCallbacks(hold);ui.removeCallbacks(watch);homeDown=false;configureKeys();DesktopTakeover.suspendForStandby(this@DesktopGuardService)
             }
@@ -591,7 +596,7 @@ class DesktopGuardService:AccessibilityService(){
         val reopenBootTarget=!explicit&&SystemClock.elapsedRealtime()<180000&&hasBootApp&&!DesktopRecovery.homeKeyWithin(this,5000)&&DesktopRecovery.bootTargetOpenedWithin(this,60000)
         val openBootApp=(boot||reopenBootTarget)&&hasBootApp
         try{startActivity(Intent(this,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra("show_home",!openBootApp).putExtra("from_boot",boot).putExtra("reopen_boot",reopenBootTarget))}
-        catch(e:RuntimeException){runCatching{getSharedPreferences("startup",0).edit().putString("guard_error",e.javaClass.simpleName).apply()}}
+        catch(e:RuntimeException){}
     }
     override fun onInterrupt(){}
     private fun disconnect(){
